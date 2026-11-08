@@ -1,0 +1,10 @@
+{
+  "name": "OpenSourceCAM Rust development",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": { "ghcr.io/devcontainers/features/desktop-lite:1": {} },
+  "forwardPorts": [6080],
+  "portsAttributes": { "6080": { "label": "CAM desktop preview", "onAutoForward": "notify" } },
+  "postCreateCommand": "rustup component add rustfmt clippy && cargo fetch --locked",
+  "remoteUser": "vscode",
+  "customizations": { "vscode": { "extensions": ["rust-lang.rust-analyzer", "vadimcn.vscode-lldb"] } }
+}

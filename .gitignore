@@ -1,0 +1,8 @@
+/target/
+/dist/
+/.tools/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc

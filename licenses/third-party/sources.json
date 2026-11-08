@@ -1,0 +1,110 @@
+{
+  "OCCT-LGPL-2.1.txt": {
+    "source": "https://raw.githubusercontent.com/Open-Cascade-SAS/OCCT/V7_9_3/LICENSE_LGPL_21.txt",
+    "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c"
+  },
+  "OCCT-exception.txt": {
+    "source": "https://raw.githubusercontent.com/Open-Cascade-SAS/OCCT/V7_9_3/OCCT_LGPL_EXCEPTION.txt",
+    "sha256": "04580a884ea6cea294402649ff7b5cbb167d47462d1340a4ed33e550db10a81b"
+  },
+  "OCP-Apache-2.0.txt": {
+    "source": "https://raw.githubusercontent.com/CadQuery/OCP/master/LICENSE",
+    "sha256": "a13caea71627202ad33cc4cafafdd18e667e16716488f8d9c568127121fb89fd"
+  },
+  "libdeflate.txt": {
+    "source": "https://raw.githubusercontent.com/ebiggers/libdeflate/master/COPYING",
+    "sha256": "4ad69099cb4374836fd27583d9991e2838cd86b6e4666ab26b2d32582c91e73a"
+  },
+  "FreeImage.txt": {
+    "source": "https://raw.githubusercontent.com/WinMerge/freeimage/master/license-fi.txt",
+    "sha256": "0bb9a3123297c73ae6e19c70459fb0e58f313f67ca63176fd43f8e77668b8243"
+  },
+  "FreeType.txt": {
+    "source": "https://raw.githubusercontent.com/freetype/freetype/VER-2-12-1/docs/FTL.TXT",
+    "sha256": "08c135755dd589039470f1fdbb400daaabaaa50d0b366d19cebff4d22986baa1"
+  },
+  "OpenEXR.txt": {
+    "source": "https://raw.githubusercontent.com/AcademySoftwareFoundation/openexr/main/LICENSE.md",
+    "sha256": "84853c91d4c2e0310741d4773469d98bb93e61029608e0ba0882a3fffdf330bd"
+  },
+  "Imath.txt": {
+    "source": "https://raw.githubusercontent.com/AcademySoftwareFoundation/Imath/main/LICENSE.md",
+    "sha256": "c20236d3b39fd20eba8e3d1fb3b892a5483df2e7d8d61bf43f165d3fac22f601"
+  },
+  "libjpeg-turbo.txt": {
+    "source": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/main/LICENSE.md",
+    "sha256": "ba6bceebcba0fdd35488477c2cca8c4632ce82c74dbfbc87d886ce6fc4433579"
+  },
+  "libjpeg-IJG.txt": {
+    "source": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/main/README.ijg",
+    "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6"
+  },
+  "LittleCMS.txt": {
+    "source": "https://raw.githubusercontent.com/mm2/Little-CMS/master/LICENSE",
+    "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31"
+  },
+  "Lerc.txt": {
+    "source": "https://raw.githubusercontent.com/Esri/lerc/master/LICENSE",
+    "sha256": "77a8b761727c75e2167b15bfdf61b2c0bcf8792271228bebe80779106ad00671"
+  },
+  "liblzma.txt": {
+    "source": "https://raw.githubusercontent.com/tukaani-project/xz/master/COPYING.0BSD",
+    "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1"
+  },
+  "libpng.txt": {
+    "source": "https://raw.githubusercontent.com/pnggroup/libpng/libpng16/LICENSE",
+    "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+  },
+  "libwebp.txt": {
+    "source": "https://raw.githubusercontent.com/webmproject/libwebp/main/COPYING",
+    "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+  },
+  "libwebp-PATENTS.txt": {
+    "source": "https://raw.githubusercontent.com/webmproject/libwebp/main/PATENTS",
+    "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+  },
+  "OpenJPEG.txt": {
+    "source": "https://raw.githubusercontent.com/uclouvain/openjpeg/master/LICENSE",
+    "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6"
+  },
+  "OpenJPH.txt": {
+    "source": "https://raw.githubusercontent.com/aous72/OpenJPH/master/LICENSE",
+    "sha256": "5ddf5177863dfc9ab65fa129d587db651241f00e21ed2427b218bea997591f98"
+  },
+  "LibRaw.txt": {
+    "source": "https://raw.githubusercontent.com/LibRaw/LibRaw/master/LICENSE.LGPL",
+    "sha256": "eea173a556abac0370461e57e12aab266894ea6be3874c2be05fd87871f75449"
+  },
+  "LibRaw-COPYRIGHT.txt": {
+    "source": "https://raw.githubusercontent.com/LibRaw/LibRaw/master/COPYRIGHT",
+    "sha256": "c91cd5a149e87f1c88e2ca8c31e66bab4ada32024ae3902fd7dccaf0250a42b4"
+  },
+  "libtiff.txt": {
+    "source": "https://gitlab.com/libtiff/libtiff/-/raw/master/LICENSE.md",
+    "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade"
+  },
+  "zlib.txt": {
+    "source": "https://raw.githubusercontent.com/madler/zlib/develop/LICENSE",
+    "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+  },
+  "zstd.txt": {
+    "source": "https://raw.githubusercontent.com/facebook/zstd/v1.5.7/LICENSE",
+    "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+  },
+  "OpenSSL.txt": {
+    "source": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.0/LICENSE.txt",
+    "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+  },
+  "libffi.txt": {
+    "source": "https://raw.githubusercontent.com/libffi/libffi/master/LICENSE",
+    "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+  },
+  "SQLite.txt": {
+    "source": "https://www.sqlite.org/copyright.html",
+    "sha256": "44ca9f793055c8e32fc65f65a4f5bcf813a33f5bdaaa084067dd617a4ed3cc70"
+  },
+  "Python-standalone.txt": {
+    "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/main/LICENSE",
+    "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+  }
+}

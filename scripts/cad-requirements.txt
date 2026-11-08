@@ -1,0 +1,3 @@
+# Pinned CAD runtime packages: CPython 3.12, Windows x64 / Linux x64.
+cadquery-ocp-novtk==7.9.3.1.1 --hash=sha256:60497cf42419dd2000d323ab772937f61539f2f0a5d3ef1b288611b13254c587 --hash=sha256:5d22339cdaac64c396f0658de8728915acfac9b868406f0078e52f50a3c25c65
+cadquery-ocp-proxy==7.9.3.1.1 --hash=sha256:ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91

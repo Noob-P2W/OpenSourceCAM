@@ -1,0 +1,44 @@
+name: Build and test
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  desktop:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: opensourcecam
+          - os: windows-latest
+            binary: opensourcecam.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --no-default-features
+      - run: cargo build --locked --release
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.13"
+      - name: Bundle the CAD kernel and private runtime
+        run: python scripts/bundle-cad.py --output target/package --exe target/release/${{ matrix.binary }}
+      - name: Test the bundled STEP/IGES importer
+        run: cargo test --locked --test import -- --ignored
+        env:
+          OPENSOURCECAM_CAD_RUNTIME: ${{ github.workspace }}/target/package/cad-runtime
+      - name: Test import from the actual release package
+        run: ./target/package/${{ matrix.binary }} --inspect examples/models/mount.step
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensourcecam-${{ runner.os }}
+          path: target/package/
+          compression-level: 6
+          if-no-files-found: error

@@ -1,0 +1,41 @@
+{
+  "format_version": 1,
+  "name": "Aluminium tray",
+  "stock": {
+    "width": 120.0,
+    "height": 80.0,
+    "thickness": 12.0
+  },
+  "tool": {
+    "name": "6 mm flat end mill",
+    "diameter": 6.0,
+    "feed": 600.0,
+    "plunge": 120.0,
+    "spindle_rpm": 12000,
+    "step_down": 1.0,
+    "step_over": 0.4
+  },
+  "clearance": 5.0,
+  "operations": [
+    {
+      "name": "Pocket",
+      "enabled": true,
+      "strategy": "pocket",
+      "x": 20.0,
+      "y": 18.0,
+      "width": 60.0,
+      "height": 40.0,
+      "depth": 3.0
+    },
+    {
+      "name": "Perimeter finish",
+      "enabled": true,
+      "strategy": "outside_profile",
+      "x": 10.0,
+      "y": 8.0,
+      "width": 100.0,
+      "height": 64.0,
+      "depth": 2.0
+    }
+  ]
+}

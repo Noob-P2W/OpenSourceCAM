@@ -1,0 +1,45 @@
+{
+  "format_version": 1,
+  "process": "milling",
+  "machine": {
+    "name": "Example 3-axis bench mill",
+    "tool_name": "Milling tool 1",
+    "axis_min": [
+      0,
+      0,
+      -150
+    ],
+    "axis_max": [
+      300,
+      200,
+      0
+    ],
+    "work_origin": [
+      20,
+      20,
+      -40
+    ],
+    "enforce_limits": true,
+    "check_tool_reach": true,
+    "rapid_feed": 3000.0,
+    "max_feed": 2000,
+    "max_spindle_rpm": 24000,
+    "tooling": {
+      "type": "milling",
+      "kind": "end_mill",
+      "flute_length": 20,
+      "overall_length": 60.0,
+      "stickout": 35.0,
+      "shank_diameter": 6.0
+    }
+  },
+  "milling_tool": {
+    "name": "6 mm flat end mill",
+    "diameter": 6.0,
+    "feed": 600.0,
+    "plunge": 120.0,
+    "spindle_rpm": 12000,
+    "step_down": 1.0,
+    "step_over": 0.4
+  }
+}

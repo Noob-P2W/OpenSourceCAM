@@ -1,0 +1,107 @@
+{
+  "format_version": 7,
+  "name": "Detailed operation setup example",
+  "stock": {
+    "width": 120.0,
+    "height": 80.0,
+    "thickness": 12.0
+  },
+  "process": "milling",
+  "post": {
+    "processor": "mach3",
+    "work_offset": "G54",
+    "coolant": "off"
+  },
+  "machine": {
+    "name": "Example 3-axis bench mill",
+    "tool_name": "Milling tool 1",
+    "axis_min": [
+      0,
+      0,
+      -150
+    ],
+    "axis_max": [
+      300,
+      200,
+      0
+    ],
+    "work_origin": [
+      20,
+      20,
+      -40
+    ],
+    "enforce_limits": true,
+    "check_tool_reach": true,
+    "rapid_feed": 3000.0,
+    "max_feed": 2000,
+    "max_spindle_rpm": 24000,
+    "tooling": {
+      "type": "milling",
+      "kind": "end_mill",
+      "flute_length": 20,
+      "overall_length": 60.0,
+      "stickout": 35.0,
+      "shank_diameter": 6.0
+    },
+    "configuration": {
+      "manufacturer": "OpenSourceCAM example",
+      "model": "Illustrative bench mill",
+      "controller": "Example Mach3 / LinuxCNC",
+      "axis_feed": [
+        2000,
+        2000,
+        600
+      ],
+      "table_size": [
+        200,
+        150
+      ],
+      "minimum_rpm": 500,
+      "spindle_power_kw": 1.5,
+      "maximum_load_kg": 40
+    }
+  },
+  "tool": {
+    "name": "6 mm flat end mill",
+    "diameter": 6.0,
+    "feed": 600.0,
+    "plunge": 120.0,
+    "spindle_rpm": 12000,
+    "step_down": 1.0,
+    "step_over": 0.4
+  },
+  "clearance": 5.0,
+  "operations": [
+    {
+      "name": "Pocket",
+      "enabled": true,
+      "strategy": "pocket",
+      "x": 20.0,
+      "y": 18.0,
+      "width": 60.0,
+      "height": 40.0,
+      "depth": 3.0,
+      "settings": {
+        "feed": 450,
+        "plunge": 90,
+        "step_down": 1.5,
+        "step_over_percent": 30,
+        "clearance": 8,
+        "radial_allowance": 0.2,
+        "axial_allowance": 0.2,
+        "spring_passes": 1,
+        "finish_feed": 180
+      }
+    },
+    {
+      "name": "Perimeter finish",
+      "enabled": true,
+      "strategy": "outside_profile",
+      "x": 10.0,
+      "y": 8.0,
+      "width": 100.0,
+      "height": 64.0,
+      "depth": 2.0
+    }
+  ]
+}
