@@ -36,7 +36,7 @@ service workers or PWA installation; use HTTPS for real-device testing.
 The **PWA build and optional deployment** GitHub workflow builds, tests and uploads
 a site artifact. To deploy it, enable repository Settings → Pages → GitHub Actions,
 then run the workflow with **deploy** checked. Open the URL reported by that
-workflow on the phone. This workflow does not publish unless explicitly selected.
+workflow on the phone. Pushes to main deploy after the build and tests pass; manual deployment is also available.
 On Android use the browser install option; on iOS use Share → Add to Home Screen.
 Wait for “Offline cache installed” before going offline. Browser installation and
 storage retention depend on browser support and available device storage.

@@ -1,7 +1,7 @@
 name: PWA build and optional deployment
 on:
   push:
-    branches: [pwa-shop-hosting]
+    branches: [main, pwa-shop-hosting]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -9,6 +9,9 @@ on:
         description: Deploy to GitHub Pages (enable Pages with GitHub Actions first)
         type: boolean
         default: false
+concurrency:
+  group: pwa-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -44,11 +47,11 @@ jobs:
           name: opensourcecam-pwa
           path: dist/pwa
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
         with:
           path: dist/pwa
   deploy:
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
     needs: build
     runs-on: ubuntu-latest
     permissions:
