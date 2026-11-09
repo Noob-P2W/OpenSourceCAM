@@ -62,7 +62,8 @@ STEP/IGES import runs locally through bundled OpenCascade WASM. It retains sourc
 text and flattens assemblies to a tessellated mesh (0.1 mm linear / 0.3 radian
 angular deflection). The kernel adds about 7.5 MiB to the offline download.
 Inputs are limited to 32 MiB, output to 100,000 triangles / 300,000 vertices; an
-import is stopped after 120 seconds. Very large CAD can still exceed mobile memory.
+import is stopped after 120 seconds. Very large CAD can still exceed mobile memory. CAD source plus mesh can exceed
+local-storage quota: download the project if the app reports that autosave is unavailable.
 A failed import leaves the current project intact. CAD import does not imply all
 shapes are supported by automatic machining strategies. The browser
 viewer currently shows model wireframe and toolpaths, rather than the native
