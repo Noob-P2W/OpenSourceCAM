@@ -147,7 +147,22 @@ impl Session {
                     thickness: size[2].max(0.001),
                 };
             }
-            Edit::ApplyMachine { profile } => profile.apply(&mut candidate)?,
+            Edit::ApplyMachine { profile } => {
+                // Legacy profiles include a tool. During Import → Setup a separate
+                // library may already be loaded without a selected tool; CNC selection
+                // must not depend on choosing that tool first or replace the library.
+                if profile.format_version == 1
+                    && !candidate.tool_library.tools.is_empty()
+                    && candidate.active_tool.is_none()
+                {
+                    let mut setup = Project::new_for_process(candidate.process);
+                    profile.apply(&mut setup)?;
+                    candidate.machine = setup.machine;
+                    candidate.tool = setup.tool;
+                } else {
+                    profile.apply(&mut candidate)?;
+                }
+            }
             Edit::ImportTools { data } => {
                 let library = crate::tool_library::ToolLibrary::from_json(data.as_bytes())?;
                 if !candidate.tool_library.tools.is_empty() {
@@ -316,6 +331,12 @@ mod tests {
         assert_eq!(s.json().unwrap(), before);
         s.apply(Edit::ImportTools { data: data.into() }).unwrap();
         assert!(!s.project().tool_library.tools.is_empty());
+        let count = s.project().tool_library.tools.len();
+        let profile =
+            serde_json::from_str(include_str!("../examples/bench-mill.cam-machine.json")).unwrap();
+        s.apply(Edit::ApplyMachine { profile }).unwrap();
+        assert_eq!(s.project().tool_library.tools.len(), count);
+        assert_eq!(s.project().active_tool, None);
     }
     #[test]
     fn transaction_history_and_export_preflight() {
