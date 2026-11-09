@@ -1,0 +1,25 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {cpSync,mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {spawn} from 'node:child_process';
+const root=mkdtempSync(`${tmpdir()}/cam-update-`);cpSync(new URL('../dist/pwa',import.meta.url),root,{recursive:true});
+const server=spawn('python3',['-m','http.server','8124','--bind','127.0.0.1','--directory',root],{stdio:'ignore'});
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
+try{
+for(let i=0;i<50;i++){try{await fetch('http://127.0.0.1:8124');break}catch{await new Promise(r=>setTimeout(r,100))}}
+const context=await browser.newContext();const page=await context.newPage();
+await page.goto('http://127.0.0.1:8124');await page.locator('#status').filter({hasText:'Ready'}).waitFor();
+const depth=()=>page.getByLabel('depth · mm',{exact:true});await depth().fill('4');await depth().blur();
+await page.locator('#undo').click();assert.equal(await depth().inputValue(),'3');await page.locator('#redo').click();assert.equal(await depth().inputValue(),'4');
+await page.reload();await page.locator('#status').filter({hasText:'Ready'}).waitFor();assert.equal(await depth().inputValue(),'4');
+await page.locator('#offline').filter({hasText:'installed'}).waitFor();
+await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
+let sw=readFileSync(`${root}/sw.js`,'utf8');const old=await page.locator('#version').textContent();sw=sw.replace(/opensourcecam-[a-f0-9]{12}/,'opensourcecam-test-upgrade');writeFileSync(`${root}/sw.js`,sw);writeFileSync(`${root}/build.js`,"export const BUILD_ID='test-upgrade';");
+await page.evaluate(async()=>{const reg=await navigator.serviceWorker.getRegistration();await reg.update()});await page.locator('#update').waitFor({state:'visible'});
+assert.equal(await depth().inputValue(),'4');await page.locator('#update').click();await page.waitForFunction(()=>document.getElementById('version')?.textContent==='Build test-upgrade');assert.equal(await depth().inputValue(),'4');assert.notEqual(old,await page.locator('#version').textContent());
+await context.setOffline(true);await page.reload();await page.locator('#status').filter({hasText:'Ready'}).waitFor();assert.equal(await depth().inputValue(),'4');await page.locator('#generate').click();await page.locator('#status').filter({hasText:'Paths generated'}).waitFor();await context.close();
+const recovery=await browser.newContext();await recovery.addInitScript(()=>localStorage.setItem('oc-project','broken original draft'));const p=await recovery.newPage();await p.goto('http://127.0.0.1:8124');await p.locator('#raw-backup').waitFor({state:'visible'});assert.equal(await p.evaluate(()=>localStorage.getItem('oc-project')),'broken original draft');await recovery.close();
+const full=await browser.newContext();await full.addInitScript(()=>{Storage.prototype.setItem=function(){throw new DOMException('Full','QuotaExceededError')}});const q=await full.newPage();await q.goto('http://127.0.0.1:8124');await q.locator('#status').filter({hasText:'Ready'}).waitFor();await q.getByLabel('depth · mm',{exact:true}).fill('4');await q.getByLabel('depth · mm',{exact:true}).blur();await q.locator('#saved').filter({hasText:'Not saved'}).waitFor();await full.close();
+console.log('PASS: undo/redo, autosave reload, waiting upgrade, version change, preserved edits, offline upgraded CAM, corrupt recovery, quota warning');
+}finally{await browser.close();server.kill();rmSync(root,{recursive:true,force:true})}

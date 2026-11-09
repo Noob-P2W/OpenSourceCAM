@@ -34,7 +34,7 @@ No backend or credentials are needed. Plain HTTP on a LAN address will not enabl
 service workers or PWA installation; use HTTPS for real-device testing.
 
 The **PWA build and optional deployment** GitHub workflow builds, tests and uploads
-a site artifact. To deploy it, enable repository Settings → Pages → GitHub Actions,
+a site artifact. To deploy it, enable repository Settings → Pages → Deploy from a branch → gh-pages → / (root),
 then run the workflow with **deploy** checked. Open the URL reported by that
 workflow on the phone. Pushes to main deploy after the build and tests pass; manual deployment is also available.
 On Android use the browser install option; on iOS use Share → Add to Home Screen.
@@ -115,3 +115,24 @@ No login is provided; use a trusted shop LAN and do not forward the port publicl
 Developers regenerate both ZIPs with `python3 scripts/package-web.py` after the
 WebAssembly build. The generated `dist/shop` folder can be tested with
 `python3 dist/shop/serve.py --bind 127.0.0.1 --port 8081 --no-browser`.
+
+## Updates and project recovery
+
+The footer shows the content-based build version. New releases download in the
+background and offer **Update available · reload**. Applying an update saves the
+current workspace first; if saving fails, download a draft backup before updating.
+The first upgrade from the original prototype may require closing all app tabs
+and reopening, because that version had no update prompt.
+
+Committed field changes are autosaved locally, with one previous snapshot.
+**Previous autosave** restores that snapshot, subject to project validation.
+**Undo/Redo** retain up to 30 recent changes within an 8 MiB history budget during
+the session. History does not survive reloads. **Download draft backup** also
+works for incomplete/invalid projects. Unreadable stored drafts are preserved and
+can be downloaded using **Recover draft**. Browser storage is not a permanent
+backup: keep downloaded copies and avoid editing the same project in multiple tabs.
+
+The build/test workflow publishes to the existing gh-pages branch and explicitly
+requests a Pages build. Run `python3 scripts/package-web.py` then
+`node web/reliability.mjs` to exercise a real service-worker upgrade, offline CAM,
+undo/redo, reload recovery, corrupt drafts and storage-quota failure handling.

@@ -38,6 +38,9 @@ jobs:
           CHROMIUM_PATH="$(node --input-type=module -e "import {chromium} from './web/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")" node web/smoke.mjs
       - name: Prepare static site and shop package
         run: python3 scripts/package-web.py
+      - name: Test project recovery and release upgrades
+        run: |
+          CHROMIUM_PATH="$(node --input-type=module -e "import {chromium} from './web/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")" node web/reliability.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: opensourcecam-shop
@@ -46,21 +49,51 @@ jobs:
         with:
           name: opensourcecam-pwa
           path: dist/pwa
-      - uses: actions/upload-pages-artifact@v3
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
-        with:
-          path: dist/pwa
   deploy:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: published
+      - uses: actions/download-artifact@v4
+        with:
+          name: opensourcecam-pwa
+          path: incoming
+      - name: Update the Pages branch after tests pass
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import shutil
+          root = Path('published')
+          for path in root.iterdir():
+              if path.name == '.git':
+                  continue
+              if path.is_dir():
+                  shutil.rmtree(path)
+              else:
+                  path.unlink()
+          shutil.copytree('incoming', root, dirs_exist_ok=True)
+          (root / '.nojekyll').touch()
+          PYTHON
+          git -C published config user.name 'github-actions[bot]'
+          git -C published config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C published add .
+          if ! git -C published diff --cached --quiet; then
+            git -C published commit -m "Deploy tested PWA $GITHUB_SHA"
+            git -C published push origin gh-pages
+          fi
+      # GITHUB_TOKEN pushes do not themselves trigger a Pages build.
+      - name: Request the Pages branch build explicitly
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.request('POST /repos/{owner}/{repo}/pages/builds', {
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
