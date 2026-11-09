@@ -1,0 +1,45 @@
+"""Repository quality gates. Run from any directory: python3 scripts/check.py all."""
+import argparse
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import os
+import subprocess
+import threading
+
+ROOT = Path(__file__).resolve().parent.parent
+
+def run(*command, env=None):
+    print('+', ' '.join(command), flush=True)
+    subprocess.run(command, cwd=ROOT, env=env, check=True)
+
+def web():
+    run('cargo', 'fmt', '--all', '--', '--check')
+    run('cargo', 'clippy', '--locked', '--no-default-features', '--features', 'web', '--all-targets', '--', '-D', 'warnings')
+    run('cargo', 'test', '--locked', '--no-default-features', '--features', 'web')
+    run('bash', 'scripts/build-web.sh')
+    run('python3', 'scripts/package-web.py')
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT/'dist/pwa')))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    env = {**os.environ, 'PWA_URL': f'http://127.0.0.1:{server.server_port}'}
+    try:
+        run('node', 'web/smoke.mjs', env=env)
+        run('node', 'web/reliability.mjs', env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+def native():
+    run('cargo', 'fmt', '--all', '--', '--check')
+    run('cargo', 'clippy', '--locked', '--all-targets', '--', '-D', 'warnings')
+    run('cargo', 'test', '--locked', '--all-targets')
+    run('cargo', 'test', '--locked', '--no-default-features')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('target', choices=['native', 'web', 'all'], default='all', nargs='?')
+    args = parser.parse_args()
+    if args.target in ('native', 'all'):
+        native()
+    if args.target in ('web', 'all'):
+        web()

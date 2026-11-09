@@ -89,3 +89,10 @@ Bundled dependencies retain their own licenses; see
 [third-party notices](THIRD_PARTY_NOTICES.md). Bug reports with reproducible
 projects and clear steps are welcome. Avoid including personal data, proprietary
 parts, or machine credentials in public issues or attachments.
+
+## Development workflow
+
+See [architecture](docs/ARCHITECTURE.md) and the
+[native/browser feature inventory](docs/FEATURE_PARITY.md). After prerequisite
+setup, `python3 scripts/check.py all` runs the native and browser quality gates.
+CI calls these same checks; packaged CAD runtime tests remain separate.

@@ -1,6 +1,7 @@
 //! Portable CAM model, deterministic toolpaths, and metric G-code postprocessor.
 pub mod cam;
 pub mod collision;
+pub mod commands;
 pub mod features;
 pub mod files;
 pub mod import;

@@ -21,6 +21,14 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
+        [flag, action, input] if flag == "--command" => {
+            let command = action.parse()?;
+            let project = Project::load(Path::new(input))?;
+            let data = serde_json::to_string(&project).map_err(|e| e.to_string())?;
+            let result = opensourcecam::commands::execute(&data, command)?;
+            println!("{result}");
+            Ok(())
+        }
         [flag, input, output] if flag == "--plan-stock" || flag == "--plan-surface" => {
             opensourcecam::files::ensure_distinct(Path::new(input), Path::new(output))?;
             let project = Project::load(Path::new(input))?;
@@ -150,7 +158,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("OpenSourceCAM {}\n\n  opensourcecam                          Open desktop workbench\n  opensourcecam --open project.cam.json   Open a project (desktop)\n  opensourcecam --sample project.cam.json Write example project\n  opensourcecam --sample-library tools.cam-tools.json\n  opensourcecam --inspect-library tools.cam-tools.json\n  opensourcecam --import model.stl project.cam.json\n  opensourcecam --import-inches model.obj project.cam.json\n  opensourcecam --inspect model.step      Report model bounds and triangle count\n  opensourcecam --features project.cam.json   Report candidate holes and pockets\n  opensourcecam --plan-stock input.cam.json output.cam.json   Build a top-side stock plan\n  opensourcecam --plan-surface input.cam.json output.cam.json   Build 3D roughing and finishing\n  opensourcecam --simulate-stock project.cam.json stock.obj   Export cut-stock mesh\n  opensourcecam --validate project.cam.json\n  opensourcecam --posts                   List controller postprocessors\n  opensourcecam --export project.cam.json output.nc\n  opensourcecam --export-post mach3 project.cam.json output.nc\n  opensourcecam --screenshot output.png   Capture the main menu\n  opensourcecam --screenshot project.cam.json output.png\n  opensourcecam --screenshot-setup project.cam.json output.png\n  opensourcecam --screenshot-tool project.cam.json output.png",env!("CARGO_PKG_VERSION"));
+            println!("OpenSourceCAM {}\n\n  opensourcecam                          Open desktop workbench\n  opensourcecam --open project.cam.json   Open a project (desktop)\n  opensourcecam --sample project.cam.json Write example project\n  opensourcecam --sample-library tools.cam-tools.json\n  opensourcecam --inspect-library tools.cam-tools.json\n  opensourcecam --import model.stl project.cam.json\n  opensourcecam --import-inches model.obj project.cam.json\n  opensourcecam --inspect model.step      Report model bounds and triangle count\n  opensourcecam --features project.cam.json   Report candidate holes and pockets\n  opensourcecam --plan-stock input.cam.json output.cam.json   Build a top-side stock plan\n  opensourcecam --plan-surface input.cam.json output.cam.json   Build 3D roughing and finishing\n  opensourcecam --simulate-stock project.cam.json stock.obj   Export cut-stock mesh\n  opensourcecam --validate project.cam.json\n  opensourcecam --command generate project.cam.json   Run shared command, returning JSON\n  opensourcecam --posts                   List controller postprocessors\n  opensourcecam --export project.cam.json output.nc\n  opensourcecam --export-post mach3 project.cam.json output.nc\n  opensourcecam --screenshot output.png   Capture the main menu\n  opensourcecam --screenshot project.cam.json output.png\n  opensourcecam --screenshot-setup project.cam.json output.png\n  opensourcecam --screenshot-tool project.cam.json output.png",env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         [flag] if flag == "--posts" => {
