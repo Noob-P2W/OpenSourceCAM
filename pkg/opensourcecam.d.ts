@@ -6,9 +6,15 @@ export class WebSession {
     [Symbol.dispose](): void;
     edit(data: string): string;
     import_file(name: string, data: Uint8Array, inches: boolean, role: string): string;
+    machine_profile(): string;
     constructor(data: string);
+    plan(action: string, options: string): string;
     run(action: string): string;
     save_project(): string;
+    simulate(progress: number, resolution: number): string;
+    stock_obj(progress: number, resolution: number): string;
+    tool_library(): string;
+    tool_preview(id: bigint): string;
     view(): string;
 }
 
@@ -16,6 +22,11 @@ export class WebSession {
  * Validate a browser-kernel result through the same Part and Project boundaries as native import.
  */
 export function cad_project(name: string, source: string, format: string, mesh: string): string;
+
+/**
+ * Menu and editor metadata comes from the same definitions as the desktop UI.
+ */
+export function catalog(): string;
 
 export function import_model(name: string, data: Uint8Array, inches: boolean): string;
 
@@ -33,6 +44,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_websession_free: (a: number, b: number) => void;
     readonly cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly catalog: (a: number) => void;
     readonly import_model: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly normalize: (a: number, b: number, c: number) => void;
     readonly operation: (a: number) => void;
@@ -40,9 +52,15 @@ export interface InitOutput {
     readonly sample: (a: number) => void;
     readonly websession_edit: (a: number, b: number, c: number, d: number) => void;
     readonly websession_import_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly websession_machine_profile: (a: number, b: number) => void;
     readonly websession_new: (a: number, b: number, c: number) => void;
+    readonly websession_plan: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly websession_run: (a: number, b: number, c: number, d: number) => void;
     readonly websession_save_project: (a: number, b: number) => void;
+    readonly websession_simulate: (a: number, b: number, c: number, d: number) => void;
+    readonly websession_stock_obj: (a: number, b: number, c: number, d: number) => void;
+    readonly websession_tool_library: (a: number, b: number) => void;
+    readonly websession_tool_preview: (a: number, b: number, c: bigint) => void;
     readonly websession_view: (a: number, b: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
     readonly __wbindgen_export: (a: number, b: number) => number;
