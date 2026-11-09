@@ -6,3 +6,6 @@
 !.env.example
 __pycache__/
 *.pyc
+
+/web/pkg/
+/web/node_modules/

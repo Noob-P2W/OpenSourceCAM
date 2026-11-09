@@ -6,11 +6,16 @@ rust-version = "1.88"
 description = "A lightweight, open-source 2.5D and 3-axis CAM workbench"
 license = "MIT"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["desktop"]
+web = ["dep:wasm-bindgen"]
 desktop = ["dep:eframe", "dep:rfd", "dep:png"]
 
 [dependencies]
+wasm-bindgen = { version = "=0.2.126", optional = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 same-file = "=1.0.6"

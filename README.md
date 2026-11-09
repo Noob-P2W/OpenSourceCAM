@@ -310,3 +310,7 @@ functionality stays last in the development order.
 Contributions to the Rust workbench are welcome under MIT; bundled components keep
 their upstream open-source licenses and platform runtime terms.
 
+
+## Browser / Android / tablet
+
+An initial offline-capable PWA uses the shared Rust CAM engine. See [PWA build, testing and deployment](docs/PWA.md). STEP/IGES browser import and native UI parity remain in development.

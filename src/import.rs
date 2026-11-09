@@ -257,7 +257,6 @@ pub fn import_file(path: &Path, units: Units) -> Result<Part, String> {
 
 pub fn import_with_cancel(path: &Path, units: Units, cancel: &AtomicBool) -> Result<Part, String> {
     use std::io::Read;
-    let format = SourceFormat::from_path(path)?;
     let file = std::fs::File::open(path).map_err(|e| format!("Cannot open model: {e}"))?;
     if file.metadata().map_err(|e| e.to_string())?.len() > MAX_IMPORT_BYTES {
         return Err("Model exceeds the 32 MiB import limit".into());
@@ -272,9 +271,27 @@ pub fn import_with_cancel(path: &Path, units: Units, cancel: &AtomicBool) -> Res
     if cancel.load(Ordering::Relaxed) {
         return Err("Import cancelled".into());
     }
+    import_bytes(path, units, &data, cancel)
+}
+
+/// Import a bounded in-memory model without filesystem access.
+pub fn import_bytes(
+    path: &Path,
+    units: Units,
+    data: &[u8],
+    cancel: &AtomicBool,
+) -> Result<Part, String> {
+    if data.len() as u64 > MAX_IMPORT_BYTES {
+        return Err("Model exceeds the 32 MiB import limit".into());
+    }
+    let format = SourceFormat::from_path(path)?;
+    #[cfg(target_arch = "wasm32")]
+    if format.is_cad() {
+        return Err("STEP/IGES import is not available in the browser yet. Use STL/OBJ or a desktop-saved project.".into());
+    }
     let (mesh, cad_source) = match format {
-        SourceFormat::Stl => (mesh::stl(&data)?, None),
-        SourceFormat::Obj => (mesh::obj(&data)?, None),
+        SourceFormat::Stl => (mesh::stl(data)?, None),
+        SourceFormat::Obj => (mesh::obj(data)?, None),
         SourceFormat::Step | SourceFormat::Iges => {
             if units != Units::Millimetres {
                 return Err(
@@ -282,10 +299,10 @@ pub fn import_with_cancel(path: &Path, units: Units, cancel: &AtomicBool) -> Res
                         .into(),
                 );
             }
-            let source = std::str::from_utf8(&data)
+            let source = std::str::from_utf8(data)
                 .map_err(|_| "CAD exchange file must be UTF-8/ASCII text")?
                 .to_owned();
-            let mesh = cad::convert(&data, format, cancel)?;
+            let mesh = cad::convert(data, format, cancel)?;
             (mesh, Some(source))
         }
     };

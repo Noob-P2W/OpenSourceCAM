@@ -15,3 +15,6 @@ pub mod surface;
 pub mod tool_library;
 pub mod view;
 pub mod workspace;
+
+#[cfg(feature = "web")]
+pub mod web;

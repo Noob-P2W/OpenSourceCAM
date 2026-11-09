@@ -1,0 +1,63 @@
+name: PWA build and optional deployment
+on:
+  push:
+    branches: [pwa-shop-hosting]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to GitHub Pages (enable Pages with GitHub Actions first)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: bash scripts/build-web.sh
+      - run: cargo test --locked --no-default-features --features web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Browser smoke test
+        run: |
+          python3 -m http.server 8080 --directory web &
+          CHROMIUM_PATH="$(node --input-type=module -e "import {chromium} from './web/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")" node web/smoke.mjs
+      - name: Prepare static site and shop package
+        run: python3 scripts/package-web.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensourcecam-shop
+          path: dist/opensourcecam-shop.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensourcecam-pwa
+          path: dist/pwa
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        with:
+          path: dist/pwa
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

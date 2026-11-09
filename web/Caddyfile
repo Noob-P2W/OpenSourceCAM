@@ -1,0 +1,8 @@
+# Replace cam.example.com and the root with your domain and deployed directory.
+cam.example.com {
+    root * /srv/opensourcecam
+    encode zstd gzip
+    header /sw.js Cache-Control "no-cache"
+    header /index.html Cache-Control "no-cache"
+    file_server
+}

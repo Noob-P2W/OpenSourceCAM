@@ -521,7 +521,15 @@ impl Project {
         if data.len() as u64 > MAX_PROJECT_BYTES {
             return Err("Project exceeds the 128 MiB size limit".into());
         }
-        let mut project: Self = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+        Self::from_json(&data)
+    }
+
+    /// Load the shared project format from memory (including browser uploads).
+    pub fn from_json(data: &[u8]) -> Result<Self, String> {
+        if data.len() as u64 > MAX_PROJECT_BYTES {
+            return Err("Project exceeds the 128 MiB size limit".into());
+        }
+        let mut project: Self = serde_json::from_slice(data).map_err(|e| e.to_string())?;
         // Older projects were implicitly milling projects.
         if (project.format_version == 1 && project.part.is_none())
             || (2..=8).contains(&project.format_version)
