@@ -190,3 +190,16 @@ shown in Operations and can be toggled with Preview in Import/Setup. On larger
 screens, the preview stays beside the selected step. Rotation retains edits.
 Tests cover stock fitting in tablet Setup, CNC profile application, vise placement,
 tool/preset selection, feature operations, file-menu placement, and screen overflow.
+
+## Large STL handling
+
+Identical STL vertices are shared exactly, reducing memory without changing faces.
+Large models use a labeled, lightweight wireframe preview; full mesh data is kept
+for CAM and saved projects. Redraws use cached/batched paths and a bounded canvas.
+Large project JSON is loaded into the advanced editor only when explicitly opened.
+Autosave uses compact JSON, and failure to refresh the previous backup no longer
+prevents saving the current project. Keep downloaded backups, especially if the
+storage warning says that the previous recovery copy could not be refreshed.
+The 100,000-triangle import regression exercises preview, editing, undo and a
+full-resolution save. It is a synthetic browser test, not verification on every
+Brave/Android device; model topology and device memory still affect workload.

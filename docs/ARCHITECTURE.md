@@ -56,7 +56,7 @@ that the remote CI passed or the website finished publishing.
 
 Session edits construct a candidate before replacing the current project. Failed
 commands leave project and history unchanged. New successful edits invalidate redo.
-History is bounded to 30 entries / 8 MiB of serialized snapshots and resets on reload.
+History is bounded to 30 entries / 8 MiB of retained metadata/geometry estimates and resets on reload.
 Large snapshots can exhaust the history budget; autosave and downloaded backups
 remain separate protections. A typed draft may temporarily contain invalid machining
 values so it can be repaired; generation/export still use the full existing validation.
@@ -68,3 +68,22 @@ reference-model insertion) and candidate-feature operation creation are Session
 transactions. Recognition and feature-to-operation conversion use shared Rust
 functions. The browser renders reference meshes from Rust-transformed vertices;
 no independent fixture coordinate calculation is used in JavaScript.
+
+## Large-model memory and rendering
+
+STL import interns exactly equal vertex coordinates; it retains every triangle and
+its winding, with no geometric decimation. Import commits directly inside the
+worker's Rust session rather than sending a project to the page and back again.
+Calculation commands borrow the session project instead of serializing/reparsing it.
+Undo snapshots clone Project metadata and share immutable Geometry through Arc;
+unchanged geometry from browser metadata replacements is reattached to the same Arc.
+The history budget excludes geometry shared with the current project, and includes
+unique older meshes retained by undo. Browser views serialize borrowed project data
+without an intermediate serde_json::Value representation of the whole mesh.
+
+The page caches compact project JSON per committed revision; the advanced editor
+is populated lazily for large projects. Canvas redraws are coalesced, geometry
+paths cached/batched, backing buffers bounded to 4 million pixels and DPR 2, and
+wireframe preview limited to 12,000 sampled triangles across visible models.
+This limit is presentation-only and is disclosed in the preview; full geometry
+remains available to validation, planning, simulation and project downloads.

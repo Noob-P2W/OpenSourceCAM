@@ -41,6 +41,7 @@ def web():
         run('node', 'web/layout-smoke.mjs', env=env)
         run('node', 'web/workflow-smoke.mjs', env=env)
         run('node', 'web/reliability.mjs', env=env)
+        run('node', 'web/performance-smoke.mjs', env=env)
     finally:
         server.shutdown()
         server.server_close()

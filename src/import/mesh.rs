@@ -1,5 +1,28 @@
 use super::{Mesh, MAX_TRIANGLES, MAX_VERTICES};
 
+// Exact coordinate interning, not geometric simplification. STL repeats each
+// vertex per face; sharing identical positions preserves every triangle.
+fn compact_stl(mut mesh: Mesh) -> Mesh {
+    let mut indices = std::collections::HashMap::new();
+    let mut vertices = Vec::new();
+    let mut remap = Vec::with_capacity(mesh.vertices.len());
+    for point in &mesh.vertices {
+        let key = point.map(|v| if v == 0.0 { 0 } else { v.to_bits() });
+        let index = *indices.entry(key).or_insert_with(|| {
+            let index = vertices.len() as u32;
+            vertices.push(*point);
+            index
+        });
+        remap.push(index);
+    }
+    for tri in &mut mesh.triangles {
+        for index in tri {
+            *index = remap[*index as usize]
+        }
+    }
+    mesh.vertices = vertices;
+    mesh
+}
 pub fn stl(data: &[u8]) -> Result<Mesh, String> {
     // Binary headers are arbitrary and may even begin with "solid".
     if data.len() >= 84 {
@@ -25,7 +48,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
                 triangles,
             };
             mesh.validate()?;
-            return Ok(mesh);
+            return Ok(compact_stl(mesh));
         }
     }
     let text = std::str::from_utf8(data).map_err(|_| "Invalid or truncated binary STL")?;
@@ -97,7 +120,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
         triangles,
     };
     mesh.validate()?;
-    Ok(mesh)
+    Ok(compact_stl(mesh))
 }
 
 fn parse_number(value: Option<&str>) -> Result<f64, String> {
@@ -234,4 +257,32 @@ fn check_convex_planar(face: &[u32], vertices: &[[f64; 3]]) -> Result<(), String
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod compact_tests {
+    #[test]
+    fn binary_stl_shares_exact_vertices_without_changing_faces() {
+        let faces = [
+            [[0f32, 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            [[1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+        ];
+        let mut data = vec![0u8; 84 + 100];
+        data[80..84].copy_from_slice(&2u32.to_le_bytes());
+        for (face, points) in faces.iter().enumerate() {
+            for (i, v) in points.iter().flatten().enumerate() {
+                let offset = 84 + face * 50 + 12 + i * 4;
+                data[offset..offset + 4].copy_from_slice(&v.to_le_bytes())
+            }
+        }
+        let mesh = super::stl(&data).unwrap();
+        assert_eq!(mesh.vertices.len(), 4);
+        assert_eq!(mesh.triangles.len(), 2);
+        for (i, tri) in mesh.triangles.iter().enumerate() {
+            assert_eq!(
+                tri.map(|v| mesh.vertices[v as usize]),
+                faces[i].map(|p| p.map(f64::from))
+            )
+        }
+    }
 }

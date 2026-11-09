@@ -67,13 +67,98 @@ impl WebSession {
         })
     }
     pub fn view(&self) -> Result<String, JsValue> {
-        let preview: Vec<_>=self.inner.project().workspace.iter().filter(|m|m.part.visible).map(|m|serde_json::json!({
-            "kind":m.kind,"vertices":m.part.geometry.mesh.vertices.iter().map(|p|m.point(*p,self.inner.project().machine.as_ref())).collect::<Vec<_>>(),"triangles":m.part.geometry.mesh.triangles
-        })).collect();
-        let mut value = serde_json::to_value(self.inner.view())
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        value["workspace_preview"] = serde_json::json!(preview);
-        serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
+        #[derive(serde::Serialize)]
+        struct Preview {
+            id: u64,
+            name: String,
+            kind: crate::workspace::ModelKind,
+            vertices: Vec<[f64; 3]>,
+            triangles: Vec<[u32; 3]>,
+        }
+        #[derive(serde::Serialize)]
+        struct BrowserView<'a> {
+            #[serde(flatten)]
+            view: crate::session::View<'a>,
+            workspace_preview: Vec<Preview>,
+        }
+        let visible = self
+            .inner
+            .project()
+            .workspace
+            .iter()
+            .filter(|m| m.part.visible)
+            .count()
+            .max(1);
+        let budget = (12000 / visible).max(1);
+        let preview = self
+            .inner
+            .project()
+            .workspace
+            .iter()
+            .filter(|m| m.part.visible)
+            .map(|m| {
+                let stride = m.part.geometry.mesh.triangles.len().div_ceil(budget).max(1);
+                let mut p = Preview {
+                    id: m.id,
+                    name: m.name.clone(),
+                    kind: m.kind,
+                    vertices: Vec::new(),
+                    triangles: Vec::new(),
+                };
+                for t in m.part.geometry.mesh.triangles.iter().step_by(stride) {
+                    let base = p.vertices.len() as u32;
+                    for i in t {
+                        p.vertices.push(m.point(
+                            m.part.geometry.mesh.vertices[*i as usize],
+                            self.inner.project().machine.as_ref(),
+                        ))
+                    }
+                    p.triangles.push([base, base + 1, base + 2]);
+                }
+                p
+            })
+            .collect();
+        serde_json::to_string(&BrowserView {
+            view: self.inner.view(),
+            workspace_preview: preview,
+        })
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn save_project(&self) -> Result<String, JsValue> {
+        crate::cam::validate_setup(self.inner.project()).map_err(|e| JsValue::from_str(&e))?;
+        self.inner.json().map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn import_file(
+        &mut self,
+        name: &str,
+        data: &[u8],
+        inches: bool,
+        role: &str,
+    ) -> Result<String, JsValue> {
+        let part = import::import_bytes(
+            std::path::Path::new(name),
+            if inches {
+                import::Units::Inches
+            } else {
+                import::Units::Millimetres
+            },
+            data,
+            &AtomicBool::new(false),
+        )
+        .map_err(|e| JsValue::from_str(&e))?;
+        let edit = match role {
+            "part" => crate::session::Edit::Replace {
+                project: Box::new(Project::from_part(part).map_err(|e| JsValue::from_str(&e))?),
+            },
+            "machine" | "vise" | "fixture" => crate::session::Edit::AddWorkspace {
+                part,
+                model_kind: serde_json::from_str(&format!("\"{role}\""))
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?,
+            },
+            _ => return Err(JsValue::from_str("Unknown model role")),
+        };
+        self.inner.apply(edit).map_err(|e| JsValue::from_str(&e))?;
+        self.view()
     }
     pub fn edit(&mut self, data: &str) -> Result<String, JsValue> {
         if data.len() as u64 > crate::model::MAX_PROJECT_BYTES {

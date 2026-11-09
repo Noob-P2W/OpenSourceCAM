@@ -5,3 +5,5 @@
 @media(max-width:640px){header{flex-wrap:wrap}.file-menu>summary{min-width:48px;padding:10px}.brand{gap:7px;font-size:13px}.brand>span{display:none}.brand small{font-size:7px;letter-spacing:.8px}.file-menu-content{width:min(340px,calc(100vw - 24px))}}
 .setup-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}#machine-setup>details,#tool-setup>details{grid-column:1/-1;width:100%}.setup-fields>label:first-child{grid-column:1/-1}.setup-fields label{margin:0!important}
 body[data-pane=operations] #preview-toggle{display:none}
+
+#preview-detail:empty{display:none}

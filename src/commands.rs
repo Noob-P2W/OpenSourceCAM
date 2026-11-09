@@ -28,27 +28,31 @@ impl std::str::FromStr for Command {
 }
 pub fn execute(data: &str, action: Command) -> Result<Value, String> {
     let p = Project::from_json(data.as_bytes())?;
+    execute_project(&p, action)
+}
+pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
+    cam::validate_setup(p)?;
     match action {
         Command::Recognize => Ok(json!(crate::features::recognize(
             p.part.as_ref().ok_or("Import a part first")?
         )?)),
         Command::Generate => {
-            let path = post::checked_path(&p)?;
+            let path = post::checked_path(p)?;
             Ok(
                 json!({"moves":path.moves.iter().map(|m| json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid})).collect::<Vec<_>>(),"seconds":path.estimated_seconds,"cut":path.cut_length}),
             )
         }
-        Command::Export => Ok(json!(post::gcode(&p)?)),
+        Command::Export => Ok(json!(post::gcode(p)?)),
         Command::Simulate => {
-            let path = post::checked_path(&p)?;
-            let sim = stock::simulate(&p, &path, 1.0, 96, &AtomicBool::new(false))?;
+            let path = post::checked_path(p)?;
+            let sim = stock::simulate(p, &path, 1.0, 96, &AtomicBool::new(false))?;
             Ok(json!({"summary":sim.summary,"heights":sim.heights}))
         }
         Command::PlanStock | Command::PlanSurface => {
             let plan = if action == Command::PlanSurface {
-                crate::surface::from_stock(&p, &Default::default(), &AtomicBool::new(false))?
+                crate::surface::from_stock(p, &Default::default(), &AtomicBool::new(false))?
             } else {
-                crate::machining::from_stock(&p, &Default::default(), &AtomicBool::new(false))?
+                crate::machining::from_stock(p, &Default::default(), &AtomicBool::new(false))?
             };
             Ok(json!(plan.project))
         }

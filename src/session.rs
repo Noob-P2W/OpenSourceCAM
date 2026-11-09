@@ -52,10 +52,43 @@ pub struct View<'a> {
     pub can_undo: bool,
     pub can_redo: bool,
 }
+struct Snapshot {
+    project: Project,
+    metadata: usize,
+}
+impl Snapshot {
+    fn new(project: Project) -> Self {
+        let metadata = serde_json::to_vec(&(
+            &project.name,
+            &project.operations,
+            &project.tool_library,
+            &project.machine,
+            &project.tool,
+            &project.post,
+            &project.stock,
+        ))
+        .map_or(8 * 1024 * 1024, |data| data.len() * 2)
+            + project.workspace.len() * 4096;
+        Self { project, metadata }
+    }
+}
+struct SizeLimit(usize);
+impl std::io::Write for SizeLimit {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if data.len() > MAX_PROJECT_BYTES as usize - self.0 {
+            return Err(std::io::Error::other("Draft exceeds project size limit"));
+        }
+        self.0 += data.len();
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 pub struct Session {
     project: Project,
-    undo: VecDeque<String>,
-    redo: VecDeque<String>,
+    undo: VecDeque<Snapshot>,
+    redo: VecDeque<Snapshot>,
 }
 impl Session {
     pub fn new(project: Project) -> Self {
@@ -78,36 +111,52 @@ impl Session {
     pub fn json(&self) -> Result<String, String> {
         serde_json::to_string(&self.project).map_err(|e| e.to_string())
     }
-    fn trim(&mut self) {
-        while self.undo.len() + self.redo.len() > 30
-            || self
-                .undo
+    fn retained_bytes(&self) -> usize {
+        fn geometry(p: &Project, seen: &mut std::collections::HashSet<usize>) -> usize {
+            p.part
                 .iter()
-                .chain(&self.redo)
-                .map(String::len)
-                .sum::<usize>()
-                > 8 * 1024 * 1024
-        {
+                .chain(p.workspace.iter().map(|m| &m.part))
+                .map(|part| {
+                    if !seen.insert(std::sync::Arc::as_ptr(&part.geometry) as usize) {
+                        return 0;
+                    }
+                    let g = &part.geometry;
+                    g.mesh.vertices.len() * 24
+                        + g.mesh.triangles.len() * 12
+                        + g.cad_source.as_ref().map_or(0, String::len)
+                        + g.source_name.len()
+                })
+                .sum()
+        }
+        let mut seen = std::collections::HashSet::new();
+        geometry(&self.project, &mut seen);
+        self.undo
+            .iter()
+            .chain(&self.redo)
+            .map(|s| s.metadata + geometry(&s.project, &mut seen))
+            .sum()
+    }
+    fn trim(&mut self) {
+        while self.undo.len() + self.redo.len() > 30 || self.retained_bytes() > 8 * 1024 * 1024 {
             if self.undo.pop_front().is_none() {
                 self.redo.pop_front();
             }
         }
     }
     pub fn apply(&mut self, edit: Edit) -> Result<(), String> {
-        let before = self.json()?;
+        let before = self.project.clone();
         if matches!(edit, Edit::Undo | Edit::Redo) {
             let undo = matches!(edit, Edit::Undo);
             let source = if undo { &mut self.undo } else { &mut self.redo };
             let Some(data) = source.back() else {
                 return Ok(());
             };
-            let restored =
-                serde_json::from_str(data).map_err(|e| format!("Cannot restore history: {e}"))?;
+            let restored = data.project.clone();
             source.pop_back();
             if undo {
-                self.redo.push_back(before)
+                self.redo.push_back(Snapshot::new(before))
             } else {
-                self.undo.push_back(before)
+                self.undo.push_back(Snapshot::new(before))
             }
             self.project = restored;
             self.trim();
@@ -240,12 +289,23 @@ impl Session {
         if candidate.format_version != FORMAT_VERSION {
             return Err("Unsupported draft version".into());
         }
-        let after = serde_json::to_string(&candidate).map_err(|e| e.to_string())?;
-        if after.len() as u64 > MAX_PROJECT_BYTES {
-            return Err("Draft exceeds project size limit".into());
+        // Browser metadata edits deserialize geometry anew. Reuse immutable geometry
+        // when unchanged, so history retains Arc references rather than whole meshes.
+        if let (Some(new), Some(old)) = (&mut candidate.part, &before.part) {
+            if new.geometry == old.geometry {
+                new.geometry = old.geometry.clone()
+            }
         }
-        if after != before {
-            self.undo.push_back(before);
+        for new in &mut candidate.workspace {
+            if let Some(old) = before.workspace.iter().find(|old| old.id == new.id) {
+                if new.part.geometry == old.part.geometry {
+                    new.part.geometry = old.part.geometry.clone()
+                }
+            }
+        }
+        if candidate != before {
+            serde_json::to_writer(&mut SizeLimit(0), &candidate).map_err(|e| e.to_string())?;
+            self.undo.push_back(Snapshot::new(before));
             self.redo.clear();
             self.project = candidate;
             self.trim()
@@ -253,12 +313,53 @@ impl Session {
         Ok(())
     }
     pub fn run(&self, command: commands::Command) -> Result<serde_json::Value, String> {
-        commands::execute(&self.json()?, command)
+        commands::execute_project(&self.project, command)
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn metadata_history_reuses_geometry_after_browser_roundtrips() {
+        let part = crate::import::import_file(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/examples/models/mount.stl"
+            )),
+            crate::import::Units::Millimetres,
+        )
+        .unwrap();
+        let mut s = Session::new(Project {
+            part: Some(part),
+            ..Project::default()
+        });
+        let geometry = s.project().part.as_ref().unwrap().geometry.clone();
+        for i in 0..10 {
+            let mut p: Project = serde_json::from_str(&s.json().unwrap()).unwrap();
+            p.name = i.to_string();
+            s.apply(Edit::Replace {
+                project: Box::new(p),
+            })
+            .unwrap();
+            assert!(std::sync::Arc::ptr_eq(
+                &geometry,
+                &s.project().part.as_ref().unwrap().geometry
+            ));
+        }
+        for state in &s.undo {
+            assert!(std::sync::Arc::ptr_eq(
+                &geometry,
+                &state.project.part.as_ref().unwrap().geometry
+            ))
+        }
+        s.apply(Edit::Undo).unwrap();
+        s.apply(Edit::Redo).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &geometry,
+            &s.project().part.as_ref().unwrap().geometry
+        ));
+        assert!(s.retained_bytes() < 100_000);
+    }
     #[test]
     fn new_operations_keep_the_selected_setup_tool_and_preset() {
         let mut p = Project::default();
