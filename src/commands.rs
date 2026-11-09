@@ -84,6 +84,15 @@ pub fn plan_project(
     command: Command,
     options: &crate::machining::PlanOptions,
 ) -> Result<crate::machining::Plan, String> {
+    // Explicit replacement discards old operations before validating the planning
+    // input. Stale geometry links or old overrides must not prevent rebuilding;
+    // the newly planned paths still pass the full shared validation.
+    let replacement = options.replace_operations.then(|| {
+        let mut p = project.clone();
+        p.operations.clear();
+        p
+    });
+    let project = replacement.as_ref().unwrap_or(project);
     cam::validate_setup(project)?;
     match command {
         Command::PlanSurface => {

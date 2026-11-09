@@ -26,7 +26,7 @@ await section(page,'operations');
 await page.getByLabel('depth · mm',{exact:true}).fill('-1');await page.getByLabel('depth · mm',{exact:true}).dispatchEvent('change');
 await section(page,'operations');await page.locator('#export').click();await page.locator('#status.error').waitFor();
 assert.equal(await page.locator('#stats').textContent(),'Changed · generate to refresh');
-await section(page,'operations');await page.getByLabel('depth · mm',{exact:true}).fill('3');await page.getByLabel('depth · mm',{exact:true}).dispatchEvent('change');
+await section(page,'operations');await page.getByLabel('depth · mm',{exact:true}).fill('3');await page.getByLabel('depth · mm',{exact:true}).dispatchEvent('change');await page.getByLabel('depth · mm',{exact:true}).blur();await page.waitForFunction(()=>JSON.parse(localStorage.getItem('oc-project')).operations[0].depth===3);
 assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 await page.screenshot({path:'/tmp/pwa-phone.png',fullPage:true});
 await page.waitForFunction(()=>document.getElementById('offline').textContent.includes('installed'));

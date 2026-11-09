@@ -106,3 +106,32 @@ into tool_preview::assembly. Both UIs consume that helper; it is not collision
 geometry. Browser stock simulation renders the actual mesh from stock::simulate,
 with a display toggle and sampling/detail control. Operation path indices support
 selected-operation filtering without changing generated/postprocessed paths.
+
+## Browser cancellation and graphics recovery
+
+A long browser job first obtains a Session history checkpoint. Its current meshes
+are references to the already-cached committed project, not additional serialized
+copies. Unique older geometry is stored once; project metadata references that pool.
+Cancellation terminates the worker, restores the committed project and both history
+stacks in a new worker, checks base-geometry fingerprints, and resumes editing.
+Restoration returns history flags rather than another large presentation copy.
+Checkpoint parsing remains size-bounded and rejects invalid geometry references.
+
+The viewport handles WebGL context loss and rebuilds its GPU resources on restore.
+Software rendering remains available when WebGL is unavailable. Camera movement,
+selected-path filtering, inspector resizing and playback do not create project edits.
+Model-link fingerprints canonicalize signed zero, matching browser JSON number
+semantics. Older links containing negative-zero hashes may need rebuilding; export
+validation is retained.
+
+Explicit operation replacement validates a planning input with the discarded old
+operations removed. This lets stock fitting or model-placement changes be repaired
+by rebuilding, while generation/export continue to reject stale geometry links.
+The resulting new operations still pass the shared planner/path validation.
+
+Browser field edits update the presentation draft and are committed together after
+focus leaves the fields. Every action flushes that draft first. This prevents a
+field's blur handler from disabling and swallowing the button tap that follows it.
+During the commit, the matching presentation object is retained so queued control
+closures keep valid references; history flags come from Rust, and the GPU scene is
+invalidated after geometry/setup changes. Invalid commits roll back atomically.

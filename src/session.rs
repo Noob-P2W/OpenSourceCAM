@@ -1,4 +1,5 @@
 //! UI-independent editing transactions. Drafts can be incomplete; export remains checked.
+mod checkpoint;
 use crate::{
     commands,
     model::{Operation, Project, FORMAT_VERSION, MAX_PROJECT_BYTES},

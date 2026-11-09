@@ -85,7 +85,8 @@ local-storage quota: download the project if the app reports that autosave is un
 A failed import leaves the current project intact. CAD import does not imply all
 shapes are supported by automatic machining strategies. The browser now has depth-tested solids, camera gestures, rendered sampled
 stock and structured machine/library editors. Full native UI parity is still
-tracked in FEATURE_PARITY.md; synchronous WASM jobs currently run to completion. Large models/plans can consume substantial mobile memory; work runs
+tracked in FEATURE_PARITY.md. Cancel calculation restarts a worker and restores
+the current workspace and its undo/redo history. Large models/plans can consume substantial mobile memory; work runs
 in a worker so the page remains responsive. Direct controller communication is
 out of scope.
 

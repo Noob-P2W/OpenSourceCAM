@@ -77,6 +77,18 @@ impl WebSession {
             inner: crate::session::Session::new(p),
         })
     }
+    pub fn history_checkpoint(&self) -> Result<String, JsValue> {
+        self.inner
+            .history_checkpoint()
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn restore_history(&mut self, data: &str) -> Result<String, JsValue> {
+        self.inner
+            .restore_history(data)
+            .map_err(|e| JsValue::from_str(&e))?;
+        let view = self.inner.view();
+        Ok(serde_json::json!({"can_undo":view.can_undo,"can_redo":view.can_redo}).to_string())
+    }
     pub fn view(&self) -> Result<String, JsValue> {
         #[derive(serde::Serialize)]
         struct Preview {

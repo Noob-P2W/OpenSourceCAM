@@ -44,6 +44,7 @@ def web():
         run('node', 'web/workflow-smoke.mjs', env=env)
         run('node', 'web/viewport-smoke.mjs', env=env)
         run('node', 'web/editor-smoke.mjs', env=env)
+        run('node', 'web/cancel-smoke.mjs', env=env)
         run('node', 'web/reliability.mjs', env=env)
         run('node', 'web/performance-smoke.mjs', env=env)
     finally:

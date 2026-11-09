@@ -20,7 +20,7 @@ This is an implementation inventory, not a release promise or certification.
 | NC inspection | Preview and export | Checked code preview and download |
 | Stock fitting and workholding | Supported | Setup step: fit stock, part offsets, vise/fixture transforms |
 | Feature recognition | Supported | Operations: candidate review, unsupported/open-mesh diagnostics and disabled feature operations |
-| Editing / undo history | Native implementation | Rust Session; native desktop history migration pending |
+| Editing / undo history | Native implementation | Rust Session, bounded undo/redo and worker cancellation that preserves both stacks |
 | Autosave / recovery | Native save protections | Local current/previous autosave and draft recovery |
 | Install/offline updates | Native packages | Service worker, version display and update prompt |
 | Controller streaming | Not implemented | Not implemented |
@@ -32,12 +32,19 @@ hardware reports with browser/OS versions and the visible PWA build id.
 
 ## Remaining UI differences
 
-Browser parity is not declared complete. Desktop background tasks have cooperative
-cancellation; browser synchronous WASM calculations currently run to completion.
-Some desktop layout conveniences and background-job controls still differ. Browser simulation uses the same
-Rust-generated mesh and sampling rules, but real phone/tablet graphics and memory
-limits still need device verification. Native and browser undo budgets and edit
-grouping differ, as recorded in ARCHITECTURE.md.
+The main desktop milling workflows now have browser controls: process selection,
+solid navigation, setup, tooling, planning, detailed operations, contextual actions,
+playback, simulation, NC preview/export and cancellation. Desktop cancellation is
+cooperative; browser cancellation restarts its worker and restores the project and
+history from a bounded checkpoint. Current geometry is referenced, older retained
+meshes are deduplicated, and the restored base geometry is checked. The desktop
+inspector is resizable in the browser at wide screen sizes; tablet/phone layout
+remains responsive.
+
+This does not establish complete device/UI equivalence. Native and browser history
+budgets/edit grouping differ, native filesystem dialogs are browser downloads and
+pickers, and real mobile graphics/storage limits still require device verification.
+No additional process engine or recognition strategy is enabled by these UI changes.
 
 The uploaded cartridge-cap STL was used for local browser regression checks only;
 it is not included in the repository or deployed site. CI generates an original

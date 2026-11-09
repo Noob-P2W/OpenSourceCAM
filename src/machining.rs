@@ -25,7 +25,7 @@ impl Fingerprint {
         }
     }
     fn number(&mut self, v: f64) {
-        self.bytes(&v.to_bits().to_le_bytes());
+        self.bytes(&(if v == 0.0 { 0.0 } else { v }).to_bits().to_le_bytes());
     }
     fn finish(self) -> String {
         format!("{:016x}", self.0)

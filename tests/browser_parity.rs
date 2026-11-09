@@ -168,3 +168,67 @@ fn duplicated_tools_clear_controller_register_bindings() {
     assert_eq!(copy.post.length_offset, None);
     assert_eq!(copy.post.diameter_offset, None);
 }
+
+#[test]
+fn model_links_treat_signed_zero_like_browser_json_roundtrips() {
+    use std::sync::Arc;
+    let mut p = Project::from_part(part()).unwrap();
+    p.ensure_tool_library();
+    for v in &mut Arc::make_mut(&mut p.part.as_mut().unwrap().geometry)
+        .mesh
+        .vertices
+    {
+        for x in v {
+            if *x == 0.0 {
+                *x = -0.0;
+            }
+        }
+    }
+    let features = opensourcecam::features::recognize(p.part.as_ref().unwrap()).unwrap();
+    let pocket = features
+        .features
+        .iter()
+        .find(|f| f.kind == opensourcecam::features::FeatureKind::RectangularPocket)
+        .unwrap();
+    let mut op = opensourcecam::features::operation(&p, pocket).unwrap();
+    op.enabled = true;
+    p.operations.push(op);
+    let mut roundtrip = p.clone();
+    for v in &mut Arc::make_mut(&mut roundtrip.part.as_mut().unwrap().geometry)
+        .mesh
+        .vertices
+    {
+        for x in v {
+            if *x == 0.0 {
+                *x = 0.0;
+            }
+        }
+    }
+    assert_eq!(
+        opensourcecam::post::gcode(&p).unwrap(),
+        opensourcecam::post::gcode(&roundtrip).unwrap()
+    );
+}
+
+#[test]
+fn explicit_rebuild_recovers_after_stock_fit_invalidates_old_model_links() {
+    let original = Project::from_part(part()).unwrap();
+    let mut plan = commands::plan_project(&original, Command::PlanSurface, &Default::default())
+        .unwrap()
+        .project;
+    plan.part.as_mut().unwrap().offset[0] += 2.0;
+    assert!(commands::execute_project(&plan, Command::Export).is_err());
+    assert!(commands::plan_project(&plan, Command::PlanSurface, &Default::default()).is_err());
+    let rebuilt = commands::plan_project(
+        &plan,
+        Command::PlanSurface,
+        &PlanOptions {
+            replace_operations: true,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .project;
+    assert_eq!(rebuilt.operations.len(), 2);
+    assert!(commands::execute_project(&rebuilt, Command::Export).is_ok());
+}
