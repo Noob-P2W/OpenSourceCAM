@@ -48,12 +48,25 @@ $('recover').onclick=()=>task(async()=>{const data=localStorage.getItem('oc-back
 window.addEventListener('beforeunload',e=>{if(!autosaved){e.preventDefault();e.returnValue=''}});
 await task(async()=>{let saved,failed=false;try{saved=localStorage.getItem('oc-project')}catch{failed=true}if(saved){try{project=await call('draft',{project:saved}).catch(()=>call('normalize',{project:saved}))}catch{failed=true;$('recovery').hidden=false;$('raw-backup').onclick=()=>download(saved,'recovered-workspace.draft.json')}}if(!project)project=await call('sample');applyView(await call('session-start'));lastState=JSON.stringify(project);render();autosaved=!failed;status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':'Ready · All machining calculations run on this device',failed);$('saved').textContent=failed?'Recovery required':'Workspace restored';});
 if('serviceWorker'in navigator){
- let waiting,controlled=!!navigator.serviceWorker.controller;
- navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled)location.reload();controlled=true});
+ let controlled=!!navigator.serviceWorker.controller,activating=false;
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled){location.reload();return}controlled=true});
  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(async reg=>{
-  function offer(){if(reg.waiting){waiting=reg.waiting;$('update').hidden=false}}
+  function offer(){if(reg.waiting){$('update').hidden=false;$('update').textContent='Update available · reload'}}
   offer();reg.addEventListener('updatefound',()=>{reg.installing?.addEventListener('statechange',offer)});
-  $('update').onclick=()=>{if(busy)return;if(!persist()){status('Download a backup before updating; autosave failed.',true);return}waiting?.postMessage({type:'ACTIVATE'})};
+  $('update').onclick=async()=>{
+   if(busy){status('Finish the current operation before updating.',true);return}
+   if(activating)return;
+   if(!persist()){status('Download a backup before updating; autosave failed.',true);return}
+   activating=true;$('update').disabled=true;$('update').textContent='Applying update…';status('Your workspace is saved. Applying the update…');
+   try{
+    // Resolve the current waiting worker, not a reference from an earlier install.
+    let next=reg.waiting;
+    if(!next){await reg.update();next=reg.waiting}
+    if(!next){throw Error('No downloaded update is waiting. Close all OpenSourceCAM tabs and reopen the app to check again. Your workspace is saved.')}
+    next.postMessage({type:'ACTIVATE'});
+    setTimeout(()=>{if(activating){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status('Update has not activated yet. Close other OpenSourceCAM tabs and reopen the app. Your workspace is saved.',true)}},10000);
+   }catch(error){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status(error.message,true)}
+  };
   await navigator.serviceWorker.ready;$('offline').textContent='· Offline cache installed';
- }).catch(()=>{$('offline').textContent='· Offline cache unavailable'});
+ }).catch(error=>{$('offline').textContent='· Offline cache unavailable';status(`Offline/update setup failed: ${error.message}`,true)});
 }

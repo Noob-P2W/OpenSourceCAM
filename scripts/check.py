@@ -11,7 +11,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def run(*command, env=None):
     print('+', ' '.join(command), flush=True)
-    subprocess.run(command, cwd=ROOT, env=env, check=True)
+    import tempfile
+    with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as log:
+        result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+        log.seek(0)
+        output = log.read()
+        print(output, flush=True)
+        summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if result.returncode and summary:
+            with open(summary, 'a', encoding='utf-8') as report:
+                report.write('\n## Failed quality check\n\n`' + ' '.join(command) + '`\n\n<pre>' + __import__('html').escape(output[-12000:]) + '</pre>\n')
+        result.check_returncode()
 
 def web():
     run('cargo', 'fmt', '--all', '--', '--check')
