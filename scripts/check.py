@@ -18,6 +18,9 @@ def run(*command, env=None):
         output = log.read()
         print(output, flush=True)
         summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if result.returncode and os.environ.get('GITHUB_ACTIONS'):
+            (ROOT / 'dist').mkdir(exist_ok=True)
+            (ROOT / 'dist/ci-failure.txt').write_text('Command: ' + ' '.join(command) + '\n' + output[-12000:], encoding='utf-8')
         if result.returncode and summary:
             with open(summary, 'a', encoding='utf-8') as report:
                 report.write('\n## Failed quality check\n\n`' + ' '.join(command) + '`\n\n<pre>' + __import__('html').escape(output[-12000:]) + '</pre>\n')
