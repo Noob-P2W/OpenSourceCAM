@@ -10,8 +10,10 @@ This is an initial browser workbench, not full parity with the native UI.
 Prerequisites: stable Rust, Python 3, and Node/npm for browser tests.
 
 ```sh
+npm ci --prefix web
 bash scripts/build-web.sh
-python3 -m http.server 8080 --directory web
+python3 scripts/package-web.py
+python3 -m http.server 8080 --directory dist/pwa
 ```
 
 Open the local server on the development computer. For tests, in another terminal:

@@ -74,8 +74,10 @@ Native setup and the complete existing validation commands are in the
 [native guide](docs/NATIVE_GUIDE.md). For the browser:
 
 ```sh
+npm ci --prefix web
 bash scripts/build-web.sh
-python3 -m http.server 8080 --directory web
+python3 scripts/package-web.py
+python3 -m http.server 8080 --directory dist/pwa
 ```
 
 Browser tests and packaging instructions are in [docs/PWA.md](docs/PWA.md).

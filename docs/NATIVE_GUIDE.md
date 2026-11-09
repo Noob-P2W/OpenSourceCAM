@@ -313,4 +313,4 @@ their upstream open-source licenses and platform runtime terms.
 
 ## Browser / Android / tablet
 
-An initial offline-capable PWA uses the shared Rust CAM engine. See [PWA build, testing and deployment](PWA.md). STEP/IGES browser import and native UI parity remain in development.
+An initial offline-capable PWA uses the shared Rust CAM engine. See [PWA build, testing and deployment](PWA.md). Browser STEP/IGES import uses a bundled OpenCascade kernel; native UI parity remains in development.
