@@ -32,3 +32,13 @@ The CAD kernel stays dynamically loaded from
 Exact wheel hashes are recorded in `cad-runtime/cad-requirements.txt`. The
 runtime's versions and platform are recorded in `cad-runtime/manifest.json`.
 The app source, bridge, tests, and reproducible packaging script also ship in `source/`.
+
+## Browser CAD kernel
+
+The PWA separately distributes **occt-import-js 0.0.23** (LGPL-2.1) with its
+OpenCascade WebAssembly kernel (LGPL-2.1 with OCCT exception). Full notices,
+corresponding source revisions and replacement/build information are included in
+`cad/NOTICES.txt`, `cad/license.occt-import-js.txt`, `cad/license.occt.txt`
+and `cad/license.occt-exception.txt`.
+The unmodified npm distribution is pinned with its integrity hash in
+`web/package-lock.json`. See [browser kernel notices](web/CAD-NOTICES.txt).

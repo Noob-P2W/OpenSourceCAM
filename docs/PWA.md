@@ -47,7 +47,7 @@ storage retention depend on browser support and available device storage.
 - Edit stock, legacy tool settings, postprocessor and operations.
 - Save/download projects; the last changed workspace is restored from local storage.
   Download backups: browser storage can be cleared or evicted.
-- Import STL/OBJ with explicit source units, creating a fitted new project.
+- Import STEP/IGES (file units converted to mm), or STL/OBJ with explicit source units. Each creates a fitted new project.
 - Generate checked paths, inspect top/isometric views and scrub path playback.
 - Plan from stock / 3D surfaces using the existing supported geometry restrictions.
 - Run sampled stock-removal simulation and inspect the numeric report.
@@ -58,8 +58,13 @@ storage retention depend on browser support and available device storage.
 
 ## Current limits
 
-STEP/IGES import requires the native CAD runtime and is explicitly rejected in the
-browser. Native projects with embedded CAD meshes can be opened. The browser
+STEP/IGES import runs locally through bundled OpenCascade WASM. It retains source
+text and flattens assemblies to a tessellated mesh (0.1 mm linear / 0.3 radian
+angular deflection). The kernel adds about 7.5 MiB to the offline download.
+Inputs are limited to 32 MiB, output to 100,000 triangles / 300,000 vertices; an
+import is stopped after 120 seconds. Very large CAD can still exceed mobile memory.
+A failed import leaves the current project intact. CAD import does not imply all
+shapes are supported by automatic machining strategies. The browser
 viewer currently shows model wireframe and toolpaths, rather than the native
 GPU solid renderer or rendered cut-stock simulation. Detailed machine/library
 editors, gesture navigation, native undo/redo, and full native UI parity remain
@@ -67,8 +72,7 @@ future work. Large models/plans can consume substantial mobile memory; work runs
 in a worker so the page remains responsive. Direct controller communication is
 out of scope.
 
-The service worker caches one release atomically. Bump its CACHE version when
-shipping changed assets. An update waits until existing tabs close; reopen the
+The service worker caches one release atomically. Packaging derives the cache version from the shipped assets. An update waits until existing tabs close; reopen the
 app to activate it. Never cache user projects or G-code as HTTP assets.
 
 ## Self-hosting
@@ -78,7 +82,7 @@ static document root (for example `/srv/opensourcecam`):
 
 ```
 index.html style.css app.js worker.js sw.js manifest.webmanifest
-icon.svg icon-192.png icon-512.png pkg/
+icon.svg icon-192.png icon-512.png build.js cad-worker.js pkg/ cad/
 ```
 
 Do not serve the source checkout or `node_modules`. No Rust, Python, Node or CAD

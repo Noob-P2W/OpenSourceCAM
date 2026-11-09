@@ -7,7 +7,7 @@ This is an implementation inventory, not a release promise or certification.
 | --- | --- | --- |
 | Project JSON and migrations | Supported | Shared loader |
 | Bounded STL/OBJ import | Supported | Shared parsers; new fitted project |
-| STEP/IGES import | Bundled runtime | Not available; embedded meshes can open |
+| STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
 | Stock simulation | Numeric and rendered | Numeric report |

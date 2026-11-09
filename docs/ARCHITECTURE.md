@@ -30,7 +30,8 @@ in native builds for that subsequent integration.
 
 The browser keeps the Rust engine in a worker. File dialogs/downloads and local
 storage remain platform responsibilities. Native STEP/IGES needs the bundled
-Python/OCP runtime; browser STL/OBJ parsers use bounded in-memory input.
+Python/OCP runtime. Browser CAD runs in a disposable OpenCascade WASM worker;
+its output passes Rust Part/Project validation. STL/OBJ use shared Rust parsers.
 
 ## Quality and deployment
 

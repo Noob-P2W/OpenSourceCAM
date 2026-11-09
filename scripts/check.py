@@ -37,6 +37,7 @@ def web():
     env = {**os.environ, 'PWA_URL': f'http://127.0.0.1:{server.server_port}'}
     try:
         run('node', 'web/smoke.mjs', env=env)
+        run('node', 'web/cad-smoke.mjs', env=env)
         run('node', 'web/reliability.mjs', env=env)
     finally:
         server.shutdown()

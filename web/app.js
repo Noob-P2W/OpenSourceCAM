@@ -7,7 +7,7 @@ function historyButtons(){$('undo').disabled=busy||!canUndo;$('redo').disabled=b
 function applyView(view){project=view.project;canUndo=view.can_undo;canRedo=view.can_redo}
 function persist(){try{const data=JSON.stringify(project);const previous=localStorage.getItem('oc-project');if(previous&&previous!==data)localStorage.setItem('oc-backup',previous);localStorage.setItem('oc-project',data);autosaved=true;$('saved').textContent='Saved on this device';return true}catch{autosaved=false;$('saved').textContent='Not saved — download a backup';status('Browser storage unavailable or full. Download a backup before closing.',true);return false}}
 async function sessionEdit(edit){applyView(await call('session-edit',{edit}));if(edit.kind==='move_operation')selected=edit.target;if(edit.kind==='duplicate_operation')selected=edit.index+1;await changed(false);render()}
-worker.onmessage=({data})=>{const p=pending.get(data.id);if(!p)return;pending.delete(data.id);data.error?p.reject(Error(data.error)):p.resolve(data.value)};
+worker.onmessage=({data})=>{const p=pending.get(data.id);if(!p)return;if(data.progress){status(data.progress);return}pending.delete(data.id);data.error?p.reject(Error(data.error)):p.resolve(data.value)};
 worker.onerror=()=>{for(const p of pending.values())p.reject(Error('CAM engine failed to load. Rebuild or reload the app.'));pending.clear()};
 function call(action,extra={}){return new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});worker.postMessage({id,action,project:JSON.stringify(project),...extra})})}
 function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error)}
@@ -25,7 +25,7 @@ $('demo').onclick=()=>task(async()=>{if(project&&!confirm('Replace current works
 $('new').onclick=()=>task(async()=>{if(project&&!confirm('Replace current workspace?'))return;const p=await call('sample');p.name='Untitled milling project';p.operations=[];await adopt(p);status('New project')});
 $('save').onclick=()=>task(async()=>{const p=await call('normalize');download(JSON.stringify(p,null,2),filename('.cam.json'));status('Project downloaded')});
 $('open').onchange=()=>task(async()=>{const file=$('open').files[0];if(!file)return;if(file.size>128*1024*1024)throw Error('Project exceeds 128 MiB');const p=await call('normalize',{project:await file.text()});if(project&&!confirm('Replace current workspace with this project?'))return;await adopt(p);status('Project opened');$('open').value=''});
-$('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');if(!confirm('Create a new project fitted to this model?'))return;status('Importing model…');await adopt(await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},inches:$('units').value==='inch'}));status('Model imported. Configure tooling and add operations.');$('model').value=''});
+$('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');if(!confirm('Create a new project fitted to this model?'))return;status('Importing model…');await adopt(await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},inches:$('units').value==='inch'}));status(`Model imported · ${project.part.geometry.mesh.triangles.length} triangles · ${project.stock.width.toFixed(2)} × ${project.stock.height.toFixed(2)} × ${project.stock.thickness.toFixed(2)} mm stock. Configure tooling and operations.`);$('model').value=''});
 $('add').onclick=()=>task(async()=>{selected=project.operations.length;await sessionEdit({kind:'add_operation'})});
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
 $('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;draw();status('Paths generated and checked')});
@@ -60,8 +60,9 @@ if('serviceWorker'in navigator){
    activating=true;$('update').disabled=true;$('update').textContent='Applying update…';status('Your workspace is saved. Applying the update…');
    try{
     // Resolve the current waiting worker, not a reference from an earlier install.
-    let next=reg.waiting;
-    if(!next){await reg.update();next=reg.waiting}
+    const current=await navigator.serviceWorker.getRegistration();
+    let next=current?.waiting;
+    if(!next&&current){await current.update();next=current.waiting}
     if(!next){throw Error('No downloaded update is waiting. Close all OpenSourceCAM tabs and reopen the app to check again. Your workspace is saved.')}
     next.postMessage({type:'ACTIVATE'});
     setTimeout(()=>{if(activating){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status('Update has not activated yet. Close other OpenSourceCAM tabs and reopen the app. Your workspace is saved.',true)}},10000);

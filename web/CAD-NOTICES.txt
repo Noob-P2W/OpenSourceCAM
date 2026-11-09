@@ -1,0 +1,19 @@
+Browser CAD import uses occt-import-js 0.0.23 by Viktor Kovacs and contributors,
+an Emscripten interface to OpenCascade Technology (OCCT).
+Wrapper license: LGPL-2.1. OCCT: LGPL-2.1 with the OCCT exception; consult the
+complete accompanying license.occt-import-js.txt, license.occt.txt and
+license.occt-exception.txt notices.
+The main OpenSourceCAM project remains MIT; these components retain their licenses.
+
+Corresponding wrapper/build source:
+https://github.com/kovacsv/occt-import-js/tree/c2148e54b456b571238d35cac037d304053d64b2
+See that revision's CMakeLists.txt, tools/build_wasm_win_release.bat,
+tools/build_wasm_win.bat and .gitmodules for its build inputs. Clone recursively.
+The pinned occt submodule commit is d2abb6d844231cb8f29be6894440874a4700e4a5.
+Corresponding OCCT source: https://github.com/Open-Cascade-SAS/OCCT/tree/d2abb6d844231cb8f29be6894440874a4700e4a5
+Package: https://www.npmjs.com/package/occt-import-js/v/0.0.23
+OCCT source: https://github.com/Open-Cascade-SAS/OCCT
+
+The kernel is distributed separately as cad/occt-import-js.js and
+cad/occt-import-js.wasm. It can be rebuilt/replaced without changing the MIT
+application. No modifications were made to the distributed kernel files.

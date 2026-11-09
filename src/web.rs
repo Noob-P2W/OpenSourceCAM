@@ -85,3 +85,34 @@ impl WebSession {
             .map_err(|e| JsValue::from_str(&e))
     }
 }
+
+/// Validate a browser-kernel result through the same Part and Project boundaries as native import.
+#[wasm_bindgen]
+pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result<String, JsValue> {
+    fn build(name: &str, source: &str, format: &str, mesh: &str) -> Result<String, String> {
+        if source.len() as u64 > import::MAX_IMPORT_BYTES
+            || mesh.len() as u64 > crate::model::MAX_PROJECT_BYTES
+        {
+            return Err("CAD input exceeds import limits".into());
+        }
+        let format = match format {
+            "step" => import::SourceFormat::Step,
+            "iges" => import::SourceFormat::Iges,
+            _ => return Err("Unsupported CAD format".into()),
+        };
+        let part = import::Part {
+            geometry: std::sync::Arc::new(import::Geometry {
+                source_name: name.into(),
+                format,
+                mesh: serde_json::from_str(mesh).map_err(|e| e.to_string())?,
+                cad_source: Some(source.into()),
+            }),
+            units: import::Units::Millimetres,
+            offset: [0.0; 3],
+            visible: true,
+        };
+        let project = Project::from_part(part)?;
+        serde_json::to_string(&project).map_err(|e| e.to_string())
+    }
+    build(name, source, format, mesh).map_err(|e| JsValue::from_str(&e))
+}

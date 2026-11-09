@@ -33,7 +33,7 @@ current browser interface, not every feature of the native application.
 | Output | Metric G-code with Generic, GRBL, Mach3 and LinuxCNC posts, subject to each post's supported configuration |
 | Projects | Local versioned JSON project files with embedded geometry |
 | Native app | Detailed machine/tool editors, STL/OBJ import and bundled STEP/IGES import |
-| Browser app | Responsive phone/tablet layout, project editing, STL/OBJ import, path playback, numeric stock simulation and G-code download |
+| Browser app | Responsive phone/tablet layout, project editing, STEP/IGES/STL/OBJ import, path playback, numeric stock simulation and G-code download |
 
 The browser runs the shared Rust CAM engine locally through WebAssembly. There
 is no project-upload service, account system or machine-control connection.
@@ -59,9 +59,9 @@ installer. See [hosting instructions](docs/PWA.md) for HTTPS and build details.
   dimensional accuracy, reliability, or suitability for a particular machine.
 - Simulation is sampled. It is not complete machine collision verification.
   Review G-code, tool data, workholding, offsets and controller behavior separately.
-- The browser has no STEP/IGES importer yet. Open a desktop-saved project with
-  embedded geometry, or import STL/OBJ. Detailed native editors and solid rendering
-  are not fully ported to the browser.
+- Browser STEP/IGES import uses a bundled OpenCascade WebAssembly kernel.
+  Imported CAD is tessellated for the existing mesh-based CAM workflow; assemblies
+  are flattened. Detailed native editors and solid rendering are not fully ported.
 - Milling is the implemented machining process. Other process workspaces do not
   imply implemented toolpaths or export engines.
 - No direct CNC streaming/control is included. The controller's computer executes
