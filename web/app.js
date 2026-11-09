@@ -49,7 +49,7 @@ window.addEventListener('beforeunload',e=>{if(!autosaved){e.preventDefault();e.r
 await task(async()=>{let saved,failed=false;try{saved=localStorage.getItem('oc-project')}catch{failed=true}if(saved){try{project=await call('draft',{project:saved}).catch(()=>call('normalize',{project:saved}))}catch{failed=true;$('recovery').hidden=false;$('raw-backup').onclick=()=>download(saved,'recovered-workspace.draft.json')}}if(!project)project=await call('sample');applyView(await call('session-start'));lastState=JSON.stringify(project);render();autosaved=!failed;status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':'Ready · All machining calculations run on this device',failed);$('saved').textContent=failed?'Recovery required':'Workspace restored';});
 if('serviceWorker'in navigator){
  let controlled=!!navigator.serviceWorker.controller,activating=false;
- navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled){location.reload();return}controlled=true});
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled&&!activating){location.reload();return}controlled=true});
  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(async reg=>{
   function offer(){if(reg.waiting){$('update').hidden=false;$('update').textContent='Update available · reload'}}
   offer();reg.addEventListener('updatefound',()=>{reg.installing?.addEventListener('statechange',offer)});
@@ -64,8 +64,24 @@ if('serviceWorker'in navigator){
     let next=current?.waiting;
     if(!next&&current){await current.update();next=current.waiting}
     if(!next){throw Error('No downloaded update is waiting. Close all OpenSourceCAM tabs and reopen the app to check again. Your workspace is saved.')}
-    next.postMessage({type:'ACTIVATE'});
-    setTimeout(()=>{if(activating){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status('Update has not activated yet. Close other OpenSourceCAM tabs and reopen the app. Your workspace is saved.',true)}},10000);
+    for(let round=0;round<4;round++){
+     await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{next.removeEventListener('statechange',check);reject(Error('The update did not activate. Close other OpenSourceCAM tabs and retry. Your workspace is saved.'))},12000);
+      function check(){if(next.state==='activated'||next.state==='redundant'){clearTimeout(timer);next.removeEventListener('statechange',check);resolve()}}
+      next.addEventListener('statechange',check);next.postMessage({type:'ACTIVATE'});check();
+     });
+     // Let registration state settle before deciding whether a newer download superseded it.
+     await new Promise(resolve=>setTimeout(resolve,250));
+     const latest=await navigator.serviceWorker.getRegistration();
+     if(latest.installing){
+      const installing=latest.installing;
+      await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{installing.removeEventListener('statechange',check);reject(Error('A newer update is still downloading. Please retry shortly.'))},15000);function check(){if(installing.state==='installed'||installing.state==='redundant'){clearTimeout(timer);installing.removeEventListener('statechange',check);resolve()}}installing.addEventListener('statechange',check);check()});
+     }
+     const settled=await navigator.serviceWorker.getRegistration();
+     if(settled.waiting){next=settled.waiting;continue}
+     if(settled.active?.state==='activated'){location.reload();return}
+    }
+    throw Error('A newer update is still arriving. Please retry shortly. Your workspace is saved.');
    }catch(error){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status(error.message,true)}
   };
   await navigator.serviceWorker.ready;$('offline').textContent='· Offline cache installed';
