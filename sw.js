@@ -1,4 +1,4 @@
-const CACHE='opensourcecam-e28837d3ee34';
+const CACHE='opensourcecam-4554f4b9af5f';
 const ASSETS=['./cad-worker.js','./cad/occt-import-js.js','./cad/occt-import-js.wasm','./cad/license.occt-import-js.txt','./cad/license.occt.txt','./cad/NOTICES.txt','./cad/license.occt-exception.txt','./','./index.html','./style.css','./app.js','./build.js','./worker.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png','./pkg/opensourcecam.js','./pkg/opensourcecam_bg.wasm'];
 self.addEventListener('install',event=>event.waitUntil((async()=>{
  const cache=await caches.open(CACHE);
