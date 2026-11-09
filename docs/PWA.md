@@ -136,3 +136,9 @@ The build/test workflow publishes to the existing gh-pages branch and explicitly
 requests a Pages build. Run `python3 scripts/package-web.py` then
 `node web/reliability.mjs` to exercise a real service-worker upgrade, offline CAM,
 undo/redo, reload recovery, corrupt drafts and storage-quota failure handling.
+
+Operation editing and Undo/Redo now run in the Rust session inside the worker.
+The operation inspector also supports duplication and moving operations up/down.
+Incomplete typed autosave drafts can be restored without bypassing machining checks;
+Generate and Download G-code still reject invalid setups. Native desktop edit/history
+migration to this session is not complete.

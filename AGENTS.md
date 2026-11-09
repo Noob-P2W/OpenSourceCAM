@@ -6,7 +6,8 @@ Use the existing checkout; preserve user edits and fetch current main before pub
 - Keep model/planning/postprocessing rules in Rust. Browser code handles presentation,
   file selection, downloads and browser persistence. Do not duplicate CAM formulas in JS.
 - Shared application operations belong in src/commands.rs. Keep the browser adapter thin.
-  This boundary currently covers calculation commands; editing sessions are not yet unified.
+  Calculation commands live there; browser editing/history belongs in src/session.rs.
+  Native desktop history migration is pending; do not claim it is already unified.
 - Return errors for invalid inputs. Keep existing size/resource limits and export preflight.
   Do not weaken checks to make a project generate or export.
 - Never claim a disabled, planned or desktop-only feature works in the browser.

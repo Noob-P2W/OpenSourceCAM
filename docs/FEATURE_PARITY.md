@@ -13,7 +13,7 @@ This is an implementation inventory, not a release promise or certification.
 | Stock simulation | Numeric and rendered | Numeric report |
 | Geometry display | Native solid/mesh renderer | Wireframe |
 | Detailed machine and tool-library editors | Supported | Advanced JSON; basic legacy-tool fields |
-| Editing / undo history | Native implementation | Separate browser history; not a shared session |
+| Editing / undo history | Native implementation | Rust Session; native desktop history migration pending |
 | Autosave / recovery | Native save protections | Local current/previous autosave and draft recovery |
 | Install/offline updates | Native packages | Service worker, version display and update prompt |
 | Controller streaming | Not implemented | Not implemented |

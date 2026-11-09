@@ -11,6 +11,7 @@ pub mod model;
 pub mod operation;
 pub mod post;
 pub mod process;
+pub mod session;
 pub mod stock;
 pub mod surface;
 pub mod tool_library;
