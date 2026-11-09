@@ -149,3 +149,19 @@ The operation inspector also supports duplication and moving operations up/down.
 Incomplete typed autosave drafts can be restored without bypassing machining checks;
 Generate and Download G-code still reject invalid setups. Native desktop edit/history
 migration to this session is not complete.
+
+## Screen-adaptive layout
+
+The layout follows viewport width rather than identifying the device:
+
+- Up to 640 px: bottom navigation switches between Model, Setup, Operations and
+  Project. Only the selected section is shown; Model includes an import shortcut.
+- 641–1200 px: preview stays alongside the selected panel, with section navigation
+  above the workbench.
+- Above 1200 px: import/setup, preview, and operations/project panels form three
+  columns. Controls are shared, not duplicated across separate device interfaces.
+
+Navigation does not alter the project. Rotation/resizing retains edits. Advanced
+JSON and recovery tools are under Project; simulation and planning are disclosed
+under Model. Browser tests cover phone/tablet/desktop widths, rotation, file-picker
+access, editing and horizontal overflow. Real-device ergonomics still need feedback.

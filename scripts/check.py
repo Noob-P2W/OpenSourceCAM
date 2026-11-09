@@ -38,6 +38,7 @@ def web():
     try:
         run('node', 'web/smoke.mjs', env=env)
         run('node', 'web/cad-smoke.mjs', env=env)
+        run('node', 'web/layout-smoke.mjs', env=env)
         run('node', 'web/reliability.mjs', env=env)
     finally:
         server.shutdown()
