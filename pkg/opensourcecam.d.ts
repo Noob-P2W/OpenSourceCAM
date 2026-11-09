@@ -8,7 +8,9 @@ export class WebSession {
     history_checkpoint(): string;
     import_file(name: string, data: Uint8Array, inches: boolean, role: string): string;
     machine_profile(): string;
+    machine_record(): string;
     constructor(data: string);
+    operation_draft(strategy: string): string;
     plan(action: string, options: string): string;
     restore_history(data: string): string;
     run(action: string): string;
@@ -32,6 +34,8 @@ export function catalog(): string;
 
 export function import_model(name: string, data: Uint8Array, inches: boolean): string;
 
+export function machine_records(data: string): string;
+
 export function normalize(data: string): string;
 
 export function operation(): string;
@@ -48,6 +52,7 @@ export interface InitOutput {
     readonly cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly catalog: (a: number) => void;
     readonly import_model: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly machine_records: (a: number, b: number, c: number) => void;
     readonly normalize: (a: number, b: number, c: number) => void;
     readonly operation: (a: number) => void;
     readonly run: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -56,7 +61,9 @@ export interface InitOutput {
     readonly websession_history_checkpoint: (a: number, b: number) => void;
     readonly websession_import_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly websession_machine_profile: (a: number, b: number) => void;
+    readonly websession_machine_record: (a: number, b: number) => void;
     readonly websession_new: (a: number, b: number, c: number) => void;
+    readonly websession_operation_draft: (a: number, b: number, c: number, d: number) => void;
     readonly websession_plan: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly websession_restore_history: (a: number, b: number, c: number, d: number) => void;
     readonly websession_run: (a: number, b: number, c: number, d: number) => void;
