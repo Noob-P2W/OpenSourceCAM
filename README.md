@@ -1,3 +1,15 @@
+
+
+⚠️⚠️⚠️ Author's note:
+Hey, Author here, before the AI slop. This program was made with AI (Codex) so I don't promise anything.
+It's "vibe coded trash", but I needed a CAM software that I could use for my DIY machines preferably free. Something that works with all. This is my attempt at trying to make an open source software for every cnc enthusiast from printer to wire edm to milling. 
+Contributions are welcome and feel free to post issues. I can't guarantee I'll keep updating regularly since I have plenty to do, but I'm trying to test everything with what I have.
+
+Thank you for checking out my project,
+Author 
+
+
+
 # OpenSourceCAM
 
 An open-source CAM workbench for milling experiments, written in Rust.
