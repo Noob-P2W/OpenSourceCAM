@@ -39,23 +39,60 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
         Command::Generate => {
             let path = post::checked_path(p)?;
             Ok(
-                json!({"moves":path.moves.iter().map(|m| json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid})).collect::<Vec<_>>(),"seconds":path.estimated_seconds,"cut":path.cut_length}),
+                json!({"moves":path.moves.iter().map(|m| json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid,"operation":m.operation})).collect::<Vec<_>>(),"seconds":path.estimated_seconds,"cut":path.cut_length}),
             )
         }
         Command::Export => Ok(json!(post::gcode(p)?)),
-        Command::Simulate => {
-            let path = post::checked_path(p)?;
-            let sim = stock::simulate(p, &path, 1.0, 96, &AtomicBool::new(false))?;
-            Ok(json!({"summary":sim.summary,"heights":sim.heights}))
-        }
+        Command::Simulate => simulate_project(p, 1.0, 96),
         Command::PlanStock | Command::PlanSurface => {
-            let plan = if action == Command::PlanSurface {
-                crate::surface::from_stock(p, &Default::default(), &AtomicBool::new(false))?
-            } else {
-                crate::machining::from_stock(p, &Default::default(), &AtomicBool::new(false))?
-            };
+            let plan = plan_project(p, action, &Default::default())?;
             Ok(json!(plan.project))
         }
+    }
+}
+pub fn simulate_project(
+    project: &Project,
+    progress: f64,
+    resolution: usize,
+) -> Result<Value, String> {
+    let path = post::checked_path(project)?;
+    let sim = stock::simulate(
+        project,
+        &path,
+        progress,
+        resolution,
+        &AtomicBool::new(false),
+    )?;
+    Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
+}
+
+pub fn stock_obj(project: &Project, progress: f64, resolution: usize) -> Result<String, String> {
+    let path = post::checked_path(project)?;
+    let simulation = stock::simulate(
+        project,
+        &path,
+        progress,
+        resolution,
+        &AtomicBool::new(false),
+    )?;
+    stock::obj_data(&simulation)
+}
+
+/// The desktop and browser planners accept the same explicit blank allowances.
+pub fn plan_project(
+    project: &Project,
+    command: Command,
+    options: &crate::machining::PlanOptions,
+) -> Result<crate::machining::Plan, String> {
+    cam::validate_setup(project)?;
+    match command {
+        Command::PlanSurface => {
+            crate::surface::from_stock(project, options, &AtomicBool::new(false))
+        }
+        Command::PlanStock => {
+            crate::machining::from_stock(project, options, &AtomicBool::new(false))
+        }
+        _ => Err("Choose a stock or surface planner".into()),
     }
 }
 #[cfg(test)]

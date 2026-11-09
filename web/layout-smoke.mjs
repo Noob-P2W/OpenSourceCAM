@@ -5,11 +5,12 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'
 try{
 for(const [width,height] of [[360,800],[390,844],[641,900],[768,1024],[1024,768],[1440,900]]){
  const context=await browser.newContext({viewport:{width,height}});const page=await context.newPage();await page.goto(process.env.PWA_URL||'http://127.0.0.1:8081');await page.locator('#status').filter({hasText:'Ready'}).waitFor();
+ await page.locator('#resume-workspace').click();
  const file=page.locator('.file-menu > summary');assert.ok((await file.boundingBox()).x<80);await file.click();assert.equal(await page.locator('#save').isVisible(),true);await page.keyboard.press('Escape');assert.equal(await page.locator('#save').isVisible(),false);
  assert.equal(await page.locator('.pane-nav').isVisible(),true);
  assert.equal(await page.locator('[data-panel=setup]').isVisible(),false);
  await section(page,'setup');assert.equal(await page.getByLabel('Stock X · mm',{exact:true}).isVisible(),true);assert.equal(await page.locator('#fit-stock').isVisible(),true);
- assert.equal(await page.locator('.viewer').isVisible(),width>640);
+ assert.equal(await page.locator('.viewer').isVisible(),true);
  await section(page,'operations');await page.getByRole('button',{name:'+ Add operation',exact:true}).click();await page.waitForFunction(()=>document.getElementById('count').textContent==='3');assert.equal(await page.getByLabel('depth · mm',{exact:true}).isVisible(),true);
  assert.equal(await page.locator('#recognize').isVisible(),true);assert.equal(await page.locator('#export').isVisible(),true);
  await page.locator('#generate').click();await page.locator('#status').filter({hasText:'Paths generated'}).waitFor();

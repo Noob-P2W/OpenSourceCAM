@@ -6,6 +6,17 @@ use crate::{
 use std::sync::atomic::AtomicBool;
 use wasm_bindgen::prelude::*;
 
+/// Menu and editor metadata comes from the same definitions as the desktop UI.
+#[wasm_bindgen]
+pub fn catalog() -> String {
+    use crate::{process::Process, tool_library::ToolKind};
+    let processes: Vec<_> = Process::ALL.iter().map(|p| serde_json::json!({"id":p,"label":p.label(),"description":p.description(),"ready":p.supports_toolpaths(),"planned":p.planned_operations()})).collect();
+    let tools: Vec<_> = ToolKind::ALL.iter().map(|kind| {
+        let parameters = |specs: Vec<crate::tool_library::Parameter>| -> Vec<_> { specs.iter().map(|p| serde_json::json!({"key":p.key,"label":p.label,"unit":p.unit,"min":p.min,"max":p.max})).collect() };
+        serde_json::json!({"id":kind,"label":kind.label(),"group":kind.group(),"process":kind.process(),"geometry":parameters(kind.geometry()),"cutting":parameters(kind.cutting())})
+    }).collect();
+    serde_json::json!({"processes":processes,"tools":tools,"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
+}
 #[wasm_bindgen]
 pub fn sample() -> String {
     serde_json::to_string(&Project::default()).unwrap()
@@ -147,9 +158,7 @@ impl WebSession {
         )
         .map_err(|e| JsValue::from_str(&e))?;
         let edit = match role {
-            "part" => crate::session::Edit::Replace {
-                project: Box::new(Project::from_part(part).map_err(|e| JsValue::from_str(&e))?),
-            },
+            "part" => crate::session::Edit::ImportPart { part },
             "machine" | "vise" | "fixture" => crate::session::Edit::AddWorkspace {
                 part,
                 model_kind: serde_json::from_str(&format!("\"{role}\""))
@@ -167,6 +176,66 @@ impl WebSession {
         let edit = serde_json::from_str(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
         self.inner.apply(edit).map_err(|e| JsValue::from_str(&e))?;
         self.view()
+    }
+    pub fn plan(&mut self, action: &str, options: &str) -> Result<String, JsValue> {
+        let command = action.parse().map_err(|e: String| JsValue::from_str(&e))?;
+        let options =
+            serde_json::from_str(options).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let plan = crate::commands::plan_project(self.inner.project(), command, &options)
+            .map_err(|e| JsValue::from_str(&e))?;
+        self.inner
+            .apply(crate::session::Edit::Replace {
+                project: Box::new(plan.project),
+            })
+            .map_err(|e| JsValue::from_str(&e))?;
+        Ok(format!(
+            "{{\"view\":{},\"notes\":{}}}",
+            self.view()?,
+            serde_json::to_string(&plan.notes).map_err(|e| JsValue::from_str(&e.to_string()))?
+        ))
+    }
+    pub fn tool_preview(&self, id: u64) -> Result<String, JsValue> {
+        let library = &self.inner.project().tool_library;
+        let tool = library.get(id).map_err(|e| JsValue::from_str(&e))?;
+        let mut meshes = [
+            crate::import::Mesh {
+                vertices: Vec::new(),
+                triangles: Vec::new(),
+            },
+            crate::import::Mesh {
+                vertices: Vec::new(),
+                triangles: Vec::new(),
+            },
+        ];
+        for (vertices, cutting) in crate::tool_preview::assembly(tool, library) {
+            let mesh = &mut meshes[usize::from(cutting)];
+            let base = mesh.vertices.len() as u32;
+            mesh.vertices.extend(vertices);
+            mesh.triangles.push([base, base + 1, base + 2]);
+        }
+        serde_json::to_string(&meshes).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn simulate(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
+        crate::commands::simulate_project(self.inner.project(), progress, resolution)
+            .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn stock_obj(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
+        crate::commands::stock_obj(self.inner.project(), progress, resolution)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn machine_profile(&self) -> Result<String, JsValue> {
+        crate::machine::SetupProfile::from_project(self.inner.project())
+            .and_then(|profile| serde_json::to_string(&profile).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn tool_library(&self) -> Result<String, JsValue> {
+        self.inner
+            .project()
+            .tool_library
+            .validate()
+            .map_err(|e| JsValue::from_str(&e))?;
+        Ok(serde_json::json!({"format_version":1,"units":"mm","library":self.inner.project().tool_library}).to_string())
     }
     pub fn run(&self, action: &str) -> Result<String, JsValue> {
         action

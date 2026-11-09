@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 out = ROOT / 'dist'
 site = out / 'pwa'
 site.mkdir(parents=True, exist_ok=True)
-files = ['index.html', 'style.css', 'app.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
+files = ['index.html', 'style.css', 'app.js', 'viewport.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
          'cad-worker.js', 'icon.svg', 'icon-192.png', 'icon-512.png']
 if not (ROOT / 'web/pkg/opensourcecam_bg.wasm').is_file():
     raise SystemExit('Run scripts/build-web.sh first.')

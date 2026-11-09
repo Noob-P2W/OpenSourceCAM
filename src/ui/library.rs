@@ -1137,39 +1137,6 @@ fn parameter(ui: &mut egui::Ui, spec: Parameter, value: &mut f64, inches: bool) 
     });
 }
 
-fn merge(target: &mut ToolLibrary, source: ToolLibrary) -> Result<(), String> {
-    let mut candidate = target.clone();
-    let mut remap = std::collections::BTreeMap::new();
-    for old in &source.tools {
-        let id = candidate.next_id();
-        remap.insert(old.id, id);
-        let mut tool = old.clone();
-        tool.id = id;
-        tool.post.number = candidate.next_number_for(&tool.uses);
-        tool.post.pocket = None;
-        tool.post.length_offset = None;
-        tool.post.diameter_offset = None;
-        tool.post.turret = 0;
-        tool.post.turning_offset = None;
-        tool.holder = None;
-        candidate.tools.push(tool);
-    }
-    for old in &source.tools {
-        if let Some(holder) = old.holder {
-            let id = remap[&old.id];
-            candidate
-                .tools
-                .iter_mut()
-                .find(|t| t.id == id)
-                .unwrap()
-                .holder = Some(remap[&holder]);
-        }
-    }
-    candidate.validate()?;
-    *target = candidate;
-    Ok(())
-}
-
 fn fixed_region(ui: &mut egui::Ui, size: Vec2, body: impl FnOnce(&mut egui::Ui)) {
     let (rect, _) = ui.allocate_exact_size(size.max(Vec2::splat(100.0)), egui::Sense::hover());
     let mut child = ui.new_child(
@@ -1186,35 +1153,7 @@ fn import_tools(
     source: ToolLibrary,
     replace: bool,
 ) -> Result<String, String> {
-    source.validate()?;
-    if source.tools.is_empty() {
-        return Err("The tool list contains no tools".into());
-    }
-    let active = source
-        .tools
-        .iter()
-        .find(|t| t.uses.contains(&project.process) && t.kind != ToolKind::Holder)
-        .map(|t| t.id);
-    if replace {
-        if !project.operations.is_empty() {
-            return Err(
-                "A library used by operations cannot be replaced; add tools instead".into(),
-            );
-        }
-        if active.is_none() {
-            return Err(
-                "The file has no applicable tool for this work mode; add tools instead".into(),
-            );
-        }
-        project.tool_library = source;
-        project.active_tool = active;
-        project.active_preset =
-            active.and_then(|id| project.tool_library.get(id).ok().map(|t| t.default_preset));
-        Ok("Library opened with its tool numbers and ATC bindings. Match them to the selected machine's controller table.".into())
-    } else {
-        merge(&mut project.tool_library, source)?;
-        Ok("Tools added with local numbers. Device pocket/offset bindings were cleared on the imported copies; existing job tools were preserved.".into())
-    }
+    opensourcecam::tool_library::import_into(project, source, replace)
 }
 
 fn feed_label(tool: &LibraryTool, preset: &opensourcecam::tool_library::CuttingPreset) -> String {

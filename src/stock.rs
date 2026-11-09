@@ -8,7 +8,6 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    io::Write,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -426,17 +425,27 @@ fn swept_height(
     Some(a.z + dz * t + profile(d))
 }
 
+fn write_obj(mesh: &Mesh, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    writeln!(out, "# OpenSourceCAM sampled remaining stock, millimetres")?;
+    for v in &mesh.vertices {
+        writeln!(out, "v {} {} {}", v[0], v[1], v[2])?;
+    }
+    for t in &mesh.triangles {
+        writeln!(out, "f {} {} {}", t[0] + 1, t[1] + 1, t[2] + 1)?;
+    }
+    out.flush()
+}
+pub fn obj_data(simulation: &Simulation) -> Result<String, String> {
+    let mut data = Vec::new();
+    write_obj(&simulation.geometry.mesh, &mut data).map_err(|e| e.to_string())?;
+    String::from_utf8(data).map_err(|e| e.to_string())
+}
 pub fn export_obj(simulation: &Simulation, file: &Path) -> Result<(), String> {
     crate::files::write_atomic_with(file, |file| {
-        let mut out = std::io::BufWriter::new(file);
-        writeln!(out, "# OpenSourceCAM sampled remaining stock, millimetres")?;
-        for v in &simulation.geometry.mesh.vertices {
-            writeln!(out, "v {} {} {}", v[0], v[1], v[2])?;
-        }
-        for t in &simulation.geometry.mesh.triangles {
-            writeln!(out, "f {} {} {}", t[0] + 1, t[1] + 1, t[2] + 1)?;
-        }
-        out.flush()
+        write_obj(
+            &simulation.geometry.mesh,
+            &mut std::io::BufWriter::new(file),
+        )
     })
     .map_err(|e| e.to_string())
 }

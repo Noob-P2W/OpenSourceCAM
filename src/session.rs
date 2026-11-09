@@ -13,6 +13,27 @@ pub enum Edit {
         project: Box<Project>,
     },
     AddOperation,
+    AddStrategy {
+        strategy: crate::model::Strategy,
+    },
+    NewProject {
+        process: crate::process::Process,
+    },
+    ImportPart {
+        part: crate::import::Part,
+    },
+    AddLibraryTool {
+        tool_kind: crate::tool_library::ToolKind,
+    },
+    DuplicateTool {
+        id: u64,
+    },
+    RemoveTool {
+        id: u64,
+    },
+    AddPreset {
+        tool_id: u64,
+    },
     FitStock {
         margin: f64,
     },
@@ -21,6 +42,14 @@ pub enum Edit {
     },
     ImportTools {
         data: String,
+    },
+    ImportLibrary {
+        data: String,
+        replace: bool,
+    },
+    RemovePreset {
+        tool_id: u64,
+        preset_id: u64,
     },
     InitializeTools,
     AddWorkspace {
@@ -165,6 +194,111 @@ impl Session {
         let mut candidate = self.project.clone();
         match edit {
             Edit::Replace { project } => candidate = *project,
+            Edit::NewProject { process } => candidate = Project::new_for_process(process),
+            Edit::ImportPart { part } => {
+                let fitted = Project::from_part(part)?;
+                let mut imported = Project::new_for_process(candidate.process);
+                imported.name = fitted.name;
+                imported.stock = fitted.stock;
+                imported.part = fitted.part;
+                candidate = imported;
+            }
+            Edit::AddLibraryTool { tool_kind } => {
+                let library = &mut candidate.tool_library;
+                let tool = crate::tool_library::LibraryTool::new(
+                    library.next_id(),
+                    library.next_number(tool_kind.process()),
+                    tool_kind,
+                );
+                let id = tool.id;
+                library.tools.push(tool);
+                library.validate()?;
+                if tool_kind.process() == candidate.process
+                    && !matches!(
+                        tool_kind,
+                        crate::tool_library::ToolKind::Holder
+                            | crate::tool_library::ToolKind::Probe
+                    )
+                {
+                    candidate.active_tool = Some(id);
+                    candidate.active_preset = Some(1);
+                }
+            }
+            Edit::DuplicateTool { id } => {
+                let library = &mut candidate.tool_library;
+                let mut tool = library.get(id)?.clone();
+                tool.id = library.next_id();
+                tool.post.number = library.next_number_for(&tool.uses);
+                tool.name = format!("{} copy", tool.name);
+                tool.post.pocket = None;
+                tool.post.length_offset = None;
+                tool.post.diameter_offset = None;
+                tool.post.turning_offset = None;
+                let id = tool.id;
+                let preset = tool.default_preset;
+                let compatible = tool.uses.contains(&candidate.process)
+                    && !matches!(
+                        tool.kind,
+                        crate::tool_library::ToolKind::Holder
+                            | crate::tool_library::ToolKind::Probe
+                    );
+                library.tools.push(tool);
+                library.validate()?;
+                if compatible {
+                    candidate.active_tool = Some(id);
+                    candidate.active_preset = Some(preset);
+                }
+            }
+            Edit::RemoveTool { id } => {
+                candidate.tool_library.get(id)?;
+                if candidate.operations.iter().any(|op| {
+                    op.tool_id == Some(id)
+                        || (op.tool_id.is_none() && candidate.active_tool == Some(id))
+                }) || candidate
+                    .tool_library
+                    .tools
+                    .iter()
+                    .any(|tool| tool.holder == Some(id))
+                {
+                    return Err("This tool is assigned to an operation or used as a holder; remove those assignments first".into());
+                }
+                candidate.tool_library.tools.retain(|tool| tool.id != id);
+                if candidate.active_tool == Some(id) {
+                    candidate.active_tool = None;
+                    candidate.active_preset = None;
+                }
+            }
+            Edit::AddPreset { tool_id } => {
+                let tool = candidate
+                    .tool_library
+                    .tools
+                    .iter_mut()
+                    .find(|tool| tool.id == tool_id)
+                    .ok_or("Tool not found")?;
+                let mut preset = tool.preset(None)?.clone();
+                preset.id = tool.presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                preset.name = format!("{} copy", preset.name);
+                let id = preset.id;
+                let compatible = tool.uses.contains(&candidate.process)
+                    && !matches!(
+                        tool.kind,
+                        crate::tool_library::ToolKind::Holder
+                            | crate::tool_library::ToolKind::Probe
+                    );
+                tool.presets.push(preset);
+                candidate.tool_library.validate()?;
+                if compatible {
+                    candidate.active_tool = Some(tool_id);
+                    candidate.active_preset = Some(id);
+                }
+            }
+            Edit::AddStrategy { strategy } => candidate.operations.push(Operation {
+                strategy,
+                name: strategy.label().into(),
+                tool_id: candidate.active_tool,
+                preset_id: candidate.active_preset,
+                ..Operation::default()
+            }),
             Edit::AddOperation => candidate.operations.push(Operation {
                 tool_id: candidate.active_tool,
                 preset_id: candidate.active_preset,
@@ -210,6 +344,38 @@ impl Session {
                     candidate.tool = setup.tool;
                 } else {
                     profile.apply(&mut candidate)?;
+                }
+            }
+            Edit::ImportLibrary { data, replace } => {
+                let library = crate::tool_library::ToolLibrary::from_json(data.as_bytes())?;
+                crate::tool_library::import_into(&mut candidate, library, replace)?;
+            }
+            Edit::RemovePreset { tool_id, preset_id } => {
+                let tool = candidate.tool_library.get(tool_id)?;
+                tool.preset(Some(preset_id))?;
+                if tool.presets.len() == 1 {
+                    return Err("Keep at least one cutting preset".into());
+                }
+                if candidate.operations.iter().any(|op| {
+                    op.tool_id.or(candidate.active_tool) == Some(tool_id)
+                        && op.preset_id.unwrap_or(tool.default_preset) == preset_id
+                }) {
+                    return Err("This preset is assigned to an operation; choose another operation preset first".into());
+                }
+                let tool = candidate
+                    .tool_library
+                    .tools
+                    .iter_mut()
+                    .find(|t| t.id == tool_id)
+                    .ok_or("Tool not found")?;
+                tool.presets.retain(|preset| preset.id != preset_id);
+                if tool.default_preset == preset_id {
+                    tool.default_preset = tool.presets[0].id;
+                }
+                if candidate.active_tool == Some(tool_id)
+                    && candidate.active_preset == Some(preset_id)
+                {
+                    candidate.active_preset = Some(tool.default_preset);
                 }
             }
             Edit::ImportTools { data } => {

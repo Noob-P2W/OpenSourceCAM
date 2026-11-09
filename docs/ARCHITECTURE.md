@@ -12,7 +12,7 @@ multi-crate layer graph yet. The browser uses a Rust editing session; the native
 | Editing session | session | Atomic draft replacement, operation management, bounded undo/redo |
 | Native adapter | main, ui, mesh_view | CLI, desktop editing and graphics |
 | Browser adapter | web.rs, web/worker.js | WASM transport to shared application commands |
-| Browser presentation | web/app.js, index.html, style.css | Touch-oriented controls, workspace persistence, file downloads |
+| Browser presentation | web/app.js, viewport.js, index.html, style.css | Touch-oriented controls, workspace persistence, file downloads |
 
 Both `--command` in the CLI and the browser dispatch through `commands::execute`.
 Command ids are generate, export, simulate, recognize, plan and surface. For example:
@@ -84,6 +84,25 @@ without an intermediate serde_json::Value representation of the whole mesh.
 The page caches compact project JSON per committed revision; the advanced editor
 is populated lazily for large projects. Canvas redraws are coalesced, geometry
 paths cached/batched, backing buffers bounded to 4 million pixels and DPR 2, and
-wireframe preview limited to 12,000 sampled triangles across visible models.
+main workpiece solids rendered at full resolution in WebGL. Wireframe/software
+fallback previews sample large meshes; reference model previews retain the
+12,000-triangle worker budget. The camera fits the complete stock/part volume,
+including negative Z; orbit, zoom and pan are display state only.
 This limit is presentation-only and is disclosed in the preview; full geometry
 remains available to validation, planning, simulation and project downloads.
+
+## Restored browser workflow
+
+Process and tool editor catalogs come from Rust definitions, including all nine
+processes and 37 library kinds. Shared Session transactions create process-specific
+projects, retain process identity when importing a part, add typed strategies and
+manage library tools/presets. Planned motion engines remain disabled. Planner
+options deserialize into machining::PlanOptions; commands::plan_project dispatches
+to the native planners. Browser planning commits inside the worker and returns
+notes with the new Session view, avoiding a large project round trip.
+
+Illustrative tool/holder geometry was extracted from the native library renderer
+into tool_preview::assembly. Both UIs consume that helper; it is not collision
+geometry. Browser stock simulation renders the actual mesh from stock::simulate,
+with a display toggle and sampling/detail control. Operation path indices support
+selected-operation filtering without changing generated/postprocessed paths.

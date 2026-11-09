@@ -27,6 +27,8 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
+    for script in ('app.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+        run('node', '--check', 'web/' + script)
     run('cargo', 'fmt', '--all', '--', '--check')
     run('cargo', 'clippy', '--locked', '--no-default-features', '--features', 'web', '--all-targets', '--', '-D', 'warnings')
     run('cargo', 'test', '--locked', '--no-default-features', '--features', 'web')
@@ -40,6 +42,8 @@ def web():
         run('node', 'web/cad-smoke.mjs', env=env)
         run('node', 'web/layout-smoke.mjs', env=env)
         run('node', 'web/workflow-smoke.mjs', env=env)
+        run('node', 'web/viewport-smoke.mjs', env=env)
+        run('node', 'web/editor-smoke.mjs', env=env)
         run('node', 'web/reliability.mjs', env=env)
         run('node', 'web/performance-smoke.mjs', env=env)
     finally:

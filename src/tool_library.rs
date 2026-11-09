@@ -1,6 +1,6 @@
 //! Local, process-independent tool definitions. All dimensions are stored in mm.
 use crate::{
-    model::{Strategy, Tool},
+    model::{Project, Strategy, Tool},
     post::Coolant,
     process::Process,
 };
@@ -1226,4 +1226,73 @@ struct LibraryFile {
     format_version: u32,
     units: String,
     library: ToolLibrary,
+}
+
+fn merge(target: &mut ToolLibrary, source: ToolLibrary) -> Result<(), String> {
+    let mut candidate = target.clone();
+    let mut remap = std::collections::BTreeMap::new();
+    for old in &source.tools {
+        let id = candidate.next_id();
+        remap.insert(old.id, id);
+        let mut tool = old.clone();
+        tool.id = id;
+        tool.post.number = candidate.next_number_for(&tool.uses);
+        tool.post.pocket = None;
+        tool.post.length_offset = None;
+        tool.post.diameter_offset = None;
+        tool.post.turret = 0;
+        tool.post.turning_offset = None;
+        tool.holder = None;
+        candidate.tools.push(tool);
+    }
+    for old in &source.tools {
+        if let Some(holder) = old.holder {
+            let id = remap[&old.id];
+            candidate
+                .tools
+                .iter_mut()
+                .find(|t| t.id == id)
+                .unwrap()
+                .holder = Some(remap[&holder]);
+        }
+    }
+    candidate.validate()?;
+    *target = candidate;
+    Ok(())
+}
+
+pub fn import_into(
+    project: &mut Project,
+    source: ToolLibrary,
+    replace: bool,
+) -> Result<String, String> {
+    source.validate()?;
+    if source.tools.is_empty() {
+        return Err("The tool list contains no tools".into());
+    }
+    let active = source
+        .tools
+        .iter()
+        .find(|t| t.uses.contains(&project.process) && t.kind != ToolKind::Holder)
+        .map(|t| t.id);
+    if replace {
+        if !project.operations.is_empty() {
+            return Err(
+                "A library used by operations cannot be replaced; add tools instead".into(),
+            );
+        }
+        if active.is_none() {
+            return Err(
+                "The file has no applicable tool for this work mode; add tools instead".into(),
+            );
+        }
+        project.tool_library = source;
+        project.active_tool = active;
+        project.active_preset =
+            active.and_then(|id| project.tool_library.get(id).ok().map(|t| t.default_preset));
+        Ok("Library opened with its tool numbers and ATC bindings. Match them to the selected machine's controller table.".into())
+    } else {
+        merge(&mut project.tool_library, source)?;
+        Ok("Tools added with local numbers. Device pocket/offset bindings were cleared on the imported copies; existing job tools were preserved.".into())
+    }
 }

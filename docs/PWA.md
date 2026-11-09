@@ -30,7 +30,7 @@ Generated `web/pkg` files are ignored and must be included in deployments.
 
 ## Try it on a phone or tablet
 
-Host the contents of `web` (excluding node_modules and test files, including pkg)
+Host the generated contents of `dist/pwa`
 on any static HTTPS host. Relative paths support a repository subdirectory.
 No backend or credentials are needed. Plain HTTP on a LAN address will not enable
 service workers or PWA installation; use HTTPS for real-device testing.
@@ -45,18 +45,34 @@ storage retention depend on browser support and available device storage.
 
 ## Available workflow
 
-- Start a blank milling project or tray demo; open native `.cam.json` projects.
-- Edit stock, legacy tool settings, postprocessor and operations.
-- Save/download projects; the last changed workspace is restored from local storage.
-  Download backups: browser storage can be cleared or evicted.
-- Import STEP/IGES (file units converted to mm), or STL/OBJ with explicit source units. Each creates a fitted new project.
-- Generate checked paths, inspect top/isometric views and scrub path playback.
-- Plan from stock / 3D surfaces using the existing supported geometry restrictions.
-- Run sampled stock-removal simulation and inspect the numeric report.
-- Download G-code generated from current data; invalid paths block export.
-- Edit other shared settings through the advanced JSON editor. Library-backed
-  projects keep their tool assignments; the basic tool fields edit the legacy
-  tool only. Edit the library through JSON or the native app.
+- Choose among the nine desktop processes on the opening page; Milling has the
+  implemented motion engine. Other processes support reference models and saving.
+- Follow Import → Setup → Operations on phone, tablet or desktop. File stays at
+  the upper left; Processes returns to the opening page without replacing a job.
+- Import STEP/IGES, STL or OBJ. A part creates a fitted project in the chosen
+  process. Vise, fixture and CNC reference models join its workspace.
+- Inspect a full-resolution shaded workpiece and stock box, orbit, pinch/scroll
+  zoom, pan, choose top/front/isometric, or Fit view. Software fallback is sampled.
+- Fit stock in Setup, inspect XYZ dimensions and placement, configure the CNC and
+  workholding, select tools/presets and edit detailed cutting/machine settings.
+- Manage all 37 tool definition kinds locally: search, create, edit dimensions,
+  shaft/holder, cutting presets and post settings; duplicate or remove unassigned
+  tools; save tool libraries and CNC profiles. Assembly previews use the native
+  illustrative geometry helper.
+- In Operations use **Plan 3D surface** for accessible upper surfaces, **Plan 2.5D
+  from stock** for the supported complete-part shapes, or **Recognize features**
+  for supported holes/pockets. Planning options include XY/top/backing allowances,
+  explicit operation replacement and the desktop 2.5D choices. Notes remain visible.
+- Add any implemented manual strategy; edit all operation settings, review
+  geometry links, assign tools/presets, reorder, duplicate, enable/disable and undo.
+- Generate checked paths, play/scrub the sequence and optionally filter its display
+  to the selected operation. Render sampled stock removal at the playback progress
+  and inspect the numeric report. Preview checked NC text and download G-code.
+- Download/reopen native project JSON, restore local drafts and use offline updates.
+  Browser storage can be evicted: keep downloaded backups of important work.
+
+See FEATURE_PARITY.md for remaining native UI differences. None of these controls
+adds machining for interior/undercut surfaces or enables planned process engines.
 
 ## Current limits
 
@@ -67,11 +83,9 @@ Inputs are limited to 32 MiB, output to 100,000 triangles / 300,000 vertices; an
 import is stopped after 120 seconds. Very large CAD can still exceed mobile memory. CAD source plus mesh can exceed
 local-storage quota: download the project if the app reports that autosave is unavailable.
 A failed import leaves the current project intact. CAD import does not imply all
-shapes are supported by automatic machining strategies. The browser
-viewer currently shows model wireframe and toolpaths, rather than the native
-GPU solid renderer or rendered cut-stock simulation. Detailed machine/library
-editors, gesture navigation, native undo/redo, and full native UI parity remain
-future work. Large models/plans can consume substantial mobile memory; work runs
+shapes are supported by automatic machining strategies. The browser now has depth-tested solids, camera gestures, rendered sampled
+stock and structured machine/library editors. Full native UI parity is still
+tracked in FEATURE_PARITY.md; synchronous WASM jobs currently run to completion. Large models/plans can consume substantial mobile memory; work runs
 in a worker so the page remains responsive. Direct controller communication is
 out of scope.
 
@@ -168,9 +182,9 @@ All screen sizes use the same three workflow steps:
    frame. Reference geometry is previewed using the shared Rust transforms.
    Select a library tool and cutting preset, or edit the legacy tool and convert
    it to a library tool. Imported profile choices last this browser session;
-   the applied CNC settings are saved in the project. Tool libraries cannot replace
-   an existing assigned library through this importer. Detailed changer/kinematic
-   configuration still requires native editors or advanced JSON.
+   the applied CNC settings are saved in the project. Tool imports merge copies
+   using the desktop rules; explicit replacement is allowed only without existing
+   operations. Machine configuration and changer settings have structured editors.
 3. **Operations:** recognize supported features, review candidate holes/pockets,
    add disabled feature operations, or use stock/surface planning. New manual
    operations retain the Setup tool/preset, and each operation exposes its own
@@ -186,7 +200,7 @@ CNC profiles are definitions, not controller connections. Verify actual machine
 specifications. Vise/fixture meshes do not implement articulated machine simulation.
 
 On phones (up to 640 px), the three steps use bottom navigation. The preview is
-shown in Operations and can be toggled with Preview in Import/Setup. On larger
+shown in every step and can be hidden explicitly on small screens. On larger
 screens, the preview stays beside the selected step. Rotation retains edits.
 Tests cover stock fitting in tablet Setup, CNC profile application, vise placement,
 tool/preset selection, feature operations, file-menu placement, and screen overflow.
@@ -194,8 +208,9 @@ tool/preset selection, feature operations, file-menu placement, and screen overf
 ## Large STL handling
 
 Identical STL vertices are shared exactly, reducing memory without changing faces.
-Large models use a labeled, lightweight wireframe preview; full mesh data is kept
-for CAM and saved projects. Redraws use cached/batched paths and a bounded canvas.
+Full-resolution workpiece solids render in WebGL. Wireframe/software fallback
+previews sample large meshes; full mesh data is kept for CAM and saved projects.
+GPU scene buffers are replaced after edits, and backing buffers remain bounded.
 Large project JSON is loaded into the advanced editor only when explicitly opened.
 Autosave uses compact JSON, and failure to refresh the previous backup no longer
 prevents saving the current project. Keep downloaded backups, especially if the

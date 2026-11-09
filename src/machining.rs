@@ -103,7 +103,8 @@ pub fn validate_links(project: &Project) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct PlanOptions {
     pub xy_margin: f64,
     pub top_allowance: f64,

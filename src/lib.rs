@@ -15,6 +15,7 @@ pub mod session;
 pub mod stock;
 pub mod surface;
 pub mod tool_library;
+pub mod tool_preview;
 pub mod view;
 pub mod workspace;
 
