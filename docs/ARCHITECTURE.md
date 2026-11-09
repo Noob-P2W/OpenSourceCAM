@@ -15,7 +15,7 @@ multi-crate layer graph yet. The browser uses a Rust editing session; the native
 | Browser presentation | web/app.js, index.html, style.css | Touch-oriented controls, workspace persistence, file downloads |
 
 Both `--command` in the CLI and the browser dispatch through `commands::execute`.
-Command ids are generate, export, simulate, plan and surface. For example:
+Command ids are generate, export, simulate, recognize, plan and surface. For example:
 
 ```sh
 cargo run --locked --no-default-features -- --command generate examples/tray.cam.json
@@ -62,3 +62,9 @@ remain separate protections. A typed draft may temporarily contain invalid machi
 values so it can be repaired; generation/export still use the full existing validation.
 The browser keeps only a presentation copy of the committed session view. Its worker
 owns the session and calculates against that state; JavaScript has no undo stack.
+
+Setup actions (stock fitting, CNC profile application, tool-library import and
+reference-model insertion) and candidate-feature operation creation are Session
+transactions. Recognition and feature-to-operation conversion use shared Rust
+functions. The browser renders reference meshes from Rust-transformed vertices;
+no independent fixture coordinate calculation is used in JavaScript.

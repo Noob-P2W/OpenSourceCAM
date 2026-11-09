@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Generate,
+    Recognize,
     Export,
     Simulate,
     PlanStock,
@@ -15,6 +16,7 @@ impl std::str::FromStr for Command {
     type Err = String;
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         match id {
+            "recognize" => Ok(Self::Recognize),
             "generate" => Ok(Self::Generate),
             "export" => Ok(Self::Export),
             "simulate" => Ok(Self::Simulate),
@@ -27,6 +29,9 @@ impl std::str::FromStr for Command {
 pub fn execute(data: &str, action: Command) -> Result<Value, String> {
     let p = Project::from_json(data.as_bytes())?;
     match action {
+        Command::Recognize => Ok(json!(crate::features::recognize(
+            p.part.as_ref().ok_or("Import a part first")?
+        )?)),
         Command::Generate => {
             let path = post::checked_path(&p)?;
             Ok(

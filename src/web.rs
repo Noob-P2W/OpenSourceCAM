@@ -67,7 +67,13 @@ impl WebSession {
         })
     }
     pub fn view(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.inner.view()).map_err(|e| JsValue::from_str(&e.to_string()))
+        let preview: Vec<_>=self.inner.project().workspace.iter().filter(|m|m.part.visible).map(|m|serde_json::json!({
+            "kind":m.kind,"vertices":m.part.geometry.mesh.vertices.iter().map(|p|m.point(*p,self.inner.project().machine.as_ref())).collect::<Vec<_>>(),"triangles":m.part.geometry.mesh.triangles
+        })).collect();
+        let mut value = serde_json::to_value(self.inner.view())
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        value["workspace_preview"] = serde_json::json!(preview);
+        serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
     }
     pub fn edit(&mut self, data: &str) -> Result<String, JsValue> {
         if data.len() as u64 > crate::model::MAX_PROJECT_BYTES {

@@ -150,18 +150,43 @@ Incomplete typed autosave drafts can be restored without bypassing machining che
 Generate and Download G-code still reject invalid setups. Native desktop edit/history
 migration to this session is not complete.
 
-## Screen-adaptive layout
+## Import → Setup → Operations
 
-The layout follows viewport width rather than identifying the device:
+The upper-left **File** menu holds New, Open, Save, the demo, backups, recovery,
+and the advanced JSON editor. It closes on Escape or an outside click.
 
-- Up to 640 px: bottom navigation switches between Model, Setup, Operations and
-  Project. Only the selected section is shown; Model includes an import shortcut.
-- 641–1200 px: preview stays alongside the selected panel, with section navigation
-  above the workbench.
-- Above 1200 px: import/setup, preview, and operations/project panels form three
-  columns. Controls are shared, not duplicated across separate device interfaces.
+All screen sizes use the same three workflow steps:
 
-Navigation does not alter the project. Rotation/resizing retains edits. Advanced
-JSON and recovery tools are under Project; simulation and planning are disclosed
-under Model. Browser tests cover phone/tablet/desktop widths, rotation, file-picker
-access, editing and horizontal overflow. Real-device ergonomics still need feedback.
+1. **Import:** load a part, CNC reference mesh, vise or fixture model. Part import
+   starts a fitted project; reference meshes are added without replacing the part.
+   Import `.cam-machine.json` CNC profiles and `.cam-tools.json` tool libraries here.
+   Use Continue to Setup once the required files are in.
+2. **Setup:** fit stock to the part with an XY margin, edit stock dimensions and
+   part offsets, select an imported CNC profile, and review travel limits, work
+   origin, feed/spindle limits, reach checks, postprocessor, coolant and work offset.
+   Position vise/fixture/reference meshes using translation, rotation and coordinate
+   frame. Reference geometry is previewed using the shared Rust transforms.
+   Select a library tool and cutting preset, or edit the legacy tool and convert
+   it to a library tool. Imported profile choices last this browser session;
+   the applied CNC settings are saved in the project. Tool libraries cannot replace
+   an existing assigned library through this importer. Detailed changer/kinematic
+   configuration still requires native editors or advanced JSON.
+3. **Operations:** recognize supported features, review candidate holes/pockets,
+   add disabled feature operations, or use stock/surface planning. New manual
+   operations retain the Setup tool/preset, and each operation exposes its own
+   tool/preset assignment. Enable reviewed
+   operations, generate paths, simulate stock, inspect playback and download G-code.
+   Recognition uses the existing conservative Rust implementation; it does not
+   recognize arbitrary manufacturing features or guarantee machinability.
+
+Fit stock aligns the part top to Z=0, applies the XY margin and sets thickness to
+part height (0.001 mm minimum). Existing operations remain; review them and fixture
+positions after refitting. Add backing/blank allowances manually where required.
+CNC profiles are definitions, not controller connections. Verify actual machine
+specifications. Vise/fixture meshes do not implement articulated machine simulation.
+
+On phones (up to 640 px), the three steps use bottom navigation. The preview is
+shown in Operations and can be toggled with Preview in Import/Setup. On larger
+screens, the preview stays beside the selected step. Rotation retains edits.
+Tests cover stock fitting in tablet Setup, CNC profile application, vise placement,
+tool/preset selection, feature operations, file-menu placement, and screen overflow.

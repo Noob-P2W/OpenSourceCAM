@@ -1203,7 +1203,13 @@ impl ToolLibrary {
         if data.len() > 8 * 1024 * 1024 {
             return Err("Tool library exceeds 8 MiB".into());
         }
-        let file: LibraryFile = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+        Self::from_json(&data)
+    }
+    pub fn from_json(data: &[u8]) -> Result<Self, String> {
+        if data.len() > 8 * 1024 * 1024 {
+            return Err("Tool library exceeds 8 MiB".into());
+        }
+        let file: LibraryFile = serde_json::from_slice(data).map_err(|e| e.to_string())?;
         if file.format_version != 1 {
             return Err("Unsupported tool-library version".into());
         }
