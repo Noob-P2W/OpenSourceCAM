@@ -7,7 +7,7 @@ function historyButtons(){$('undo').disabled=busy||!canUndo;$('redo').disabled=b
 function applyView(view){project=view.project;canUndo=view.can_undo;canRedo=view.can_redo}
 function persist(){try{const data=JSON.stringify(project);const previous=localStorage.getItem('oc-project');if(previous&&previous!==data)localStorage.setItem('oc-backup',previous);localStorage.setItem('oc-project',data);autosaved=true;$('saved').textContent='Saved on this device';return true}catch{autosaved=false;$('saved').textContent='Not saved — download a backup';status('Browser storage unavailable or full. Download a backup before closing.',true);return false}}
 async function sessionEdit(edit){applyView(await call('session-edit',{edit}));if(edit.kind==='move_operation')selected=edit.target;if(edit.kind==='duplicate_operation')selected=edit.index+1;await changed(false);render()}
-worker.onmessage=({data})=>{const p=pending.get(data.id);if(!p)return;pending.delete(data.id);data.error?p.reject(Error(data.error)):p.resolve(data.value)};
+worker.onmessage=({data})=>{const p=pending.get(data.id);if(!p)return;if(data.progress){status(data.progress);return}pending.delete(data.id);data.error?p.reject(Error(data.error)):p.resolve(data.value)};
 worker.onerror=()=>{for(const p of pending.values())p.reject(Error('CAM engine failed to load. Rebuild or reload the app.'));pending.clear()};
 function call(action,extra={}){return new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});worker.postMessage({id,action,project:JSON.stringify(project),...extra})})}
 function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error)}
@@ -25,7 +25,7 @@ $('demo').onclick=()=>task(async()=>{if(project&&!confirm('Replace current works
 $('new').onclick=()=>task(async()=>{if(project&&!confirm('Replace current workspace?'))return;const p=await call('sample');p.name='Untitled milling project';p.operations=[];await adopt(p);status('New project')});
 $('save').onclick=()=>task(async()=>{const p=await call('normalize');download(JSON.stringify(p,null,2),filename('.cam.json'));status('Project downloaded')});
 $('open').onchange=()=>task(async()=>{const file=$('open').files[0];if(!file)return;if(file.size>128*1024*1024)throw Error('Project exceeds 128 MiB');const p=await call('normalize',{project:await file.text()});if(project&&!confirm('Replace current workspace with this project?'))return;await adopt(p);status('Project opened');$('open').value=''});
-$('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');if(!confirm('Create a new project fitted to this model?'))return;status('Importing model…');await adopt(await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},inches:$('units').value==='inch'}));status('Model imported. Configure tooling and add operations.');$('model').value=''});
+$('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');if(!confirm('Create a new project fitted to this model?'))return;status('Importing model…');await adopt(await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},inches:$('units').value==='inch'}));status(`Model imported · ${project.part.geometry.mesh.triangles.length} triangles · ${project.stock.width.toFixed(2)} × ${project.stock.height.toFixed(2)} × ${project.stock.thickness.toFixed(2)} mm stock. Configure tooling and operations.${autosaved?'':' Autosave is unavailable: download a project backup before closing.'}`,!autosaved);$('model').value=''});
 $('add').onclick=()=>task(async()=>{selected=project.operations.length;await sessionEdit({kind:'add_operation'})});
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
 $('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;draw();status('Paths generated and checked')});
@@ -49,7 +49,7 @@ window.addEventListener('beforeunload',e=>{if(!autosaved){e.preventDefault();e.r
 await task(async()=>{let saved,failed=false;try{saved=localStorage.getItem('oc-project')}catch{failed=true}if(saved){try{project=await call('draft',{project:saved}).catch(()=>call('normalize',{project:saved}))}catch{failed=true;$('recovery').hidden=false;$('raw-backup').onclick=()=>download(saved,'recovered-workspace.draft.json')}}if(!project)project=await call('sample');applyView(await call('session-start'));lastState=JSON.stringify(project);render();autosaved=!failed;status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':'Ready · All machining calculations run on this device',failed);$('saved').textContent=failed?'Recovery required':'Workspace restored';});
 if('serviceWorker'in navigator){
  let controlled=!!navigator.serviceWorker.controller,activating=false;
- navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled){location.reload();return}controlled=true});
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled&&!activating){location.reload();return}controlled=true});
  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(async reg=>{
   function offer(){if(reg.waiting){$('update').hidden=false;$('update').textContent='Update available · reload'}}
   offer();reg.addEventListener('updatefound',()=>{reg.installing?.addEventListener('statechange',offer)});
@@ -60,11 +60,28 @@ if('serviceWorker'in navigator){
    activating=true;$('update').disabled=true;$('update').textContent='Applying update…';status('Your workspace is saved. Applying the update…');
    try{
     // Resolve the current waiting worker, not a reference from an earlier install.
-    let next=reg.waiting;
-    if(!next){await reg.update();next=reg.waiting}
+    const current=await navigator.serviceWorker.getRegistration();
+    let next=current?.waiting;
+    if(!next&&current){await current.update();next=current.waiting}
     if(!next){throw Error('No downloaded update is waiting. Close all OpenSourceCAM tabs and reopen the app to check again. Your workspace is saved.')}
-    next.postMessage({type:'ACTIVATE'});
-    setTimeout(()=>{if(activating){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status('Update has not activated yet. Close other OpenSourceCAM tabs and reopen the app. Your workspace is saved.',true)}},10000);
+    for(let round=0;round<4;round++){
+     await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{next.removeEventListener('statechange',check);reject(Error('The update did not activate. Close other OpenSourceCAM tabs and retry. Your workspace is saved.'))},12000);
+      function check(){if(next.state==='activated'||next.state==='redundant'){clearTimeout(timer);next.removeEventListener('statechange',check);resolve()}}
+      next.addEventListener('statechange',check);next.postMessage({type:'ACTIVATE'});check();
+     });
+     // Let registration state settle before deciding whether a newer download superseded it.
+     await new Promise(resolve=>setTimeout(resolve,250));
+     const latest=await navigator.serviceWorker.getRegistration();
+     if(latest.installing){
+      const installing=latest.installing;
+      await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{installing.removeEventListener('statechange',check);reject(Error('A newer update is still downloading. Please retry shortly.'))},15000);function check(){if(installing.state==='installed'||installing.state==='redundant'){clearTimeout(timer);installing.removeEventListener('statechange',check);resolve()}}installing.addEventListener('statechange',check);check()});
+     }
+     const settled=await navigator.serviceWorker.getRegistration();
+     if(settled.waiting){next=settled.waiting;continue}
+     if(settled.active?.state==='activated'){location.reload();return}
+    }
+    throw Error('A newer update is still arriving. Please retry shortly. Your workspace is saved.');
    }catch(error){activating=false;$('update').disabled=false;$('update').textContent='Retry update';status(error.message,true)}
   };
   await navigator.serviceWorker.ready;$('offline').textContent='· Offline cache installed';

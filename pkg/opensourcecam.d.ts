@@ -10,6 +10,11 @@ export class WebSession {
     view(): string;
 }
 
+/**
+ * Validate a browser-kernel result through the same Part and Project boundaries as native import.
+ */
+export function cad_project(name: string, source: string, format: string, mesh: string): string;
+
 export function import_model(name: string, data: Uint8Array, inches: boolean): string;
 
 export function normalize(data: string): string;
@@ -25,6 +30,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_websession_free: (a: number, b: number) => void;
+    readonly cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly import_model: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly normalize: (a: number, b: number, c: number) => void;
     readonly operation: (a: number) => void;

@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_websession_free: (a: number, b: number) => void;
+export const cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const import_model: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const normalize: (a: number, b: number, c: number) => void;
 export const operation: (a: number) => void;
