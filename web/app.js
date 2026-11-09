@@ -97,7 +97,25 @@ function renderSetup(){
 $('fit-stock').onclick=()=>task(async()=>{await sessionEdit({kind:'fit_stock',margin:$('stock-margin').valueAsNumber});status('Stock fitted to part. Review existing operations and fixture positions before regenerating.')});
 $('machine-file').onchange=()=>task(async()=>{const f=$('machine-file').files[0];if(!f)return;$('machine-file').value='';if(f.size>8*1024*1024)throw Error('CNC profile exceeds 8 MiB');const profile=JSON.parse(await f.text());if(typeof profile.machine?.name!=='string')throw Error('Choose a .cam-machine.json CNC profile');machineProfiles.push(profile);render();status('CNC profile imported. Select it under Setup → CNC machine.')});
 $('tools-file').onchange=()=>task(async()=>{const f=$('tools-file').files[0];if(!f)return;$('tools-file').value='';if(f.size>8*1024*1024)throw Error('Tool library exceeds 8 MiB');await sessionEdit({kind:'import_tools',data:await f.text()});status('Tool library imported. Select an active tool and cutting preset in Setup.')});
-$('recognize').onclick=()=>task(async()=>{status('Recognizing supported features…');const report=await call('recognize');$('features').replaceChildren();const note=document.createElement('p');note.textContent=`${report.features.length} candidate features. ${report.notes.join(' ')} ${report.machining_error||''}`;$('features').append(note);report.features.forEach((feature,index)=>{const b=document.createElement('button');b.textContent=`Add ${feature.kind.replaceAll('_',' ')} · depth ${(-feature.bottom_z).toFixed(2)} mm`;b.onclick=()=>task(async()=>{await sessionEdit({kind:'feature_operation',index});status('Feature operation added disabled. Review tooling, depth and placement before enabling it.')});$('features').append(b)});status('Recognition complete. Candidates require review; choose suitable tooling in Setup before adding.')});
+$('recognize').onclick=()=>task(async()=>{
+ const container=$('features');container.replaceChildren();
+ const message=text=>{const p=document.createElement('p');p.textContent=text;container.append(p)};
+ status('Recognizing supported features…');
+ let report;
+ try{report=await call('recognize')}catch(error){
+  message('Recognition could not inspect this model.');message(error.message);
+  message('Review the error above. For mesh errors, check that the STL is a closed solid with consistent face orientation; repair it in your CAD/mesh application and reimport it. STEP is also available if you have the original CAD model.');
+  throw error;
+ }
+ const count=report.features.length;
+ message(count?`${count} candidate features found. Review dimensions and accessibility before adding operations.`:'No supported features found. This recognizer looks for openings on the highest horizontal face, along the Z axis. Sideways features, curved surfaces, tapers, counterbores and pockets with islands are not currently supported.');
+ if(report.skipped_openings)message(`${report.skipped_openings} top-face openings were skipped because their geometry is unsupported.`);
+ if(report.machining_error)message(`Complete stock planning unavailable: ${report.machining_error}`);
+ const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Recognition limits';details.append(summary);
+ for(const text of report.notes){const p=document.createElement('p');p.textContent=text;details.append(p)}container.append(details);
+ report.features.forEach((feature,index)=>{const b=document.createElement('button');b.textContent=`Add ${feature.kind.replaceAll('_',' ')} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;b.onclick=()=>task(async()=>{await sessionEdit({kind:'feature_operation',index});status('Feature operation added disabled. Review tooling, depth and placement before enabling it.')});container.append(b)});
+ status(count?'Recognition complete. Candidates require review; choose suitable tooling in Setup before adding.':'Recognition complete: no supported features found. See the explanation in Operations.');
+});
 $('advanced-editor').addEventListener('toggle',refreshEditor);
 $('version').textContent=`Build ${BUILD_ID}`;
 $('undo').onclick=()=>task(()=>sessionEdit({kind:'undo'}));
