@@ -201,6 +201,7 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
     positive(project.stock.width, "Stock width", 100_000.0)?;
     positive(project.stock.height, "Stock height", 100_000.0)?;
     positive(project.stock.thickness, "Stock thickness", 10_000.0)?;
+    project.stock.validate_profile()?;
     positive(project.clearance, "Clearance", 10_000.0)?;
     if project.tool_library.tools.is_empty() {
         validate_cutting_tool(&project.tool)?;
@@ -330,6 +331,46 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
                         ((op.height - tool.diameter) / (tool.diameter * tool.step_over)).ceil();
                     if rows > MAX_ROWS as f64 {
                         return Err("Pocket exceeds 10,000 raster rows".into());
+                    }
+                }
+            }
+            if project.stock.profile != crate::blank::StockProfile::Rectangular
+                && !matches!(
+                    op.strategy,
+                    Strategy::Facing
+                        | Strategy::StockRough
+                        | Strategy::SurfaceRough
+                        | Strategy::ParallelFinish
+                )
+            {
+                let points = if matches!(op.strategy, Strategy::Drill | Strategy::CircularPocket) {
+                    let radius = if op.strategy == Strategy::Drill {
+                        tool.diameter / 2.
+                    } else {
+                        op.width / 2.
+                    };
+                    if !project.stock.contains_disc([op.x, op.y, -op.depth], radius) {
+                        return Err("Circular operation extends outside the physical blank".into());
+                    }
+                    Vec::new()
+                } else {
+                    vec![
+                        [op.x, op.y],
+                        [op.x + op.width, op.y],
+                        [op.x + op.width, op.y + op.height],
+                        [op.x, op.y + op.height],
+                    ]
+                };
+                for xy in points {
+                    let floor = project
+                        .stock
+                        .column(xy[0], xy[1])
+                        .ok_or("Operation extends beyond the physical blank")?;
+                    if -op.depth < floor[0] - EPS {
+                        return Err(
+                            "Operation depth extends below the physical blank at this position"
+                                .into(),
+                        );
                     }
                 }
             }

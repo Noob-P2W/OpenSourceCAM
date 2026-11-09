@@ -31,6 +31,8 @@ pub enum Frame {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceModel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vise: Option<crate::workholding::ViseSpec>,
     pub id: u64,
     pub name: String,
     pub kind: ModelKind,
@@ -42,6 +44,7 @@ pub struct WorkspaceModel {
 impl WorkspaceModel {
     pub fn new(id: u64, kind: ModelKind, part: Part) -> Self {
         Self {
+            vise: None,
             id,
             name: part.geometry.source_name.clone(),
             kind,
@@ -55,7 +58,12 @@ impl WorkspaceModel {
         }
     }
     pub fn rotation_matrix(&self) -> [f32; 9] {
-        let columns = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|p| self.rotate(p));
+        let columns = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|p| {
+            self.rotate(crate::blank::apply(
+                crate::blank::rotation(self.part.rotation),
+                p,
+            ))
+        });
         std::array::from_fn(|i| columns[i / 3][i % 3] as f32)
     }
     fn rotate(&self, mut p: [f64; 3]) -> [f64; 3] {
@@ -81,7 +89,10 @@ impl WorkspaceModel {
         })
     }
     pub fn point(&self, p: [f64; 3], machine: Option<&MachineSetup>) -> [f64; 3] {
-        let p = self.rotate(p.map(|v| v * self.part.units.factor()));
+        let p = self.rotate(crate::blank::apply(
+            crate::blank::rotation(self.part.rotation),
+            p.map(|v| v * self.part.units.factor()),
+        ));
         let o = self.offset(machine);
         std::array::from_fn(|i| p[i] + o[i])
     }

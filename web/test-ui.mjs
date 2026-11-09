@@ -1,7 +1,15 @@
-export async function section(page,pane){
- if(await page.locator('#home').isVisible())await page.locator('#resume-workspace').click();
- const target=pane==='project'?'import':pane==='model'?'import':pane;
- const button=page.locator(`[data-pane-target="${target}"]`);
- if(await button.isVisible())await button.click();
- if(pane==='project'&&!await page.locator('.file-menu').evaluate(el=>el.open))await page.locator('.file-menu > summary').click();
-}
+export async function ready(page){await page.locator('#status').filter({hasText:'Ready'}).waitFor();}
+export async function closeDialogs(page){for(let i=0;i<6;i++){const dialog=page.locator('dialog[open]').last();if(!await dialog.count())break;const id=await dialog.getAttribute('id');await dialog.locator('.dialog-close').click();await page.locator('#'+id).waitFor({state:'hidden'});}if(await page.locator('.file-menu').evaluate(el=>el.open))await page.locator('.file-menu > summary').click();}
+export async function workspace(page){await closeDialogs(page);if(await page.locator('#home').isVisible())await page.locator('#resume-workspace').click();}
+export async function ribbon(page,tab,command){await workspace(page);await page.getByRole('tab',{name:tab,exact:true}).click();if(command){await page.locator('#ribbon-commands').getByRole('button',{name:command,exact:true}).click();const modal={'Setup…':'setup-dialog','Orientation':'setup-dialog','Workholding':'setup-dialog','Import model':'import-dialog','Tools':'tool-library-dialog','Tool library':'tool-library-dialog','Machines':'machine-library-dialog','Machine library':'machine-library-dialog','Active machine':'active-machine-dialog','Pocket':'operation-dialog','Circular pocket':'operation-dialog','Rough + finish…':'planning-dialog','Recognize':'feature-dialog','Stock simulation':'inspect-dialog'}[command];if(modal)await page.locator('#'+modal).waitFor({state:'visible'});}}
+export async function section(page,pane){await workspace(page);if(['project'].includes(pane)){await page.locator('.file-menu > summary').click();return}if(['model','import'].includes(pane)){await ribbon(page,'Setup','Import model');return}if(pane==='setup'){await ribbon(page,'Setup','Setup…');return}if(pane==='tools'){await ribbon(page,'Libraries','Tool library');return}if(pane==='machines'){await ribbon(page,'Libraries','Machine library');return}await ribbon(page,'Actions');}
+export async function editOperation(page,index=0){await workspace(page);if(!await page.locator('.op').nth(index).isVisible())await page.locator('#browser-toggle').click();await page.locator('.op').nth(index).dblclick();await page.locator('#operation-dialog').waitFor({state:'visible'});}
+export async function saveOperation(page){await page.locator('#save-operation').click();await page.locator('#operation-dialog').waitFor({state:'hidden'});}
+export async function generate(page){await ribbon(page,'Actions','Generate paths');await page.locator('#status').filter({hasText:'Paths generated'}).waitFor({timeout:60000});}
+export async function inspect(page){await ribbon(page,'Actions','Stock simulation');}
+export async function planning(page,{fit=false,replace=false}={}){await ribbon(page,'3D milling','Rough + finish…');await page.locator('#use-setup-stock').setChecked(!fit);await page.locator('#replace-operations').setChecked(replace);}
+export async function plan(page,options={}){await planning(page,options);await page.locator('#surface').click();await page.locator('#status').filter({hasText:'Operations planned'}).waitFor({timeout:60000});}
+export async function recognize(page){await ribbon(page,'2.5D milling','Recognize');await page.locator('#recognize').click();}
+export async function idle(page){await page.waitForFunction(()=>!document.getElementById('software-settings').disabled,{},{timeout:120000});}
+export async function state(page){await idle(page);return page.evaluate(()=>JSON.parse(localStorage.getItem('oc-project')));}
+export async function importModel(page,file,role='part'){await section(page,'import');await page.locator('#import-role').selectOption(role);page.once('dialog',d=>d.accept());await page.locator('#model').setInputFiles(file);await page.locator('#status').filter({hasText:'Model imported'}).waitFor({timeout:120000});}

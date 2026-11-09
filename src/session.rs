@@ -14,6 +14,33 @@ pub enum Edit {
         project: Box<Project>,
     },
     AddOperation,
+    PlaceExampleVise {
+        id: Option<u64>,
+        spec: crate::workholding::ViseSpec,
+    },
+    UseMachine {
+        record: Box<crate::machine_library::MachineRecord>,
+    },
+    SaveOperation {
+        index: Option<usize>,
+        expected: Option<Box<Operation>>,
+        operation: Box<Operation>,
+    },
+    ConfigureStock {
+        definition: crate::blank::StockDefinition,
+    },
+    ConfigureSetup {
+        definition: crate::blank::StockDefinition,
+        rotation: [f64; 3],
+        offset: Option<[f64; 3]>,
+        clearance: f64,
+        fit_margin: Option<f64>,
+    },
+    OrientPart {
+        rotation: [f64; 3],
+    },
+    CenterPart,
+
     AddStrategy {
         strategy: crate::model::Strategy,
     },
@@ -305,47 +332,84 @@ impl Session {
                 preset_id: candidate.active_preset,
                 ..Operation::default()
             }),
+            Edit::PlaceExampleVise { id, spec } => {
+                crate::workholding::place_example(&mut candidate, id, spec)?
+            }
+            Edit::UseMachine { record } => record.apply(&mut candidate)?,
+            Edit::SaveOperation {
+                index,
+                expected,
+                operation,
+            } => {
+                operation.settings.validate()?;
+                if let Some(index) = index {
+                    let old = candidate
+                        .operations
+                        .get(index)
+                        .ok_or("Operation no longer exists")?;
+                    if expected.as_deref() != Some(old) {
+                        return Err(
+                            "Operation changed while its settings were open; reopen the settings"
+                                .into(),
+                        );
+                    }
+                    candidate.operations[index] = *operation;
+                } else {
+                    if candidate.operations.len() >= 1000 {
+                        return Err("Maximum 1,000 operations".into());
+                    }
+                    candidate.operations.push(*operation);
+                }
+                crate::cam::validate_setup(&candidate)?;
+            }
+            Edit::ConfigureStock { definition } => candidate.stock = definition.build()?,
+            Edit::ConfigureSetup {
+                definition,
+                rotation,
+                offset,
+                clearance,
+                fit_margin,
+            } => {
+                if !clearance.is_finite() || !(0.0..=10000.0).contains(&clearance) {
+                    return Err("Clearance must be 0–10,000 mm".into());
+                }
+                candidate.stock = definition.build()?;
+                candidate.clearance = clearance;
+                if let Some(part) = &mut candidate.part {
+                    part.orient_centered(rotation)?;
+                    if let Some(offset) = offset {
+                        part.offset = offset;
+                    }
+                    part.validate()?;
+                }
+                if let Some(margin) = fit_margin {
+                    if !margin.is_finite() || !(0.0..=1000.0).contains(&margin) {
+                        return Err("Stock margin must be 0–1000 mm".into());
+                    }
+                    crate::blank::fit(&mut candidate, margin, 0., 0.)?;
+                }
+            }
+            Edit::OrientPart { rotation } => candidate
+                .part
+                .as_mut()
+                .ok_or("Import a part first")?
+                .orient_centered(rotation)?,
+            Edit::CenterPart => {
+                let stock = &candidate.stock;
+                let part = candidate.part.as_mut().ok_or("Import a part first")?;
+                let bounds = part.bounds();
+                part.offset[0] += (stock.width - bounds.min[0] - bounds.max[0]) / 2.;
+                part.offset[1] += (stock.height - bounds.min[1] - bounds.max[1]) / 2.;
+                part.offset[2] -= bounds.max[2];
+            }
             Edit::FitStock { margin } => {
                 if !margin.is_finite() || !(0.0..=1000.0).contains(&margin) {
                     return Err("Stock margin must be 0–1000 mm".into());
                 }
-                let part = candidate
-                    .part
-                    .as_mut()
-                    .ok_or("Import a part before fitting stock")?;
-                part.validate()?;
-                let size = part.bounds().size();
-                if size[0] + 2.0 * margin < 0.001 || size[1] + 2.0 * margin < 0.001 {
-                    return Err("Stock needs positive X/Y dimensions; use a larger margin".into());
-                }
-                if size[0] + 2.0 * margin > 100_000.0
-                    || size[1] + 2.0 * margin > 100_000.0
-                    || size[2] > 10_000.0
-                {
-                    return Err("Model exceeds supported stock limits".into());
-                }
-                part.align_to_top(margin);
-                candidate.stock = crate::model::Stock {
-                    width: size[0] + 2.0 * margin,
-                    height: size[1] + 2.0 * margin,
-                    thickness: size[2].max(0.001),
-                };
+                crate::blank::fit(&mut candidate, margin, 0., 0.)?;
             }
             Edit::ApplyMachine { profile } => {
-                // Legacy profiles include a tool. During Import → Setup a separate
-                // library may already be loaded without a selected tool; CNC selection
-                // must not depend on choosing that tool first or replace the library.
-                if profile.format_version == 1
-                    && !candidate.tool_library.tools.is_empty()
-                    && candidate.active_tool.is_none()
-                {
-                    let mut setup = Project::new_for_process(candidate.process);
-                    profile.apply(&mut setup)?;
-                    candidate.machine = setup.machine;
-                    candidate.tool = setup.tool;
-                } else {
-                    profile.apply(&mut candidate)?;
-                }
+                crate::machine_library::apply_profile(&profile, &mut candidate)?;
             }
             Edit::ImportLibrary { data, replace } => {
                 let library = crate::tool_library::ToolLibrary::from_json(data.as_bytes())?;

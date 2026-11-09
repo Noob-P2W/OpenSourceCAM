@@ -11,14 +11,14 @@ This is an implementation inventory, not a release promise or certification.
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
 | Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, playback progress and OBJ download |
-| Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, top/front/isometric and fit; sampled software fallback |
-| Machine/tool setup | Detailed native editors | CNC profile import/export, configuration/tool changer, tool geometry and presets, shaft/holder/post settings |
+| Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
+| Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
 | Tool library | 37 kinds and assembly preview | Same catalog and assembly geometry; local creation, search, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
 | Planning controls | Blank allowances and operation replacement | Same PlanOptions in the worker; notes, XY/top/backing, 2.5D choices and explicit replacement |
-| Detailed operation editor | All implemented settings | All settings, inherited overrides, geometry unlinking, strategy picker and keyboard operation actions |
+| Detailed operation editor | All implemented settings | Dedicated operation drafts with geometry/tool/pass/feed/height tabs, atomic validation/save, geometry unlinking and keyboard/context actions |
 | NC inspection | Preview and export | Checked code preview and download |
-| Stock fitting and workholding | Supported | Setup step: fit stock, part offsets, vise/fixture transforms |
+| Stock fitting and workholding | Supported | Modal Setup: rectangular/round physical stock, XYZ stock/part orientation and offsets, shape-preserving fit, configurable example vise/backing and imported fixture transforms |
 | Feature recognition | Supported | Operations: candidate review, unsupported/open-mesh diagnostics and disabled feature operations |
 | Editing / undo history | Native implementation | Rust Session, bounded undo/redo and worker cancellation that preserves both stacks |
 | Autosave / recovery | Native save protections | Local current/previous autosave and draft recovery |
@@ -38,8 +38,8 @@ playback, simulation, NC preview/export and cancellation. Desktop cancellation i
 cooperative; browser cancellation restarts its worker and restores the project and
 history from a bounded checkpoint. Current geometry is referenced, older retained
 meshes are deduplicated, and the restored base geometry is checked. The desktop
-inspector is resizable in the browser at wide screen sizes; tablet/phone layout
-remains responsive.
+selection panel is resizable on wide screens. Desktop/tablet use a ribbon and
+project tree; phones use a tree drawer and responsive settings windows.
 
 This does not establish complete device/UI equivalence. Native and browser history
 budgets/edit grouping differ, native filesystem dialogs are browser downloads and

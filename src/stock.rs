@@ -97,7 +97,17 @@ pub fn simulate(
     let dx = s.width / nx as f64;
     let dy = s.height / ny as f64;
     let bottom = -s.thickness;
-    let mut heights = vec![0.0_f64; nx * ny];
+    let mut floors = vec![bottom; nx * ny];
+    let mut heights = vec![bottom; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            if let Some([lo, hi]) = s.column((x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy) {
+                floors[y * nx + x] = lo;
+                heights[y * nx + x] = hi;
+            }
+        }
+    }
+    let initial = heights.clone();
     let mut work = 0u64;
     let until = path.estimated_seconds * progress;
     let mut elapsed = 0.0;
@@ -168,7 +178,7 @@ pub fn simulate(
             for x in minx..=maxx as usize {
                 let p = [(x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy];
                 if let Some(height) = swept_height(p, from, to, radius, ball, point_angle) {
-                    heights[y * nx + x] = heights[y * nx + x].min(height.max(bottom));
+                    heights[y * nx + x] = heights[y * nx + x].min(height.max(floors[y * nx + x]));
                 }
             }
         }
@@ -199,6 +209,9 @@ pub fn simulate(
             return Err("Stock preview cancelled".into());
         }
         for x in 0..nx {
+            if initial[y * nx + x] <= floors[y * nx + x] + 1e-10 {
+                continue;
+            }
             if let Some(column) = target
                 .as_ref()
                 .filter(|_| comparable)
@@ -244,78 +257,71 @@ pub fn simulate(
         while x < nx {
             let start = x;
             let h = heights[y * nx + x];
-            while x < nx && heights[y * nx + x] == h {
+            let floor = floors[y * nx + x];
+            while x < nx && heights[y * nx + x] == h && floors[y * nx + x] == floor {
                 x += 1;
             }
-            if h > bottom + 1e-9 {
+            if h > floor + 1e-9 {
                 let a = start as f64 * dx;
                 let b = x as f64 * dx;
                 let c = y as f64 * dy;
                 quad([[a, c, h], [b, c, h], [b, c + dy, h], [a, c + dy, h]])?;
                 quad([
-                    [a, c + dy, bottom],
-                    [b, c + dy, bottom],
-                    [b, c, bottom],
-                    [a, c, bottom],
+                    [a, c + dy, floor],
+                    [b, c + dy, floor],
+                    [b, c, floor],
+                    [a, c, floor],
                 ])?;
             }
         }
         for x in 0..nx {
             let h = heights[y * nx + x];
-            if h <= bottom + 1e-9 {
+            let floor = floors[y * nx + x];
+            if h <= floor + 1e-9 {
                 continue;
             }
             let a = x as f64 * dx;
             let b = y as f64 * dy;
-            for (neighbor, points) in [
+            let neighbors = [
                 (
-                    if x == 0 {
-                        bottom
-                    } else {
-                        heights[y * nx + x - 1]
-                    },
-                    [[a, b, h], [a, b + dy, h], [a, b + dy, 0.0], [a, b, 0.0]],
+                    x.checked_sub(1).map(|x| y * nx + x),
+                    [[a, b, h], [a, b + dy, h], [a, b + dy, 0.], [a, b, 0.]],
                 ),
                 (
-                    if x + 1 == nx {
-                        bottom
-                    } else {
-                        heights[y * nx + x + 1]
-                    },
+                    (x + 1 < nx).then_some(y * nx + x + 1),
                     [
                         [a + dx, b + dy, h],
                         [a + dx, b, h],
-                        [a + dx, b, 0.0],
-                        [a + dx, b + dy, 0.0],
+                        [a + dx, b, 0.],
+                        [a + dx, b + dy, 0.],
                     ],
                 ),
                 (
-                    if y == 0 {
-                        bottom
-                    } else {
-                        heights[(y - 1) * nx + x]
-                    },
-                    [[a + dx, b, h], [a, b, h], [a, b, 0.0], [a + dx, b, 0.0]],
+                    y.checked_sub(1).map(|y| y * nx + x),
+                    [[a + dx, b, h], [a, b, h], [a, b, 0.], [a + dx, b, 0.]],
                 ),
                 (
-                    if y + 1 == ny {
-                        bottom
-                    } else {
-                        heights[(y + 1) * nx + x]
-                    },
+                    (y + 1 < ny).then_some((y + 1) * nx + x),
                     [
                         [a, b + dy, h],
                         [a + dx, b + dy, h],
-                        [a + dx, b + dy, 0.0],
-                        [a, b + dy, 0.0],
+                        [a + dx, b + dy, 0.],
+                        [a, b + dy, 0.],
                     ],
                 ),
-            ] {
-                if h > neighbor + 1e-9 {
-                    let mut points = points;
-                    points[2][2] = neighbor;
-                    points[3][2] = neighbor;
-                    quad(points)?;
+            ];
+            for (neighbor, points) in neighbors {
+                let lo = neighbor.map_or(bottom, |i| floors[i]);
+                let hi = neighbor.map_or(bottom, |i| heights[i]);
+                for (z0, z1) in [(floor, h.min(lo)), (floor.max(hi), h)] {
+                    if z1 > z0 + 1e-9 {
+                        let mut p = points;
+                        p[0][2] = z1;
+                        p[1][2] = z1;
+                        p[2][2] = z0;
+                        p[3][2] = z0;
+                        quad(p)?
+                    }
                 }
             }
         }
@@ -329,8 +335,16 @@ pub fn simulate(
         return Err("Stock preview cancelled".into());
     }
     notes.push("Backing is the nominal blank allowance below the part. Local drilling clearance can remove backing without gouging the target part. Separate enclosed fixture shells are checked as a conservative union.".into());
-    let remaining = heights.iter().map(|h| (h - bottom) * area).sum();
-    let removed = heights.iter().map(|h| -h * area).sum();
+    let remaining = heights
+        .iter()
+        .zip(&floors)
+        .map(|(h, f)| (h - f).max(0.) * area)
+        .sum();
+    let removed = initial
+        .iter()
+        .zip(&heights)
+        .map(|(a, h)| (a - h).max(0.) * area)
+        .sum();
     let summary = Summary {
         resolution: [nx, ny],
         cell_size: [dx, dy],

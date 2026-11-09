@@ -99,8 +99,8 @@ Build with `bash scripts/build-web.sh`, then copy these files to your server's
 static document root (for example `/srv/opensourcecam`):
 
 ```
-index.html style.css app.js worker.js sw.js manifest.webmanifest
-icon.svg icon-192.png icon-512.png build.js cad-worker.js pkg/ cad/
+index.html style.css app.js shell.js viewport.js worker.js sw.js manifest.webmanifest
+icon.svg icon-192.png icon-512.png build.js cad-worker.js assets/ pkg/ cad/
 ```
 
 Do not serve the source checkout or `node_modules`. No Rust, Python, Node or CAD
@@ -170,41 +170,54 @@ migration to this session is not complete.
 The upper-left **File** menu holds New, Open, Save, the demo, backups, recovery,
 and the advanced JSON editor. It closes on Escape or an outside click.
 
-All screen sizes use the same three workflow steps:
+The desktop and tablet workbench uses a command ribbon above a large viewport,
+with a project tree showing Setup 1 and its numbered operation steps. The optional
+selection panel appears on wide screens. On phones, the project tree opens as a
+drawer and the ribbon scrolls horizontally. Settings windows resize to the screen;
+rotating the device retains the project and local operation draft.
 
-1. **Import:** load a part, CNC reference mesh, vise or fixture model. Part import
-   starts a fitted project; reference meshes are added without replacing the part.
-   Import `.cam-machine.json` CNC profiles and `.cam-tools.json` tool libraries here.
-   Use Continue to Setup once the required files are in.
-2. **Setup:** fit stock to the part with an XY margin, edit stock dimensions and
-   part offsets, select an imported CNC profile, and review travel limits, work
-   origin, feed/spindle limits, reach checks, postprocessor, coolant and work offset.
-   Position vise/fixture/reference meshes using translation, rotation and coordinate
-   frame. Reference geometry is previewed using the shared Rust transforms.
-   Select a library tool and cutting preset, or edit the legacy tool and convert
-   it to a library tool. Imported profile choices last this browser session;
-   the applied CNC settings are saved in the project. Tool imports merge copies
-   using the desktop rules; explicit replacement is allowed only without existing
-   operations. Machine configuration and changer settings have structured editors.
-3. **Operations:** recognize supported features, review candidate holes/pockets,
-   add disabled feature operations, or use stock/surface planning. New manual
-   operations retain the Setup tool/preset, and each operation exposes its own
-   tool/preset assignment. Enable reviewed
-   operations, generate paths, simulate stock, inspect playback and download G-code.
-   Recognition uses the existing conservative Rust implementation; it does not
-   recognize arbitrary manufacturing features or guarantee machinability.
+1. **Import:** load a part, CNC reference mesh, vise or fixture. Importing a part
+   starts a fitted project. Reference models are added to the current project.
+2. **Setup:** choose a rectangular or round blank, edit physical dimensions and XYZ
+   stock/part orientation, fit or position the part, and set clearance. The viewer
+   starts in an axonometric projection; camera rotation never changes machining
+   orientation. Choose a machine and default tool from the Libraries windows.
+   Review machine travel, work origin, feed/spindle limits, tool reach, configuration,
+   changer, postprocessor, work offset and coolant in its editors.
+3. **Operations:** the 2.5D, 3D and Drilling ribbon tabs expose individual illustrated
+   commands. Each operation opens a local draft with Geometry, Tool, Passes, Feeds
+   and Heights tabs. Save validates and commits the draft as one undo step; Cancel
+   discards it. Feeds and cutting overrides belong to that operation. Right-click
+   an operation for editing, duplication, ordering or removal. Generate paths,
+   inspect playback, simulate material removal, preview NC and export from Actions.
 
-Fit stock aligns the part top to Z=0, applies the XY margin and sets thickness to
-part height (0.001 mm minimum). Existing operations remain; review them and fixture
-positions after refitting. Add backing/blank allowances manually where required.
-CNC profiles are definitions, not controller connections. Verify actual machine
-specifications. Vise/fixture meshes do not implement articulated machine simulation.
+Tool and machine libraries use searchable tables. Tool definitions and presets
+are stored in the project, with explicit device-library save/load and portable
+JSON import/export. Custom machine records persist on this browser and include
+both machine configuration and the selected postprocessor. The four generic
+milling templates target Generic, GRBL, Mach3 and LinuxCNC output; they require
+measured machine settings. Legacy `.cam-machine.json` profiles can be imported.
+Libraries do not connect to a controller.
 
-On phones (up to 640 px), the three steps use bottom navigation. The preview is
-shown in every step and can be hidden explicitly on small screens. On larger
-screens, the preview stays beside the selected step. Rotation retains edits.
-Tests cover stock fitting in tablet Setup, CNC profile application, vise placement,
-tool/preset selection, feature operations, file-menu placement, and screen overflow.
+Workholding includes a configurable example vise with a base and two jaws. Set jaw
+width/depth, grip and part clearance, and reserve backing below the finished part.
+Reseating replaces that example's geometry. Imported vise/fixture meshes use editable
+translations, rotations and work/machine coordinate frames. Recheck workholding after
+stock changes. This remains static reference geometry with conservative fixture
+checks, rather than articulated machine simulation.
+
+Stock fitting preserves the chosen blank shape and orientation. Model-based
+planning uses the stock and placement from Setup by default. Disable that option
+only when fitting a new blank with XY/top/backing allowances. Existing operations
+remain until explicit replacement; geometry links become stale after part placement
+or orientation changes, and generation/export require rebuilding them. Round/tilted
+stock removal uses sampled physical columns, with the existing preview resource limit.
+
+Project naming is in Project properties under File or the header title. Processes
+is at the upper left. Software Settings controls theme, density, default projection,
+import units, grid, axes, rapid visibility, framing and the wide-screen selection panel.
+Recognition retains its conservative supported-feature limits; other process workspaces
+remain reference-only until their motion engines are implemented.
 
 ## Large STL handling
 

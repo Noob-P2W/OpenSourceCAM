@@ -33,7 +33,7 @@ current browser interface, not every feature of the native application.
 | Output | Metric G-code with Generic, GRBL, Mach3 and LinuxCNC posts, subject to each post's supported configuration |
 | Projects | Local versioned JSON project files with embedded geometry |
 | Native app | Detailed machine/tool editors, STL/OBJ import and bundled STEP/IGES import |
-| Browser app | Responsive phone/tablet layout, project editing, STEP/IGES/STL/OBJ import, path playback, numeric stock simulation and G-code download |
+| Browser app | Desktop/tablet ribbon and operation tree, phone layout, dedicated setup/operation windows, machine/tool tables, oriented rectangular/round stock, example vise, STEP/IGES/STL/OBJ import, playback, sampled simulation and G-code download |
 
 The browser runs the shared Rust CAM engine locally through WebAssembly. There
 is no project-upload service, account system or machine-control connection.

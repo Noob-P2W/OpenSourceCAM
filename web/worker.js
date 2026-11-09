@@ -9,11 +9,14 @@ function importCad(file,id){return new Promise((resolve,reject)=>{
  worker.onmessage=({data})=>{if(data.progress){self.postMessage({id,progress:data.progress});return}if(data.error){finish(Error(data.error));return}try{const source=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);finish(null,JSON.parse(core.cad_project(file.name,source,data.format,JSON.stringify(data.mesh))))}catch(error){finish(error)}};
  worker.postMessage(file);
 })}
-self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, tool_id, history}}) => {
+self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, tool_id, history, strategy, data}}) => {
   try {
     await ready;
     let value;
     if(action==='catalog') value=JSON.parse(core.catalog());
+    else if(action==='machine-records') value=JSON.parse(core.machine_records(data));
+    else if(action==='operation-draft') value=JSON.parse(session.operation_draft(strategy));
+    else if(action==='machine-record') value=JSON.parse(session.machine_record());
     else if(action==='plan-model') value=JSON.parse(session.plan(planner,JSON.stringify(options)));
     else if(action==='tool-preview') value=JSON.parse(session.tool_preview(BigInt(tool_id)));
     else if(action==='simulate-current') value=JSON.parse(session.simulate(progress,resolution));

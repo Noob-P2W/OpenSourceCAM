@@ -1,7 +1,7 @@
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {section} from './test-ui.mjs';
+import {section,closeDialogs} from './test-ui.mjs';
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
 try{
  const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:3});
@@ -16,7 +16,7 @@ try{
  await page.locator('#preview-detail').filter({hasText:'Full geometry is retained'}).waitFor();
  const strokes=await page.evaluate(()=>window.strokeCount);assert.ok(strokes<40,`Too many canvas strokes: ${strokes}`);
  assert.ok(await page.locator('#canvas').evaluate(c=>c.width*c.height)<=4000000);
- await section(page,'setup');await page.getByLabel('Stock X · mm',{exact:true}).fill('270');await page.getByLabel('Stock X · mm',{exact:true}).blur();await page.waitForFunction(()=>document.getElementById('undo').disabled===false);await page.locator('#undo').click();await page.waitForFunction(()=>document.querySelector('#setup input[type=number]').value==='260');
+ await section(page,'setup');await page.getByLabel('Stock X · mm',{exact:true}).fill('270');await page.locator('#apply-stock').click();await page.waitForFunction(()=>document.getElementById('undo').disabled===false);await closeDialogs(page);await page.locator('#undo').click();await page.waitForFunction(()=>JSON.parse(localStorage.getItem('oc-project')).stock.width===260);await section(page,'setup');assert.equal(await page.getByLabel('Stock X · mm',{exact:true}).inputValue(),'260');
  await section(page,'project');const event=page.waitForEvent('download');await page.locator('#save').click();const download=await event;const saved=JSON.parse(readFileSync(await download.path(),'utf8'));assert.equal(saved.part.geometry.mesh.triangles.length,100000);assert.equal(saved.part.geometry.mesh.vertices.length,(nx+1)*(ny+1));
  for(let i=0;i<2;i++){
   await page.keyboard.press('Escape');await section(page,'import');

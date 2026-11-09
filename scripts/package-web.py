@@ -7,12 +7,13 @@ ROOT = Path(__file__).resolve().parent.parent
 out = ROOT / 'dist'
 site = out / 'pwa'
 site.mkdir(parents=True, exist_ok=True)
-files = ['index.html', 'style.css', 'app.js', 'viewport.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
+files = ['index.html', 'style.css', 'app.js', 'shell.js', 'viewport.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
          'cad-worker.js', 'icon.svg', 'icon-192.png', 'icon-512.png']
 if not (ROOT / 'web/pkg/opensourcecam_bg.wasm').is_file():
     raise SystemExit('Run scripts/build-web.sh first.')
 for name in files:
     shutil.copy2(ROOT / 'web' / name, site / name)
+shutil.copytree(ROOT / 'web/assets', site / 'assets', dirs_exist_ok=True)
 shutil.copytree(ROOT / 'web/pkg', site / 'pkg', dirs_exist_ok=True)
 cad_source = ROOT / 'web/node_modules/occt-import-js/dist'
 if not (cad_source / 'occt-import-js.wasm').is_file():

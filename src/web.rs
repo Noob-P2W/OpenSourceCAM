@@ -6,6 +6,12 @@ use crate::{
 use std::sync::atomic::AtomicBool;
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen]
+pub fn machine_records(data: &str) -> Result<String, JsValue> {
+    crate::machine_library::parse(data)
+        .and_then(|r| serde_json::to_string(&r).map_err(|e| e.to_string()))
+        .map_err(|e| JsValue::from_str(&e))
+}
 /// Menu and editor metadata comes from the same definitions as the desktop UI.
 #[wasm_bindgen]
 pub fn catalog() -> String {
@@ -15,7 +21,7 @@ pub fn catalog() -> String {
         let parameters = |specs: Vec<crate::tool_library::Parameter>| -> Vec<_> { specs.iter().map(|p| serde_json::json!({"key":p.key,"label":p.label,"unit":p.unit,"min":p.min,"max":p.max})).collect() };
         serde_json::json!({"id":kind,"label":kind.label(),"group":kind.group(),"process":kind.process(),"geometry":parameters(kind.geometry()),"cutting":parameters(kind.cutting())})
     }).collect();
-    serde_json::json!({"processes":processes,"tools":tools,"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
+    serde_json::json!({"processes":processes,"tools":tools,"machines":crate::machine_library::builtins(),"posts":crate::post::PostProcessor::ALL.iter().map(|p|serde_json::json!({"id":p,"label":p.label()})).collect::<Vec<_>>(),"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
 }
 #[wasm_bindgen]
 pub fn sample() -> String {
@@ -68,11 +74,9 @@ impl WebSession {
         if data.len() as u64 > crate::model::MAX_PROJECT_BYTES {
             return Err(JsValue::from_str("Draft exceeds project size limit"));
         }
-        let p: Project =
+        let mut p: Project =
             serde_json::from_str(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        if p.format_version != crate::model::FORMAT_VERSION {
-            return Err(JsValue::from_str("Unsupported draft version"));
-        }
+        p.migrate().map_err(|e| JsValue::from_str(&e))?;
         Ok(Self {
             inner: crate::session::Session::new(p),
         })
@@ -103,6 +107,10 @@ impl WebSession {
             #[serde(flatten)]
             view: crate::session::View<'a>,
             workspace_preview: Vec<Preview>,
+            part_transform: Option<[[f64; 4]; 4]>,
+            stock_outline: Vec<[f64; 3]>,
+            stock_definition: crate::blank::StockDefinition,
+            setup_issue: Option<String>,
         }
         let visible = self
             .inner
@@ -144,6 +152,15 @@ impl WebSession {
         serde_json::to_string(&BrowserView {
             view: self.inner.view(),
             workspace_preview: preview,
+            part_transform: self.inner.project().part.as_ref().map(|p| p.matrix()),
+            stock_outline: self.inner.project().stock.outline(),
+            stock_definition: self.inner.project().stock.definition(),
+            setup_issue: self
+                .inner
+                .project()
+                .part
+                .as_ref()
+                .and_then(|p| crate::blank::contains_part(&self.inner.project().stock, p).err()),
         })
         .map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -232,6 +249,20 @@ impl WebSession {
             .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
             .map_err(|e| JsValue::from_str(&e))
     }
+    pub fn operation_draft(&self, strategy: &str) -> Result<String, JsValue> {
+        let strategy = serde_json::from_str(&format!("\"{strategy}\""))
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::to_string(&crate::commands::operation_template(
+            self.inner.project(),
+            strategy,
+        ))
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn machine_record(&self) -> Result<String, JsValue> {
+        crate::machine_library::MachineRecord::from_project(self.inner.project())
+            .and_then(|r| serde_json::to_string(&r).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
+    }
     pub fn stock_obj(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
         crate::commands::stock_obj(self.inner.project(), progress, resolution)
             .map_err(|e| JsValue::from_str(&e))
@@ -273,6 +304,7 @@ pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result
             _ => return Err("Unsupported CAD format".into()),
         };
         let part = import::Part {
+            rotation: [0.; 3],
             geometry: std::sync::Arc::new(import::Geometry {
                 source_name: name.into(),
                 format,

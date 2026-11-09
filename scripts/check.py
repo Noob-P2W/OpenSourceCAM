@@ -27,7 +27,7 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
-    for script in ('app.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+    for script in ('app.js', 'shell.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
         run('node', '--check', 'web/' + script)
     run('cargo', 'fmt', '--all', '--', '--check')
     run('cargo', 'clippy', '--locked', '--no-default-features', '--features', 'web', '--all-targets', '--', '-D', 'warnings')

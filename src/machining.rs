@@ -3,7 +3,7 @@ use crate::{
     cam,
     features::{self, Report},
     import::Part,
-    model::{Operation, Project, Stock, Strategy},
+    model::{Operation, Project, Strategy},
     process::Process,
     tool_library::ToolKind,
 };
@@ -37,6 +37,12 @@ pub fn model_fingerprint(part: &Part) -> String {
     hash.number(part.units.factor());
     for v in part.offset {
         hash.number(v);
+    }
+    if part.rotation.iter().any(|v| v.rem_euclid(360.) != 0.) {
+        hash.bytes(b"orientation");
+        for r in part.rotation {
+            hash.number(r.rem_euclid(360.));
+        }
     }
     for vertex in &part.geometry.mesh.vertices {
         for v in vertex {
@@ -113,6 +119,7 @@ pub struct PlanOptions {
     pub outside: bool,
     pub cavities: bool,
     pub replace_operations: bool,
+    pub fit_stock: bool,
 }
 impl Default for PlanOptions {
     fn default() -> Self {
@@ -124,6 +131,7 @@ impl Default for PlanOptions {
             outside: true,
             cavities: true,
             replace_operations: false,
+            fit_stock: true,
         }
     }
 }
@@ -162,19 +170,20 @@ pub fn from_stock(
     }
     let id = tool.id;
     let preset = result.active_preset.unwrap_or(tool.default_preset);
+    if options.fit_stock {
+        crate::blank::fit(
+            &mut result,
+            options.xy_margin,
+            options.top_allowance,
+            options.backing,
+        )?;
+    }
     let part = result
         .part
-        .as_mut()
+        .as_ref()
         .ok_or("Import the target part before machining from stock")?;
-    part.align_to_top(options.xy_margin);
-    part.offset[2] -= options.top_allowance;
+    crate::blank::contains_part(&result.stock, part)?;
     let bounds = part.bounds();
-    let size = bounds.size();
-    result.stock = Stock {
-        width: size[0] + 2.0 * options.xy_margin,
-        height: size[1] + 2.0 * options.xy_margin,
-        thickness: size[2] + options.top_allowance + options.backing,
-    };
     if cancel.load(Ordering::Relaxed) {
         return Err("Machining plan cancelled".into());
     }
@@ -201,7 +210,7 @@ pub fn from_stock(
         height,
         depth,
     };
-    if options.face && options.top_allowance >= 0.001 {
+    if options.face && -bounds.max[2] >= 0.001 {
         operations.push(make(
             Strategy::Facing,
             "Face blank to model top",
@@ -209,7 +218,7 @@ pub fn from_stock(
             0.0,
             result.stock.width,
             result.stock.height,
-            options.top_allowance,
+            -bounds.max[2],
         ));
     }
     if options.cavities {

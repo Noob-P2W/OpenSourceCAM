@@ -22,6 +22,7 @@ enum GeometryEntry {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PartRef {
+    rotation: [f64; 3],
     geometry: usize,
     units: Units,
     offset: [f64; 3],
@@ -30,6 +31,7 @@ struct PartRef {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkspaceRef {
+    vise: Option<crate::workholding::ViseSpec>,
     id: u64,
     name: String,
     kind: ModelKind,
@@ -84,6 +86,7 @@ impl Pool {
             GeometryEntry::Retained(part.geometry.clone()),
         );
         PartRef {
+            rotation: part.rotation,
             geometry,
             units: part.units,
             offset: part.offset,
@@ -96,6 +99,7 @@ impl Pool {
                 .workspace
                 .iter()
                 .map(|m| WorkspaceRef {
+                    vise: m.vise.clone(),
                     id: m.id,
                     name: m.name.clone(),
                     kind: m.kind,
@@ -127,6 +131,7 @@ impl PartRef {
             .ok_or("Recovery history references missing geometry")?
             .clone();
         let part = Part {
+            rotation: self.rotation,
             geometry,
             units: self.units,
             offset: self.offset,
@@ -147,6 +152,7 @@ impl ProjectRef {
                 .into_iter()
                 .map(|m| {
                     Ok(WorkspaceModel {
+                        vise: m.vise,
                         id: m.id,
                         name: m.name,
                         kind: m.kind,

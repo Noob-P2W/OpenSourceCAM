@@ -15,7 +15,7 @@ pub fn from_stock(
     options: &crate::machining::PlanOptions,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<crate::machining::Plan, String> {
-    use crate::{model::Stock, process::Process};
+    use crate::process::Process;
     if project.process != Process::Milling {
         return Err("3D stock planning requires Milling".into());
     }
@@ -37,16 +37,17 @@ pub fn from_stock(
     }
     let id = tool.id;
     let preset = result.active_preset.unwrap_or(tool.default_preset);
-    let part = result.part.as_mut().ok_or("Import a target model first")?;
-    part.align_to_top(options.xy_margin);
-    part.offset[2] -= options.top_allowance;
+    if options.fit_stock {
+        crate::blank::fit(
+            &mut result,
+            options.xy_margin,
+            options.top_allowance,
+            options.backing,
+        )?;
+    }
+    let part = result.part.as_ref().ok_or("Import a target model first")?;
+    crate::blank::contains_part(&result.stock, part)?;
     let bounds = part.bounds();
-    let size = bounds.size();
-    result.stock = Stock {
-        width: size[0] + 2.0 * options.xy_margin,
-        height: size[1] + 2.0 * options.xy_margin,
-        thickness: size[2] + options.top_allowance + options.backing,
-    };
     let report = crate::features::recognize_with_cancel(part, cancel)?;
     let mut operations = Vec::new();
     for strategy in [Strategy::SurfaceRough, Strategy::ParallelFinish] {
@@ -189,6 +190,7 @@ impl Field {
         budget: &mut Budget,
     ) -> Result<Self, String> {
         crate::features::validate_closed(part, budget.1)?;
+        crate::blank::contains_part(&project.stock, part)?;
         let nx = (project.stock.width / step).ceil() as usize;
         let ny = (project.stock.height / step).ceil() as usize;
         if nx > 2048 || ny > 2048 || nx.checked_mul(ny).is_none_or(|n| n > 262_144) {

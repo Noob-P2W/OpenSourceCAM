@@ -920,6 +920,7 @@ impl Workbench {
                             {
                                 part.align_to_top(5.0);
                                 self.project.stock = opensourcecam::model::Stock {
+                                    profile: Default::default(),
                                     width: size[0] + 10.0,
                                     height: size[1] + 10.0,
                                     thickness: size[2].max(0.001),
@@ -1211,7 +1212,29 @@ impl Workbench {
                 );
             }
         }
-        if self.show_stock {
+        if self.show_stock && !matches!(s.profile, opensourcecam::blank::StockProfile::Rectangular)
+        {
+            for segment in s.outline().as_chunks::<2>().0 {
+                let a = segment[0];
+                let b = segment[1];
+                painter.line_segment(
+                    [
+                        project(Point3 {
+                            x: a[0],
+                            y: a[1],
+                            z: a[2],
+                        }),
+                        project(Point3 {
+                            x: b[0],
+                            y: b[1],
+                            z: b[2],
+                        }),
+                    ],
+                    Stroke::new(1.0_f32, Color32::from_rgb(180, 140, 65)),
+                );
+            }
+        }
+        if self.show_stock && matches!(s.profile, opensourcecam::blank::StockProfile::Rectangular) {
             let bottom = corners.map(|point| Point3 {
                 z: -s.thickness,
                 ..point
@@ -1335,7 +1358,7 @@ impl Workbench {
                     geometry: part.geometry.clone(),
                     units: part.units.factor(),
                     offset: part.offset,
-                    rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    rotation: part.rotation_matrix(),
                     color: [0.35, 0.68, 0.8],
                 });
             }

@@ -5,14 +5,14 @@ multi-crate layer graph yet. The browser uses a Rust editing session; the native
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
-| Domain | model, operation, machine, tool_library, process, workspace | Shared project data and validation |
-| Geometry and computation | import, features, collision, machining, surface, stock, cam | Bounded import, planning and sampled simulation |
+| Domain | model, operation, machine, machine_library, tool_library, process, workspace | Shared project data and validation |
+| Geometry and computation | blank, workholding, import, features, collision, machining, surface, stock, cam | Bounded import, planning and sampled simulation |
 | Output | post, files | Controller formats, preflight and native atomic file writes |
 | Application calculations | commands | Generate, export, simulate, stock/surface planning; errors returned without dialogs |
 | Editing session | session | Atomic draft replacement, operation management, bounded undo/redo |
 | Native adapter | main, ui, mesh_view | CLI, desktop editing and graphics |
 | Browser adapter | web.rs, web/worker.js | WASM transport to shared application commands |
-| Browser presentation | web/app.js, viewport.js, index.html, style.css | Touch-oriented controls, workspace persistence, file downloads |
+| Browser presentation | web/app.js, shell.js, viewport.js, index.html, style.css | Touch-oriented controls, workspace persistence, file downloads |
 
 Both `--command` in the CLI and the browser dispatch through `commands::execute`.
 Command ids are generate, export, simulate, recognize, plan and surface. For example:
@@ -135,3 +135,26 @@ field's blur handler from disabling and swallowing the button tap that follows i
 During the commit, the matching presentation object is retained so queued control
 closures keep valid references; history flags come from Rust, and the GPU scene is
 invalidated after geometry/setup changes. Invalid commits roll back atomically.
+
+## Manufacturing shell and physical blanks
+
+The browser shell owns command presentation, modal drafts and software preferences.
+Its operation Save and setup actions are Rust Session transactions. MachineRecord
+normalization and portable import validation also run in Rust. Custom machine records
+and explicit tool device libraries use browser storage; project state retains its
+applied machine/post and tool definitions. Cancellation checkpoints retain part
+rotation and configurable vise metadata.
+
+Project format 10 adds part rotation and StockProfile. Existing axis-aligned stock
+fields retain the work-axis envelope. StockDefinition records physical block sizes
+or cylinder diameter/length plus XYZ orientation. Rust supplies world matrices and
+blank outlines to the viewport. Planning containment and stock simulation use the
+physical solid; the JavaScript renderer only applies supplied display matrices.
+FitStock preserves the selected profile. PlanOptions.fit_stock defaults true for
+legacy callers; the browser explicitly sends false when using its measured Setup.
+Zero part rotation preserves prior geometry-link hashes.
+
+The example vise is original generated geometry, stored as a workspace reference
+with its ViseSpec. Imported references keep their existing placement controls.
+Native display and shared calculations understand these project fields; the new
+modal/ribbon workflow and stock definition editor are browser features.

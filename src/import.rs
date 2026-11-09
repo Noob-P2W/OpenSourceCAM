@@ -181,6 +181,8 @@ pub struct Geometry {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Part {
+    #[serde(default)]
+    pub rotation: [f64; 3],
     pub geometry: Arc<Geometry>,
     pub units: Units,
     pub offset: [f64; 3],
@@ -189,7 +191,8 @@ pub struct Part {
 
 impl PartialEq for Part {
     fn eq(&self, other: &Self) -> bool {
-        self.units == other.units
+        self.rotation == other.rotation
+            && self.units == other.units
             && self.offset == other.offset
             && self.visible == other.visible
             && (Arc::ptr_eq(&self.geometry, &other.geometry) || self.geometry == other.geometry)
@@ -199,6 +202,13 @@ impl PartialEq for Part {
 impl Part {
     pub fn validate(&self) -> Result<(), String> {
         self.geometry.mesh.validate()?;
+        if self
+            .rotation
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > 36000.)
+        {
+            return Err("Part rotation must be finite and within ±36,000 degrees".into());
+        }
         if self.geometry.source_name.len() > 1024 {
             return Err("Source name is too long".into());
         }
@@ -234,20 +244,67 @@ impl Part {
         Ok(())
     }
     pub fn point(&self, point: [f64; 3]) -> [f64; 3] {
-        std::array::from_fn(|i| point[i] * self.units.factor() + self.offset[i])
+        let scaled = point.map(|v| v * self.units.factor());
+        let rotated = if self.rotation == [0.; 3] {
+            scaled
+        } else {
+            crate::blank::apply(crate::blank::rotation(self.rotation), scaled)
+        };
+        std::array::from_fn(|i| rotated[i] + self.offset[i])
+    }
+    pub fn rotation_matrix(&self) -> [f32; 9] {
+        let matrix = crate::blank::rotation(self.rotation);
+        std::array::from_fn(|i| matrix[i / 3][i % 3] as f32)
+    }
+    pub fn matrix(&self) -> [[f64; 4]; 4] {
+        let m = crate::blank::rotation(self.rotation);
+        std::array::from_fn(|col| {
+            if col == 3 {
+                [self.offset[0], self.offset[1], self.offset[2], 1.]
+            } else {
+                [
+                    m[col][0] * self.units.factor(),
+                    m[col][1] * self.units.factor(),
+                    m[col][2] * self.units.factor(),
+                    0.,
+                ]
+            }
+        })
     }
     pub fn bounds(&self) -> Bounds {
-        let b = self.geometry.mesh.bounds();
-        Bounds {
-            min: self.point(b.min),
-            max: self.point(b.max),
+        let mut bounds = Bounds {
+            min: [f64::INFINITY; 3],
+            max: [f64::NEG_INFINITY; 3],
+        };
+        for p in &self.geometry.mesh.vertices {
+            let p = self.point(*p);
+            for (i, x) in p.iter().enumerate() {
+                bounds.min[i] = bounds.min[i].min(*x);
+                bounds.max[i] = bounds.max[i].max(*x)
+            }
         }
+        bounds
     }
-    /// Put XY lower-left at the margin and the uppermost face at stock top Z=0.
+    pub fn orient_centered(&mut self, rotation: [f64; 3]) -> Result<(), String> {
+        let old = self.bounds();
+        let old_rotation = self.rotation;
+        self.rotation = rotation;
+        if let Err(e) = self.validate() {
+            self.rotation = old_rotation;
+            return Err(e);
+        }
+        let new = self.bounds();
+        for i in 0..3 {
+            self.offset[i] += (old.min[i] + old.max[i] - new.min[i] - new.max[i]) / 2.
+        }
+        self.validate()
+    }
+    /// Put the oriented part's lower XY corner at the margin and its top at Z=0.
     pub fn align_to_top(&mut self, margin: f64) {
-        let b = self.geometry.mesh.bounds();
-        let f = self.units.factor();
-        self.offset = [margin - b.min[0] * f, margin - b.min[1] * f, -b.max[2] * f];
+        let b = self.bounds();
+        self.offset[0] += margin - b.min[0];
+        self.offset[1] += margin - b.min[1];
+        self.offset[2] -= b.max[2];
     }
 }
 
@@ -307,6 +364,7 @@ pub fn import_bytes(
         }
     };
     let part = Part {
+        rotation: [0.; 3],
         geometry: Arc::new(Geometry {
             source_name: path
                 .file_name()

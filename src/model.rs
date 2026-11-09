@@ -4,12 +4,14 @@ use crate::process::Process;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 10;
 pub const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Stock {
+    #[serde(default)]
+    pub profile: crate::blank::StockProfile,
     pub width: f64,
     pub height: f64,
     pub thickness: f64,
@@ -155,6 +157,7 @@ impl Default for Project {
             post: PostSettings::default(),
             machine: crate::machine::MachineSetup::for_process(Process::Milling),
             stock: Stock {
+                profile: Default::default(),
                 width: 120.0,
                 height: 80.0,
                 thickness: 12.0,
@@ -495,6 +498,7 @@ impl Project {
         let project = Self {
             name: part.geometry.source_name.clone(),
             stock: Stock {
+                profile: Default::default(),
                 width: size[0] + 10.0,
                 height: size[1] + 10.0,
                 thickness: size[2].max(0.001),
@@ -505,6 +509,36 @@ impl Project {
         };
         crate::cam::validate_setup(&project)?;
         Ok(project)
+    }
+
+    /// Migrate stored drafts without requiring a finished machining setup.
+    pub fn migrate(&mut self) -> Result<(), String> {
+        // Older projects were implicitly milling projects.
+        if (self.format_version == 1 && self.part.is_none())
+            || (2..=9).contains(&self.format_version)
+        {
+            if self.machine.is_none() {
+                self.machine = crate::machine::MachineSetup::for_process(self.process);
+                if let Some(machine) = &mut self.machine {
+                    if let crate::machine::Tooling::Milling { shank_diameter, .. } =
+                        &mut machine.tooling
+                    {
+                        // Older files contain no measured reach. Keep their
+                        // paths available without inventing physical tool sizes.
+                        machine.check_tool_reach = false;
+                        *shank_diameter = self.tool.diameter;
+                    }
+                }
+            }
+            self.format_version = FORMAT_VERSION;
+        }
+        if self.format_version != FORMAT_VERSION {
+            return Err(format!(
+                "Unsupported project version {}",
+                self.format_version
+            ));
+        }
+        Ok(())
     }
 
     /// Load bounded input, migrate v1 projects, and validate the setup and geometry.
@@ -530,31 +564,7 @@ impl Project {
             return Err("Project exceeds the 128 MiB size limit".into());
         }
         let mut project: Self = serde_json::from_slice(data).map_err(|e| e.to_string())?;
-        // Older projects were implicitly milling projects.
-        if (project.format_version == 1 && project.part.is_none())
-            || (2..=8).contains(&project.format_version)
-        {
-            if project.machine.is_none() {
-                project.machine = crate::machine::MachineSetup::for_process(project.process);
-                if let Some(machine) = &mut project.machine {
-                    if let crate::machine::Tooling::Milling { shank_diameter, .. } =
-                        &mut machine.tooling
-                    {
-                        // Older files contain no measured reach. Keep their
-                        // paths available without inventing physical tool sizes.
-                        machine.check_tool_reach = false;
-                        *shank_diameter = project.tool.diameter;
-                    }
-                }
-            }
-            project.format_version = FORMAT_VERSION;
-        }
-        if project.format_version != FORMAT_VERSION {
-            return Err(format!(
-                "Unsupported project version {}",
-                project.format_version
-            ));
-        }
+        project.migrate()?;
         crate::cam::validate_setup(&project)?;
         Ok(project)
     }

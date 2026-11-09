@@ -50,6 +50,67 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
         }
     }
 }
+/// Defaults for an operation settings draft; committing still validates the job.
+pub fn operation_template(
+    p: &Project,
+    strategy: crate::model::Strategy,
+) -> crate::model::Operation {
+    use crate::model::{Operation, Strategy};
+    let s = &p.stock;
+    let mut op = Operation {
+        strategy,
+        name: strategy.label().into(),
+        tool_id: p.active_tool,
+        preset_id: p.active_preset,
+        x: s.width * 0.25,
+        y: s.height * 0.25,
+        width: s.width * 0.5,
+        height: s.height * 0.5,
+        depth: s.thickness.min(3.),
+        ..Operation::default()
+    };
+    match strategy {
+        Strategy::Drill | Strategy::CircularPocket => {
+            op.x = s.width / 2.;
+            op.y = s.height / 2.;
+            op.width = s.width.min(s.height) * 0.5;
+            op.height = op.width;
+        }
+        Strategy::Facing | Strategy::SurfaceRough | Strategy::ParallelFinish => {
+            op.x = 0.;
+            op.y = 0.;
+            op.width = s.width;
+            op.height = s.height;
+            if strategy.is_surface() {
+                op.depth = p
+                    .part
+                    .as_ref()
+                    .map_or(s.thickness, |part| -part.bounds().min[2]);
+                op.settings.surface_step = Some(0.5);
+                if let Some(part) = &p.part {
+                    crate::machining::link(&mut op, part)
+                }
+            }
+        }
+        Strategy::StockRough => {
+            if let Some(report) = p
+                .part
+                .as_ref()
+                .and_then(|part| crate::features::recognize(part).ok())
+            {
+                if let Some(e) = report.exterior {
+                    op.x = e.min[0];
+                    op.y = e.min[1];
+                    op.width = e.max[0] - e.min[0];
+                    op.height = e.max[1] - e.min[1];
+                    op.depth = -e.bottom_z;
+                }
+            }
+        }
+        _ => {}
+    }
+    op
+}
 pub fn simulate_project(
     project: &Project,
     progress: f64,
