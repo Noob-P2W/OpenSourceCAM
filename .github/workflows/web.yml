@@ -31,8 +31,12 @@ jobs:
           node-version: '22'
       - run: npm ci
         working-directory: web
-      - run: npx playwright install --with-deps chromium
-        working-directory: web
+      - name: Install browser test dependencies
+        run: |
+          mkdir -p dist
+          set -o pipefail
+          cd web
+          npx playwright install --with-deps chromium 2>&1 | tee ../dist/ci-failure.txt
       - name: Browser quality gate
         run: |
           CHROMIUM_PATH="$(node --input-type=module -e "import {chromium} from './web/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")" python3 scripts/check.py web
