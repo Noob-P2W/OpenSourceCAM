@@ -234,3 +234,86 @@ fn step_and_iges_use_the_same_rust_recognizer() {
         assert_eq!(report.skipped_openings, 0);
     }
 }
+
+#[test]
+fn closed_stl_with_sub_weld_edge_preserves_all_five_features() {
+    let mut part = model("examples/models/mount.stl");
+    let geometry = Arc::make_mut(&mut part.geometry);
+    let [a, b, _] = geometry.mesh.triangles[0];
+    let pa = geometry.mesh.vertices[a as usize];
+    let pb = geometry.mesh.vertices[b as usize];
+    let length = (0..3).map(|i| (pb[i] - pa[i]).powi(2)).sum::<f64>().sqrt();
+    let inserted = geometry.mesh.vertices.len() as u32;
+    geometry.mesh.vertices.push(std::array::from_fn(|i| {
+        pa[i] + (pb[i] - pa[i]) * 0.00001 / length
+    }));
+    let original = std::mem::take(&mut geometry.mesh.triangles);
+    let mut splits = 0;
+    for t in original {
+        if let Some(i) = (0..3).find(|i| {
+            let (x, y) = (t[*i], t[(*i + 1) % 3]);
+            (x == a && y == b) || (x == b && y == a)
+        }) {
+            let (x, y, z) = (t[i], t[(i + 1) % 3], t[(i + 2) % 3]);
+            geometry
+                .mesh
+                .triangles
+                .extend([[x, inserted, z], [inserted, y, z]]);
+            splits += 1;
+        } else {
+            geometry.mesh.triangles.push(t);
+        }
+    }
+    assert_eq!(splits, 2);
+    // Exercise an actual binary STL import, including its f32 coordinates and
+    // repeated vertices, rather than relying only on a constructed Part.
+    let mut bytes = vec![0u8; 80];
+    bytes.extend((geometry.mesh.triangles.len() as u32).to_le_bytes());
+    for t in &geometry.mesh.triangles {
+        bytes.extend([0u8; 12]);
+        for index in t {
+            for coordinate in geometry.mesh.vertices[*index as usize] {
+                bytes.extend((coordinate as f32).to_le_bytes());
+            }
+        }
+        bytes.extend([0u8; 2]);
+    }
+    let mesh = import::import_bytes(
+        Path::new("fine-detail.stl"),
+        Units::Millimetres,
+        &bytes,
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+    .geometry
+    .mesh
+    .clone();
+    Arc::make_mut(&mut part.geometry).mesh = mesh;
+    let before = part.clone();
+    let report = features::recognize(&part).unwrap();
+    assert_eq!(report.features.len(), 5);
+    assert_eq!(part, before);
+    // Preserving tiny faces must not allow an actual open seam through.
+    Arc::make_mut(&mut part.geometry).mesh.triangles.pop();
+    assert!(features::recognize(&part).unwrap_err().contains("closed"));
+}
+
+#[test]
+fn almost_coincident_exchange_seams_still_use_bounded_welding() {
+    let mut part = model("examples/models/mount.stl");
+    let geometry = Arc::make_mut(&mut part.geometry);
+    let original = geometry.mesh.clone();
+    geometry.mesh.vertices.clear();
+    geometry.mesh.triangles.clear();
+    for (face, t) in original.triangles.iter().enumerate() {
+        let start = geometry.mesh.vertices.len() as u32;
+        for index in t {
+            geometry
+                .mesh
+                .vertices
+                .push(original.vertices[*index as usize].map(|x| x + (face % 3) as f64 * 1e-7));
+        }
+        geometry.mesh.triangles.push([start, start + 1, start + 2]);
+    }
+    assert_eq!(features::recognize(&part).unwrap().features.len(), 5);
+}

@@ -203,6 +203,22 @@ impl Topology {
         })
     }
     fn build(part: &Part, cancel: &AtomicBool) -> Result<Self, String> {
+        // Preserve real short edges on closed meshes. Quantized welding is only
+        // a fallback for exchange meshes whose coincident seams differ slightly.
+        match Self::build_with_weld(part, cancel, false) {
+            Err(error) if error.starts_with("Recognition requires a closed,") => {
+                let welded = Self::build_with_weld(part, cancel, true);
+                cancelled(cancel)?;
+                welded.map_err(|fallback| format!("{error} Seam welding also failed: {fallback}"))
+            }
+            result => result,
+        }
+    }
+    fn build_with_weld(
+        part: &Part,
+        cancel: &AtomicBool,
+        approximate: bool,
+    ) -> Result<Self, String> {
         part.validate()?;
         let mut vertices = Vec::new();
         let mut weld = BTreeMap::new();
@@ -212,7 +228,15 @@ impl Topology {
                 cancelled(cancel)?;
             }
             let p = part.point(*v);
-            let key = p.map(|x| (x / WELD).round() as i64);
+            let key = p.map(|x| {
+                if approximate {
+                    ((x / WELD).round() as i64) as u64
+                } else if x == 0.0 {
+                    0 // +0 and -0 are the same position.
+                } else {
+                    x.to_bits()
+                }
+            });
             let id = *weld.entry(key).or_insert_with(|| {
                 vertices.push(p);
                 vertices.len() - 1

@@ -10,6 +10,11 @@ The operation is enabled and linked to the current model and placement. Smaller
 flat end mills can interpolate round holes. Blind flat floors require an end mill;
 matching drills can program through holes when sufficient bottom allowance exists.
 
+Recognition first checks exact shared-vertex topology, preserving short edges and
+small valid triangles. If exact topology has open seams, it retries the existing
+0.0001 mm quantized weld for exchange meshes; the result must still pass all
+closed-surface, orientation and degeneracy checks. No faces are removed.
+
 Recognition checks closed, oriented topology, complete wall profiles and supported
 floor/end boundaries. Only top-access vertical circular holes and axis-aligned
 rectangular blind pockets are currently supported. Fine polygons may be inferred
