@@ -16,6 +16,10 @@ let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},s
 let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null,lastStockRequest=0;
 let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
 const playbackToolCache=new Map();
+const geometryState={key:null,faces:null,face:null,report:null,feature:null,exterior:false};
+function geometryKey(){return project?.part?`${presentation.part_fingerprint}:${project.setup_face??'top'}`:null}
+function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,exterior:false});$('features').replaceChildren();highlight=null}}
+
 const viewport=new Viewport($('canvas'),()=>draw(),(text,error)=>status(text,error));
 function projectJSON(){return serializedProject??=JSON.stringify(project)}
 function refreshEditor(){if(!project)return;$('json').dataset.dirty='false';const data=projectJSON();const open=$('advanced-editor').open;$('json').value=(open||data.length<512*1024)?data:'';$('json').placeholder='Open this editor to load project JSON. Large models use extra memory in text form.'}
@@ -23,7 +27,7 @@ let canUndo=false,canRedo=false,lastState,autosaved=false,fieldsDirty=false,fiel
 function scheduleFields(){clearTimeout(fieldTimer);fieldTimer=setTimeout(()=>{if(document.activeElement?.matches('input:not([type=checkbox]),textarea')){scheduleFields();return}task(async()=>{})},350)}
 function markFields(){fieldsDirty=true;serializedProject=null;autosaved=false;path=null;simulation=null;clearStockRequests();pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';historyButtons();draw();scheduleFields()}
 function historyButtons(){$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','recognize','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation;$('play').disabled=busy||!path?.moves.length}
-function displayView(view){presentation={part_transform:view.part_transform,stock_outline:view.stock_outline,stock_definition:view.stock_definition,setup_issue:view.setup_issue};Object.defineProperty(project,'_display',{value:presentation,configurable:true});workspacePreview=view.workspace_preview||[];canUndo=view.can_undo;canRedo=view.can_redo}
+function displayView(view){presentation={setup_allowances:view.setup_allowances,part_fingerprint:view.part_fingerprint,part_transform:view.part_transform,stock_outline:view.stock_outline,stock_definition:view.stock_definition,setup_issue:view.setup_issue};Object.defineProperty(project,'_display',{value:presentation,configurable:true});workspacePreview=view.workspace_preview||[];canUndo=view.can_undo;canRedo=view.can_redo}
 function applyView(view){project=view.project;serializedProject=null;displayView(view)}
 function persist(){try{const data=projectJSON();const previous=localStorage.getItem('oc-project');let backupWarning=false;if(previous&&previous!==data){try{localStorage.setItem('oc-backup',previous)}catch{backupWarning=true}}localStorage.setItem('oc-project',data);autosaved=true;$('saved').textContent=backupWarning?'Saved on this device · previous backup could not be refreshed':'Saved on this device';return true}catch{autosaved=false;$('saved').textContent='Not saved — download a backup';status('Browser storage unavailable or full. Download a backup before closing.',true);return false}}
 async function sessionEdit(edit){applyView(await call('session-edit',{edit}));if(edit.kind==='move_operation')selected=edit.target;if(edit.kind==='duplicate_operation')selected=edit.index+1;if(edit.kind==='feature_operation')selected=project.operations.length-1;await changed(false);render()}
@@ -33,7 +37,7 @@ engine.onerror=()=>{for(const p of pending.values())p.reject(Error('CAM engine f
 return engine;}
 function engineCall(action,extra={}){return new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});const message={id,action,...(['session-start','normalize','draft'].includes(action)?{project:projectJSON()}:{}),...extra};worker.postMessage(message,extra.file?[extra.file.bytes]:[])})}
 async function call(action,extra={}){
- if(busy&&lastState&&['generate','recognize','simulate-current','plan-model','import','stock-obj'].includes(action)){
+ if(busy&&lastState&&['generate','recognize','simulate-current','plan-model','import','stock-obj','geometry'].includes(action)){
   const history=await engineCall('history-checkpoint');jobCheckpoint={history,project:lastState};$('job-controls').hidden=false;$('cancel-job').disabled=false;
  }
  return engineCall(action,extra);
@@ -47,7 +51,7 @@ function status(text,error=false){$('status').textContent=text;$('status').class
 async function task(fn){if(busy)return;pausePlayback();clearStockRequests();busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){status(e.message,e.name!=='AbortError')}finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
 async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();persist();throw e}}
- lastState=projectJSON();revision++;path=null;simulation=null;highlight=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';$('features').replaceChildren();refreshEditor();persist();historyButtons();draw()
+ lastState=projectJSON();revision++;path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();persist();historyButtons();draw()
 }
 function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);return input}
 function render(){if(!project)return;selected=Math.max(0,Math.min(selected,project.operations.length-1));$('title').textContent=project.name;$('title').title=project.name;renderSetup();renderExtras();refreshEditor();shell?.render();draw()}
@@ -76,10 +80,11 @@ function paint(){
  if(!project)return;
 const result=viewport.draw(project,workspacePreview,path,Number($('progress').value),$('show-simulation').checked?simulation:null,highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null,$('show-tool').checked?playbackTool:null);
  if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
- if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}%${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
+ if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}% · ${simulation.resolution} cells${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
 }
 $('view').onchange=()=>viewport.setView($('view').value);$('fit-view').onclick=()=>viewport.fit();$('zoom-in').onclick=()=>viewport.magnify(1.25);$('zoom-out').onclick=()=>viewport.magnify(.8);
 for(const id of ['wireframe','show-stock','selected-path','show-tool'])$(id).oninput=draw;
+$('playback-detail').onchange=()=>{clearStockRequests();if(path)path.preview_initial=null;requestStockPreview();draw()};
 $('show-simulation').oninput=()=>{clearStockRequests();if($('show-simulation').checked)requestStockPreview(true);else $('stock-playback-state').textContent='';draw()};
 $('progress').oninput=()=>{pausePlayback();requestStockPreview(true);draw()};
 new ResizeObserver(draw).observe($('canvas'));
@@ -122,23 +127,23 @@ $('plan-margin').oninput=()=>{$('stock-margin').value=$('plan-margin').value};$(
 function clearStockRequests(){stockEpoch++;stockWanted=null;if(!path||!$('show-simulation').checked)$('stock-playback-state').textContent='';clearTimeout(stockTimer);stockTimer=null}
 function requestStockPreview(reset=false){
  if(!$('show-simulation').checked||!path?.moves.length)return;
- const progress=Number($('progress').value)/100;
- if(reset){clearStockRequests();simulation=path.initial_stock?{...path.initial_stock,resolution:32,preview:true}:null;draw()}
- if(progress===0){stockWanted=null;$('stock-playback-state').textContent='Uncut stock · 0%';return}
- stockWanted={progress,epoch:stockEpoch,revision,path};
+ const progress=Number($('progress').value)/100,resolution=Number($('playback-detail').value);
+ if(reset){clearStockRequests();simulation=path.preview_initial?.resolution===resolution?path.preview_initial:path.initial_stock?{...path.initial_stock,resolution:32,preview:true}:null;draw()}
+ if(progress===0&&(resolution===32||path.preview_initial?.resolution===resolution)){stockWanted=null;$('stock-playback-state').textContent='Uncut stock · 0%';return}
+ stockWanted={progress,resolution,epoch:stockEpoch,revision,path};
  $('stock-playback-state').textContent=`Stock ${((simulation?.summary.progress||0)*100).toFixed(1)}% · updating`;
  pumpStockPreview();
 }
 function pumpStockPreview(){
  if(stockRequest||!stockWanted)return;
  if(busy){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},100);return}
- const wait=Math.max(0,250-(performance.now()-lastStockRequest));
+ const wait=Math.max(0,Math.max(250,stockWanted.resolution*2)-(performance.now()-lastStockRequest));
  if(wait){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},wait);return}
  const request=stockWanted;stockWanted=null;stockRequest=true;lastStockRequest=performance.now();
- engineCall('stock-preview',{progress:request.progress,resolution:32}).then(value=>{
+ engineCall('stock-preview',{progress:request.progress,resolution:request.resolution}).then(value=>{
   if(request.epoch!==stockEpoch||request.revision!==revision||request.path!==path||!$('show-simulation').checked)return;
   if(request.progress>Number($('progress').value)/100+1e-9)return;
-  simulation={...value,resolution:32,preview:true};
+  simulation={...value,resolution:request.resolution,preview:true};if(request.progress===0&&request.resolution>32)path.preview_initial=simulation;
   $('stock-playback-state').textContent=`Stock ${(value.summary.progress*100).toFixed(1)}% · playback preview`;
   $('save-stock').disabled=false;draw();
  }).catch(error=>{if(request.epoch===stockEpoch){clearStockRequests();pausePlayback();status(`Stock playback paused: ${error.message}`,true)}}).finally(()=>{stockRequest=false;pumpStockPreview()});
@@ -189,6 +194,53 @@ function renderSetup(){
  field(tools,'Active tool',project,'active_tool','id',[['','Choose a tool'],...project.tool_library.tools.filter(t=>t.uses.includes(project.process)).map(t=>[String(t.id),t.name])]);const tool=project.tool_library.tools.find(t=>t.id===project.active_tool);if(tool){if(!tool.presets.some(p=>p.id===project.active_preset)){const hint=document.createElement('p');hint.textContent='Select a cutting preset before planning.';tools.append(hint)}field(tools,'Cutting preset',project,'active_preset','id',[['','Choose a preset'],...tool.presets.map(p=>[String(p.id),p.name])]);tools=setupGroup(toolsRoot,'Tool dimensions & cutting data',toolOpen);for(const key of ['diameter','flute_length','stickout'])if(key in tool.geometry)field(tools,`${key.replaceAll('_',' ')} · mm`,tool.geometry,key);const preset=tool.presets.find(p=>p.id===project.active_preset);if(preset)for(const key of ['cut_feed','plunge_feed','spindle_rpm','step_down','step_over'])if(key in preset.values)field(tools,({cut_feed:'Cut feed · mm/min',plunge_feed:'Plunge feed · mm/min',spindle_rpm:'Spindle · RPM',step_down:'Step down · mm',step_over:'Step over · %'})[key],preset.values,key)} }
 }
 $('tools-file').onchange=()=>task(async()=>{const f=$('tools-file').files[0];if(!f)return;$('tools-file').value='';if(f.size>8*1024*1024)throw Error('Tool library exceeds 8 MiB');await sessionEdit({kind:'import_library',data:await f.text(),replace:$('replace-library').checked});status('Tool library imported. Select an active tool and cutting preset in Setup.')});
+let faceLoad=null;
+function describeFace(){
+ const face=geometryState.face;
+ $('plane-description').textContent=face?(face.horizontal?`XY machining plane at Z ${face.z.toFixed(3)} mm · tool axis +Z. Recognize features on this level.`:`Selected face normal ${face.normal.map(v=>v.toFixed(2)).join(', ')}. Align it to +Z and fit a new setup before machining.`):'Select a model face, then recognize its holes and pockets. Stock top is Z=0.';
+ $('use-machining-face').hidden=!face;$('use-machining-face').textContent=face?.horizontal?'Use this machining plane':'Align face to +Z & fit stock';
+ $('face-selected').hidden=!face?.horizontal;
+ if(face)$('machining-face').value=String(face.id);
+}
+async function loadGeometryFaces(){
+ updateGeometryState();if(!project?.part){describeFace();return}
+ const key=geometryKey();
+ try{
+  if(!geometryState.faces){
+   if(faceLoad?.key===key)return;
+   const request={key};faceLoad=request;
+   try{const faces=await engineCall('geometry',{data:{action:'faces'}});if(geometryKey()!==key)return;geometryState.faces=faces}finally{if(faceLoad===request)faceLoad=null}
+  }
+  if(geometryKey()!==key)return;
+  const select=$('machining-face');select.replaceChildren(new Option('Highest XY face / stock top',''));
+  for(const face of geometryState.faces)select.add(new Option(`Face ${face.id+1} · ${face.horizontal?`Z ${face.z.toFixed(2)} mm`:`normal ${face.normal.map(v=>v.toFixed(1)).join(',')}`} · ${face.area.toFixed(1)} mm²`,String(face.id)));
+  if(project.setup_face!==null&&project.setup_face!==undefined&&!geometryState.face){const face=await engineCall('geometry',{data:{action:'face',triangle:project.setup_face}});if(geometryKey()!==key)return;geometryState.face=face;highlight=face;draw()}
+  describeFace();
+ }catch(error){if(geometryKey()===key)status(error.message,true)}
+}
+async function selectMachiningFace(face){
+ $('show-simulation').checked=false;clearStockRequests();
+ if(face.horizontal&&project.setup_face!==face.id)await sessionEdit({kind:'set_machining_face',triangle:face.id,align:false});
+ geometryState.face=face;geometryState.feature=null;geometryState.exterior=false;highlight=face;describeFace();draw();
+ status(face.horizontal?'Machining plane selected. Recognize features on this face level.':'Face selected. Use Align face to +Z & fit stock for a new setup.');
+}
+function clearGeometrySelection(){geometryState.feature=null;geometryState.exterior=false;highlight=geometryState.face;draw()}
+async function geometryDraft(strategy,index){
+ if(index!==undefined){const draft=await call('geometry',{data:{action:'feature_draft',index,strategy}});geometryState.feature=index;geometryState.exterior=false;highlight=geometryState.report?.features[index]||null;draw();return draft;}
+ if(strategy==='facing')return geometryState.face?call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}}):null;
+ if(geometryState.exterior)return call('geometry',{data:{action:'exterior_draft',strategy}});
+ if(Number.isInteger(geometryState.feature))return call('geometry',{data:{action:'feature_draft',index:geometryState.feature,strategy}});
+ if(geometryState.face&&!geometryState.face.horizontal)throw Error('Align the selected machining face to +Z before creating 2.5D toolpaths');
+ if(strategy==='facing'&&geometryState.face)return call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}});
+ return null;
+}
+$('load-faces').onclick=()=>task(loadGeometryFaces);
+$('machining-face').onchange=()=>task(async()=>{const value=$('machining-face').value;if(value===''){project.setup_face=null;await changed();await loadGeometryFaces();return}await selectMachiningFace(await call('geometry',{data:{action:'face',triangle:Number(value)}}))});
+$('use-machining-face').onclick=()=>task(async()=>{const face=geometryState.face;if(!face)return;await sessionEdit({kind:'set_machining_face',triangle:face.id,align:!face.horizontal});await loadGeometryFaces();status(face.horizontal?'Machining plane selected':'Face aligned to +Z and stock fitted. Review fixture placement and rebuild model-linked operations.');viewport.fit()});
+$('face-selected').onclick=()=>shell.newOperation('facing');
+$('clear-geometry').onclick=clearGeometrySelection;
+function toggleFacePicking(){const enabled=!viewport.onPick;if(enabled){$('show-simulation').checked=false;clearStockRequests();draw();}$('pick-face').setAttribute('aria-pressed',String(enabled));viewport.onPick=enabled?ray=>task(async()=>{const face=await call('geometry',{data:{action:'pick',...ray}});await selectMachiningFace(face);shell.open('feature-dialog')}):null;status(enabled?'Tap or click a model face. Drag still rotates the view.':'Face picking off')}
+$('pick-face').onclick=toggleFacePicking;$('pick-face-panel').onclick=()=>{if(!viewport.onPick)toggleFacePicking();shell.close('feature-dialog')};
 $('recognize').onclick=()=>task(async()=>{
  shell.close('feature-dialog');const container=$('features');container.replaceChildren();
  const message=text=>{const p=document.createElement('p');p.textContent=text;container.append(p)};
@@ -199,14 +251,15 @@ $('recognize').onclick=()=>task(async()=>{
   message('Review the error above. For mesh errors, check that the STL is a closed solid with consistent face orientation; repair it in your CAD/mesh application and reimport it. STEP is also available if you have the original CAD model.');
   shell.open('feature-dialog');throw error;
  }
- shell.open('feature-dialog');const count=report.features.length;
+ geometryState.report=report;geometryState.feature=null;geometryState.exterior=false;shell.open('feature-dialog');const count=report.features.length;
  message(count?`${count} candidate features found. Review dimensions and accessibility before adding operations.`:'No supported features found. This recognizer looks for openings on the highest horizontal face, along the Z axis. Sideways features, curved surfaces, tapers, counterbores and pockets with islands are not currently supported.');
  if(report.skipped_openings)message(`${report.skipped_openings} top-face openings were skipped because their geometry is unsupported.`);
  if(report.machining_error)message(`Complete stock planning unavailable: ${report.machining_error}`);
  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Recognition limits';details.append(summary);
  for(const text of report.notes){const p=document.createElement('p');p.textContent=text;details.append(p)}container.append(details);
  if(!count){const useSurface=document.createElement('button');useSurface.textContent='Use 3D surface planning';useSurface.onclick=()=>{shell.close('feature-dialog');shell.openPlanning('surface');status('Use Plan 3D surface for accessible upper surfaces. Review blank allowances and tooling first.')};container.append(useSurface)}
- report.features.forEach((feature,index)=>{const review=document.createElement('button');review.textContent=`View ${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`Ø ${feature.diameter.toFixed(2)} mm`:`${(feature.max[0]-feature.min[0]).toFixed(2)} × ${(feature.max[1]-feature.min[1]).toFixed(2)} mm`}`;review.onclick=()=>{shell.close('feature-dialog');highlight=feature;document.body.dataset.preview='true';viewport.fit();draw();status('Feature highlighted in orange. Review the dimensions and accessibility before adding.')};container.append(review);const b=document.createElement('button');b.dataset.featureAdd='true';b.textContent=`Add ${feature.kind.replaceAll('_',' ')} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;b.onclick=()=>task(async()=>{await sessionEdit({kind:'feature_operation',index});shell.close('feature-dialog');shell.openOperation(selected);status('Feature operation added disabled. Review tooling, depth and placement before enabling it.')});container.append(b)});
+ report.features.forEach((feature,index)=>{const review=document.createElement('button');review.textContent=`View ${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`Ø ${feature.diameter.toFixed(2)} mm`:`${(feature.max[0]-feature.min[0]).toFixed(2)} × ${(feature.max[1]-feature.min[1]).toFixed(2)} mm`}`;review.dataset.featureView=String(index);review.onclick=()=>{$('show-simulation').checked=false;clearStockRequests();geometryState.feature=index;geometryState.exterior=false;highlight=feature;container.querySelectorAll('[data-feature-view]').forEach(button=>button.setAttribute('aria-pressed',String(button===review)));document.body.dataset.preview='true';viewport.fit();draw();status('Feature highlighted in orange. Review the dimensions and accessibility before adding.')};container.append(review);const b=document.createElement('button');b.dataset.featureAdd='true';b.textContent=`Add ${feature.kind.replaceAll('_',' ')} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;b.onclick=()=>task(async()=>{if(!project.tool_library.tools.length)await sessionEdit({kind:'initialize_tools'});await sessionEdit({kind:'feature_operation',index});shell.close('feature-dialog');shell.openOperation(selected);status('Feature operation added disabled. Review tooling, depth and placement before enabling it.')});container.append(b)});
+ if(report.exterior){const exterior=document.createElement('button');exterior.textContent='Select part exterior';exterior.onclick=()=>{const e=report.exterior;geometryState.exterior=true;geometryState.feature=null;highlight={outline:[[e.min[0],e.min[1],e.top_z],[e.max[0],e.min[1],e.top_z],[e.max[0],e.max[1],e.top_z],[e.min[0],e.max[1],e.top_z]]};draw();status('Part exterior selected for outside contour or clearing')};container.append(exterior)}
  status(count?'Recognition complete. Candidates require review; choose suitable tooling in Setup before adding.':'Recognition complete: no supported features found. See the explanation in Operations.');
 });
 function closeOperationMenu(){$('operation-menu').hidden=true}
@@ -309,7 +362,7 @@ $('redo').onclick=()=>task(()=>sessionEdit({kind:'redo'}));
 $('backup').onclick=()=>download(projectJSON(),filename('.draft.json'));
 $('recover').onclick=()=>task(async()=>{const data=localStorage.getItem('oc-backup');if(!data)throw Error('No previous autosave is available');const p=await call('draft',{project:data});if(await confirmAction({title:'Restore previous autosave?',message:'The current workspace remains available through Undo.',accept:'Restore autosave'})){await adopt(p);status('Previous autosave restored')}});
 window.addEventListener('beforeunload',e=>{if(!autosaved){e.preventDefault();e.returnValue=''}});
-shell=initShell({project:()=>project,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,select:index=>{selected=index},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome});
+shell=initShell({project:()=>project,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,select:index=>{selected=index},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,geometryPanel:loadGeometryFaces,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
 $('machine-file').onchange=()=>task(async()=>{const file=$('machine-file').files[0];if(!file)return;$('machine-file').value='';await shell.importMachine(file);shell.openMachines()});
 await task(async()=>{catalog=await call('catalog');await shell.restoreLibraries();renderHome();let saved,failed=false;try{saved=localStorage.getItem('oc-project')}catch{failed=true}if(saved){try{project=await call('draft',{project:saved}).catch(()=>call('normalize',{project:saved}))}catch{failed=true;$('recovery').hidden=false;$('raw-backup').onclick=()=>download(saved,'recovered-workspace.draft.json')}}if(!project)project=await call('sample');applyView(await call('session-start'));lastState=projectJSON();render();viewport.setView(shell.prefs().defaultView);if(sessionStorage.getItem('oc-screen')==='workbench')showWorkspace();autosaved=!failed;status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':'Ready · All machining calculations run on this device',failed);$('saved').textContent=failed?'Recovery required':'Workspace restored';});
 if('serviceWorker'in navigator){

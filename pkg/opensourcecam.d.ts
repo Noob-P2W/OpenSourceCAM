@@ -5,6 +5,7 @@ export class WebSession {
     free(): void;
     [Symbol.dispose](): void;
     edit(data: string): string;
+    geometry(query: string): string;
     history_checkpoint(): string;
     import_file(name: string, data: Uint8Array, inches: boolean, role: string): string;
     machine_profile(): string;
@@ -60,6 +61,7 @@ export interface InitOutput {
     readonly run: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly sample: (a: number) => void;
     readonly websession_edit: (a: number, b: number, c: number, d: number) => void;
+    readonly websession_geometry: (a: number, b: number, c: number, d: number) => void;
     readonly websession_history_checkpoint: (a: number, b: number) => void;
     readonly websession_import_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly websession_machine_profile: (a: number, b: number) => void;
