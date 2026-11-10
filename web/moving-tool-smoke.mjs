@@ -36,7 +36,7 @@ try{
   drill.name='Measured 8 mm drill';Object.assign(drill.geometry,{diameter:8,shaft_diameter:8,flute_length:20,shoulder_length:20,overall_length:70,stickout:40,gauge_length:70});
   Object.assign(holder.geometry,{body_diameter:20,overall_length:20,clamping_length:15});
   for(const [index,tool] of [mill,drill].entries()){tool.post.length_offset=index+1;tool.post.pocket=index+1}
-  Object.assign(project.machine.tool_changer,{mode:'milling_atc',controller_managed:true});project.post.processor='mach3';project.active_tool=mill.id;project.active_preset=mill.default_preset;
+  Object.assign(project.machine.tool_changer,{mode:'manual',manual_position:[10,10,25],controller_managed:false});project.post.processor='mach3';project.active_tool=mill.id;project.active_preset=mill.default_preset;
   const pocket=structuredClone(seed.operations[0]);pocket.tool_id=null;pocket.preset_id=null;
   const hole=structuredClone(pocket);Object.assign(hole,{name:'Drill the hole',tool_id:drill.id,strategy:'drill_once',x:90,y:60,depth:4});
   project.operations=[pocket,hole,{...structuredClone(pocket),name:'Return to the end mill',tool_id:mill.id}];
@@ -56,6 +56,10 @@ try{
   assert.ok(Number(await canvas.getAttribute('data-tool-triangles'))>200,'Draw the assembly surface, not a point');
   assert.ok(await visibleToolPixels(page)>100,'The actual tool must occupy visibly more than a cursor dot');
   await page.locator('#show-simulation').setChecked(true);await page.locator('#stock-playback-state').filter({hasText:'playback preview'}).waitFor();
+  await page.locator('#playback-speed').selectOption('128');await page.locator('#play').click();await page.waitForTimeout(700);
+  const synchronized=await canvas.evaluate(canvas=>{const percent=Number(canvas.dataset.stockProgress),time=percent/100*window.generatedPath.seconds,path=window.generatedPath,move=path.moves.find(m=>m.end_seconds>time)||path.moves.at(-1),f=Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)));return {display:Number(canvas.dataset.displayProgress),stock:percent,actual:canvas.dataset.toolTip.split(',').map(Number),expected:move.from.map((v,i)=>v+(move.to[i]-v)*f)}});
+  assert.ok(Math.abs(synchronized.display-synchronized.stock)<1e-8,'The cutter must never outrun its displayed stock snapshot');for(let i=0;i<3;i++)assert.ok(Math.abs(synchronized.actual[i]-synchronized.expected[i])<1e-6,'Rendered tool tip must match the processed stock time');
+  await page.locator('#play').click();await page.locator('#playback-speed').selectOption('1');
   assert.equal(await page.locator('.playback-controls').evaluate(root=>{const host=root.closest('.viewer').getBoundingClientRect();return [...root.children].every(el=>{const rect=el.getBoundingClientRect();return rect.left>=host.left&&rect.right<=host.right+1&&el.scrollWidth<=el.clientWidth+1})}),true,'All playback controls must fit the device width');
   const cutting=await seek(1,.8);assert.match(await page.locator('#playback-tool-state').textContent(),/T2.*Measured 8 mm drill/);assert.ok(await visibleToolPixels(page)>100);await page.locator('#stock-playback-state').filter({hasText:`${cutting.percent.toFixed(1)}%`}).waitFor();
   await page.screenshot({path:`/tmp/cam-moving-tool-${width}-${software?'software':'webgl'}.png`});

@@ -18,7 +18,7 @@ let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
 const playbackToolCache=new Map();
 const geometryState={key:null,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false};
 function geometryKey(){return project?.part?`${presentation.part_fingerprint}:${project.setup_face??'top'}`:null}
-function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false});$('features').replaceChildren();highlight=null}}
+function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false});$('features').replaceChildren();$('feature-tags').replaceChildren();$('feature-count').textContent='Not scanned';highlight=null}}
 
 const viewport=new Viewport($('canvas'),()=>draw(),(text,error)=>status(text,error));
 function projectJSON(){return serializedProject??=JSON.stringify(project)}
@@ -51,7 +51,7 @@ function status(text,error=false){$('status').textContent=text;$('status').class
 async function task(fn){if(busy)return;pausePlayback();clearStockRequests();busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){status(e.message,e.name!=='AbortError')}finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
 async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();persist();throw e}}
- lastState=projectJSON();revision++;path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();persist();historyButtons();draw()
+ lastState=projectJSON();revision++;viewport.controls.hiddenOperations?.clear();path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();persist();historyButtons();draw()
 }
 function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);return input}
 function render(){if(!project)return;selected=Math.max(0,Math.min(selected,project.operations.length-1));$('title').textContent=project.name;$('title').title=project.name;renderSetup();renderExtras();refreshEditor();shell?.render();draw()}
@@ -78,11 +78,15 @@ let drawPending=false;
 function draw(){if(drawPending)return;drawPending=true;requestAnimationFrame(()=>{drawPending=false;paint()})}
 function paint(){
  if(!project)return;
-const result=viewport.draw(project,workspacePreview,path,Number($('progress').value),$('show-simulation').checked?simulation:null,highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null,$('show-tool').checked?playbackTool:null);
- if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
- if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}% · ${simulation.resolution} cells${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
+const visibleProgress=$('show-simulation').checked&&simulation&&path?simulation.summary.progress*100:Number($('progress').value);
+$('canvas').dataset.stockProgress=$('show-simulation').checked&&simulation?String(simulation.summary.progress*100):'';if(path)$('playback-clock').textContent=`${formatTime(visibleProgress/100*path.seconds)} / ${formatTime(path.seconds)}`;
+const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show-simulation').checked?simulation:null,highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null,$('show-tool').checked?playbackTool:null);
+ positionFeatureTags(result);
+ if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name} · cutting Ø${result.tool.cutting_diameter} mm${result.tool.shaft_diameter!==result.tool.cutting_diameter?` · shaft Ø${result.tool.shaft_diameter} mm`:""}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
+ if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}% · ${simulation.resolution} cells · spacing ${Math.max(...simulation.summary.cell_size).toFixed(3)} mm${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
 }
 $('view').onchange=()=>viewport.setView($('view').value);$('fit-view').onclick=()=>viewport.fit();$('zoom-in').onclick=()=>viewport.magnify(1.25);$('zoom-out').onclick=()=>viewport.magnify(.8);
+$('show-paths').oninput=()=>{viewport.controls.paths=$('show-paths').checked;draw()};
 for(const id of ['wireframe','show-stock','selected-path','show-tool'])$(id).oninput=draw;
 $('playback-detail').onchange=()=>{clearStockRequests();if(path)path.preview_initial=null;requestStockPreview();draw()};
 $('show-simulation').oninput=()=>{clearStockRequests();if($('show-simulation').checked)requestStockPreview(true);else $('stock-playback-state').textContent='';draw()};
@@ -137,7 +141,7 @@ function requestStockPreview(reset=false){
 function pumpStockPreview(){
  if(stockRequest||!stockWanted)return;
  if(busy){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},100);return}
- const wait=Math.max(0,Math.max(250,stockWanted.resolution*2)-(performance.now()-lastStockRequest));
+ const wait=Math.max(0,250-(performance.now()-lastStockRequest));
  if(wait){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},wait);return}
  const request=stockWanted;stockWanted=null;stockRequest=true;lastStockRequest=performance.now();
  engineCall('stock-preview',{progress:request.progress,resolution:request.resolution}).then(value=>{
@@ -161,7 +165,7 @@ function playbackTick(now){
  playbackFrame=null;
  if(!playing)return;
  playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/1000/Math.max(path?.seconds||0,0.001)*100*Number($('playback-speed').value));
- lastPlaybackTime=now;$('progress').value=playbackProgress;$('playback-clock').textContent=`${formatTime(playbackProgress/100*(path?.seconds||0))} / ${formatTime(path?.seconds||0)}`;requestStockPreview();draw();
+ lastPlaybackTime=now;$('progress').value=playbackProgress;requestStockPreview();draw();
  if(playbackProgress===100)pausePlayback();
  else playbackFrame=requestAnimationFrame(playbackTick);
 }
@@ -196,17 +200,18 @@ function renderSetup(){
 }
 $('tools-file').onchange=()=>task(async()=>{const f=$('tools-file').files[0];if(!f)return;$('tools-file').value='';if(f.size>8*1024*1024)throw Error('Tool library exceeds 8 MiB');await sessionEdit({kind:'import_library',data:await f.text(),replace:$('replace-library').checked});status('Tool library imported. Select an active tool and cutting preset in Setup.')});
 
-// Display-only overlay of the recognized cavity walls/floor; never used for machining.
-function featureHighlight(feature,outline=feature.outline,normal=[0,0,1]){
- const bottom=outline.map(p=>p.map((v,i)=>v-normal[i]*(feature.opening_z-feature.bottom_z))),fill=[];
- outline.forEach((p,i)=>{const j=(i+1)%outline.length;fill.push([p,outline[j],bottom[j]],[p,bottom[j],bottom[i]])});
- if(!feature.through)for(let i=1;i+1<bottom.length;i++)fill.push([bottom[0],bottom[i],bottom[i+1]]);
+// Display the selected original triangles; do not invent walls or floors.
+function featureHighlight(feature,outline=feature.outline){
+ const mesh=project.part?.geometry.mesh,matrix=presentation.part_transform;
+ const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v;
+ const fill=(feature.detail?.triangles||[]).filter(i=>mesh?.triangles[i]).map(i=>mesh.triangles[i].map(v=>transform(mesh.vertices[v])));
  return {outline,fill};
 }
-function clearGeometrySelection(){geometryState.feature=null;geometryState.exterior=false;highlight=null;draw()}
-function cancelPicking(){viewport.onPick=null;$('pick-face').hidden=true;$('selection-hint').hidden=true;draw()}
+let pendingFeaturePick=null;
+function clearGeometrySelection(){geometryState.feature=null;geometryState.exterior=false;geometryState.selectedFeature=null;geometryState.selectedEntry=null;highlight=null;$('features').querySelectorAll('[aria-pressed=true]').forEach(b=>b.setAttribute('aria-pressed','false'));$('feature-tags').querySelectorAll('[aria-pressed=true]').forEach(b=>b.setAttribute('aria-pressed','false'));draw()}
+function cancelPicking(){pendingFeaturePick=null;viewport.onPick=null;$('pick-face').hidden=true;$('selection-hint').hidden=true;draw()}
 function beginPick(callback,label='Pick a face on the model'){
- shell.close('feature-dialog');shell.close('operation-dialog');$('show-simulation').checked=false;clearStockRequests();
+ shell.close('operation-dialog');$('show-simulation').checked=false;clearStockRequests();
  $('pick-face').hidden=false;$('selection-hint').hidden=false;$('selection-hint').textContent=label;
  viewport.onPick=ray=>task(async()=>{await callback(ray);cancelPicking()});draw();status(label);
 }
@@ -218,37 +223,53 @@ async function geometryDraft(strategy,index){
  return null;
 }
 async function pickOperation(strategy,commit){
+ pendingFeaturePick={strategy,commit};
  beginPick(async ray=>{
   if(strategy==='facing'){
    const face=await call('geometry',{data:{action:'pick',...ray}});highlight=face;geometryState.face=face;draw();
    const draft=await call('geometry',{data:{action:'facing_draft',triangle:face.id}});await commit(draft);
   }else{
-   const feature=await call('geometry',{data:{action:'pick_feature',...ray}});geometryState.selectedFeature=feature;highlight=featureHighlight(feature);draw();
+   const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});geometryState.selectedFeature=feature;highlight=featureHighlight(feature);draw();
    await commit(await call('geometry',{data:{action:'feature_geometry',feature,strategy}}));
   }
  },strategy==='facing'?'Click the surface to face down to · drag to rotate':'Click inside the hole or pocket opening · drag to rotate');
 }
-async function recognizeAll(){
- status('Inspecting features across model orientations and levels…');
- $('features').replaceChildren();let survey;try{survey=await call('geometry',{data:{action:'survey'}})}catch(error){const p=document.createElement('p');p.textContent=`Recognition could not inspect this model. ${error.message}`;$('features').append(p);shell.open('feature-dialog');throw error;}geometryState.survey=survey;
- const container=$('features');container.replaceChildren();
- const note=document.createElement('p');note.textContent=`${survey.features.length} supported feature candidates across the part. Select one to inspect it. Recognition does not create operations.`;container.append(note);
- for(const entry of survey.features){
-  const feature=entry.feature,card=document.createElement('div');card.className='feature-card';const button=document.createElement('button');button.dataset.featureView='true';button.textContent=`${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`Ø ${feature.diameter.toFixed(2)} mm`:`${(feature.max[0]-feature.min[0]).toFixed(2)} × ${(feature.max[1]-feature.min[1]).toFixed(2)} mm`} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;
-  button.onclick=()=>{geometryState.selectedFeature=entry.current_orientation?feature:null;highlight=featureHighlight(feature,entry.outline,entry.normal);$('show-simulation').checked=false;clearStockRequests();container.querySelectorAll('[data-feature-view]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));draw();status(`${button.textContent} · tool direction ${entry.normal.map(n=>n.toFixed(2)).join(', ')}`)};card.append(button);
-  for(const orientation of entry.orientations.filter(o=>!o.current)){const align=document.createElement('button');align.textContent='Orient this side upward…';align.onclick=()=>task(async()=>{if(!await confirmAction({title:'Change machining setup?',message:'Rotate the part and refit the stock for this direction? Existing model-linked paths will need rebuilding. Reseat fixtures after changing the setup.',accept:'Orient & fit stock'}))return;await sessionEdit({kind:'set_machining_face',triangle:orientation.face,align:true});viewport.fit();await recognizeAll()});card.append(align)}
+function featureText(entry){const f=entry.feature;return `${entry.label||f.kind.replaceAll('_',' ')} · ${f.diameter?`Ø ${f.diameter.toFixed(2)} mm`:`${(f.max[0]-f.min[0]).toFixed(2)} × ${(f.max[1]-f.min[1]).toFixed(2)} mm`} · depth ${(f.opening_z-f.bottom_z).toFixed(2)} mm`}
+function selectRecognized(entry,index){
+ geometryState.selectedFeature=entry.current_orientation?entry.feature:null;geometryState.selectedEntry=index;highlight=featureHighlight(entry.feature,entry.outline);
+ $('features').querySelectorAll('[data-feature-view]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.featureView)===index)));
+ $('feature-tags').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.featureTag)===index)));
+ draw();status(`${featureText(entry)}${entry.machinable?'':' · inspection candidate; use a suitable 3D / dedicated strategy'}`);
+ const pending=pendingFeaturePick;
+ if(pending&&entry.current_orientation&&entry.machinable){task(async()=>{const op=await call('geometry',{data:{action:'feature_geometry',feature:entry.feature,strategy:pending.strategy}});await pending.commit(op);cancelPicking()})}
+ else if(innerWidth<=700)shell.hideBrowser();
+}
+function renderFeatureTree(survey){
+ const container=$('features');container.replaceChildren();const tags=$('feature-tags');tags.replaceChildren();
+ $('feature-count').textContent=String(survey.features.length);$('feature-notes').textContent=survey.features.length?'Select an item here or a marker on the part.': 'No supported candidates found. Use 3D surface operations for unclassified surfaces.';
+ for(const [index,entry] of survey.features.entries()){
+  const card=document.createElement('div');card.className='feature-card';const button=document.createElement('button');button.className='tree-feature';button.dataset.featureView=String(index);button.textContent=featureText(entry);button.onclick=()=>selectRecognized(entry,index);card.append(button);if(!entry.current_orientation){const hint=document.createElement('small');hint.textContent='Other setup direction';card.append(hint)}
+  if(entry.feature.detail?.profiles?.length>1){const meta=document.createElement('small');meta.textContent=`${entry.feature.detail.profiles.length} wall profile levels${entry.feature.detail.floor_z!==null&&entry.feature.detail.floor_z!==undefined?` · floor Z ${entry.feature.detail.floor_z.toFixed(2)} mm`:''}`;card.append(meta);}
+  const other=entry.orientations.filter(o=>!o.current);if(other.length){const directions=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Other setup directions';directions.append(summary);for(const orientation of other){const align=document.createElement('button');align.textContent='Orient this side upward…';align.onclick=()=>task(async()=>{if(!await confirmAction({title:'Change machining setup?',message:'Rotate the part and refit the stock for this direction? Existing linked paths need rebuilding. Reseat fixtures after changing the setup.',accept:'Orient & fit stock'}))return;await sessionEdit({kind:'set_machining_face',triangle:orientation.face,align:true});viewport.fit();await recognizeAll()});directions.append(align)}card.append(directions)}
   container.append(card);
+  if(index<80&&entry.marker){const tag=document.createElement('button');tag.className='feature-tag';tag.dataset.featureTag=String(index);tag.title=featureText(entry);tag.setAttribute('aria-label',`Select ${featureText(entry)}`);tag.textContent=entry.feature.diameter?`⊙ ${entry.feature.diameter.toFixed(1)}`:'◇';tag.onclick=()=>selectRecognized(entry,index);tags.append(tag)}
  }
- if(!survey.features.length){const b=document.createElement('button');b.textContent='Use 3D surface planning';b.onclick=()=>{shell.close('feature-dialog');shell.openPlanning('surface')};container.append(b)}
- for(const text of survey.notes){const p=document.createElement('p');p.className='note';p.textContent=text;container.append(p)}
- shell.open('feature-dialog');status(survey.features.length?'Recognition complete. Select candidates to inspect; create operations from the machining toolbar.':'Recognition complete: no supported features found. Use 3D surface planning for general surfaces.');
+ const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Recognition details';details.append(summary);for(const text of survey.notes){const p=document.createElement('p');p.className='note';p.textContent=text;details.append(p)}container.append(details);
+}
+function positionFeatureTags(result){if(!result?.projectPoint||!geometryState.survey)return;const w=$('canvas').clientWidth,h=$('canvas').clientHeight;for(const tag of $('feature-tags').children){const entry=geometryState.survey.features[Number(tag.dataset.featureTag)],p=result.projectPoint(entry.marker),facing=entry.normal.reduce((n,v,i)=>n+v*result.camera[i],0);tag.hidden=facing<.1||p[0]<14||p[0]>w-14||p[1]<20||p[1]>h-14;tag.style.left=`${p[0]}px`;tag.style.top=`${p[1]}px`;}}
+async function recognizeAll(){
+ status('Inspecting features across model orientations and levels…');$('features').replaceChildren();$('feature-tags').replaceChildren();
+ let survey;try{survey=await call('geometry',{data:{action:'survey'}})}catch(error){$('feature-notes').textContent=`Recognition could not inspect this model. ${error.message}`;shell.showFeatures();throw error;}
+ geometryState.survey=survey;geometryState.selectedFeature=null;renderFeatureTree(survey);shell.showFeatures();draw();
+ status(survey.features.length?'Recognition complete. Part features are listed in the project tree.':'Recognition complete: no supported features found. Use 3D surface operations.');
 }
 $('recognize').onclick=()=>task(recognizeAll);
-viewport.onInspect=ray=>task(async()=>{
- let feature;try{feature=await call('geometry',{data:{action:'pick_feature',...ray}})}catch{}
+viewport.onInspect=async ray=>{if(busy||!project.part)return;const rev=revision;try{
+ let feature;try{feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}})}catch{}
+ if(rev!==revision)return;
  if(feature){highlight=featureHighlight(feature);geometryState.selectedFeature=feature;status(`${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`diameter ${feature.diameter.toFixed(3)} mm · `:''}depth ${(feature.opening_z-feature.bottom_z).toFixed(3)} mm · opening Z ${feature.opening_z.toFixed(3)} mm`)}
- else {const face=await call('geometry',{data:{action:'pick',...ray}});highlight=face;status(`Surface · area ${face.area.toFixed(2)} mm² · normal ${face.normal.map(n=>n.toFixed(2)).join(', ')} · Z ${face.z.toFixed(3)} mm`)}draw();
-});
+ else {const face=await engineCall('geometry',{data:{action:'pick',...ray}});if(rev!==revision)return;highlight=face;status(`Surface · area ${face.area.toFixed(2)} mm² · normal ${face.normal.map(n=>n.toFixed(2)).join(', ')} · Z ${face.z.toFixed(3)} mm`)}draw();
+}catch(error){if(error.message.includes('No model face')){clearGeometrySelection();status('Selection cleared')}else status(error.message,true)}};
 function closeOperationMenu(){$('operation-menu').hidden=true}
 function showOperationMenu(index,x,y){
  if(busy)return;selected=index;render();const menu=$('operation-menu');menu.replaceChildren();
@@ -300,7 +321,12 @@ function renderExtras(){
  $('process-status').textContent=process?.ready?'Choose model-based planning, recognized features or manual operations.':'This process supports reference models and project storage. Its motion engine is planned.';
  const s=project.stock;$('stock-summary').textContent=project.part?`Current stock: ${s.width} × ${s.height} × ${s.thickness} mm. Stock top is Z=0. Fit stock aligns the part inside this blank.`:'Import a part to fit stock automatically, or enter blank dimensions below.';
  $('part-settings').replaceChildren();if(project.part){field($('part-settings'),'Show part',project.part,'visible','checkbox');field($('part-settings'),'Source units',project.part,'units','text',[['millimetres','Millimetres'],['inches','Inches']])}
- const machineRoot=$('machine-setup');if(project.machine){const advanced=setupGroup(machineRoot,'Machine configuration & tool changer',false);basicFields(setupGroup(advanced,'Configuration',false),project.machine.configuration,{axis_feed:'Axis maximum feed · mm/min',axis_acceleration:'Axis acceleration · mm/s²',home:'Home · mm',table_size:'Table size · mm',minimum_rpm:'Minimum spindle · RPM',maximum_load_kg:'Maximum load · kg',spindle_power_kw:'Spindle power · kW'});const changer=setupGroup(advanced,'Tool changer',false);field(changer,'Change mode',project.machine.tool_changer,'mode','text',[['mounted_tool','Mounted tool'],['milling_atc','Milling ATC'],['turning_turret','Turning turret']]);for(const [key,value] of Object.entries(project.machine.tool_changer))if(key!=='mode')field(changer,key.replaceAll('_',' '),project.machine.tool_changer,key,typeof value==='boolean'?'checkbox':'integer');const legacy=setupGroup(advanced,'Machine tool geometry',false);for(const [key,value] of Object.entries(project.machine.tooling)){if(key==='type')continue;if(key==='kind')field(legacy,'Cutter kind',project.machine.tooling,key,'text',[['end_mill','End mill'],['drill','Drill']]);else {const unit=key.includes('temperature')?'°C':key.includes('rpm')?'RPM':key.includes('angle')?'°':key.includes('watts')?'W':key.includes('amps')?'A':'mm';field(legacy,key.replaceAll('_',' ')+' · '+unit,project.machine.tooling,key,typeof value==='number'?'number':'text')}}}
+ const machineRoot=$('machine-setup');if(project.machine){const manual=setupGroup(machineRoot,'Tool changes',true),changerData=project.machine.tool_changer;
+ const mode=field(manual,'Tool changing',changerData,'mode','text',[['mounted_tool','Mounted tool / manual changes'],['manual','Manual multi-tool · operator pause'],['milling_atc','Controller-managed ATC'],['turning_turret','Turning turret']]);
+ const note=document.createElement('p');note.className='info-note form-wide';note.textContent='Multi-tool planning needs no ATC. For one multi-tool NC program, set a change position and calibrated H length registers in the tool library. Mach3/Generic use M0; LinuxCNC uses its configured manual M6 handshake. Start with the first tool already mounted. GRBL requires a separate program per tool.';manual.append(note);
+ if(changerData.mode==='milling_atc'){field(manual,'ATC magazine capacity',changerData,'capacity','integer')}else if(changerData.manual_position){for(let i=0;i<3;i++)field(manual,`Manual change ${'XYZ'[i]} · work mm`,changerData.manual_position,i)}else{const set=document.createElement('button');set.textContent='Set manual tool-change position…';set.onclick=()=>task(async()=>{changerData.manual_position=[project.stock.width/2,project.stock.height/2,project.clearance+20];changerData.mode='manual';await changed();render()});manual.append(set)}
+ field(manual,'Controller M6 / LinuxCNC manual handshake configured',changerData,'controller_managed','checkbox');
+ const advanced=setupGroup(machineRoot,'Machine configuration & tool changer',false);basicFields(setupGroup(advanced,'Configuration',false),project.machine.configuration,{axis_feed:'Axis maximum feed · mm/min',axis_acceleration:'Axis acceleration · mm/s²',home:'Home · mm',table_size:'Table size · mm',minimum_rpm:'Minimum spindle · RPM',maximum_load_kg:'Maximum load · kg',spindle_power_kw:'Spindle power · kW'});const legacy=setupGroup(advanced,'Machine tool geometry',false);for(const [key,value] of Object.entries(project.machine.tooling)){if(key==='type')continue;if(key==='kind')field(legacy,'Cutter kind',project.machine.tooling,key,'text',[['end_mill','End mill'],['drill','Drill']]);else {const unit=key.includes('temperature')?'°C':key.includes('rpm')?'RPM':key.includes('angle')?'°':key.includes('watts')?'W':key.includes('amps')?'A':'mm';field(legacy,key.replaceAll('_',' ')+' · '+unit,project.machine.tooling,key,typeof value==='number'?'number':'text')}}}
  renderLibrary();historyButtons();
 }
 let toolSearch='',toolScene=null,toolUnits='mm',toolDimensionKey='diameter';

@@ -342,5 +342,17 @@ fn feature_geometry_opens_before_choosing_a_small_enough_tool() {
 #[test]
 fn survey_groups_opposite_views_of_the_same_through_hole() {
     let survey = features::survey(&mount()).unwrap();
-    assert_eq!(survey["features"].as_array().unwrap().len(), 5);
+    let entries = survey["features"].as_array().unwrap();
+    assert_eq!(
+        entries.len(),
+        5,
+        "Cylinder facets and known pocket walls must not become extra open pockets"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|e| e["feature"]["kind"] == "circular_hole" && e["feature"]["through"] == true)
+            .count(),
+        4
+    );
 }

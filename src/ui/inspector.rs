@@ -145,7 +145,7 @@ impl Workbench {
         }).size(12.0).color(MUTED));
         ui.label(
             RichText::new(
-                if self.project.machine.as_ref().is_some_and(|m|m.tool_changer.mode==opensourcecam::machine::ChangeMode::MillingAtc) {"Controller-managed ATC: T/M6 and G43/H. Verify tool table, offsets and changer configuration."} else {"Mounted-tool mode: one tool per export. Configure the machine ATC for multi-tool programs."},
+                if self.project.machine.as_ref().is_some_and(|m|m.tool_changer.mode==opensourcecam::machine::ChangeMode::MillingAtc) {"Controller-managed ATC: T/M6 and G43/H. Verify tool table, offsets and changer configuration."} else {"Manual multi-tool export uses a configured change position, operator stop and calibrated H registers; LinuxCNC needs its manual M6 handshake. GRBL remains one tool per file."},
             )
             .size(11.0)
             .color(MUTED),

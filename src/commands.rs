@@ -35,7 +35,7 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
     match action {
         Command::Recognize => Ok(json!(crate::features::recognize_project(p)?)),
         Command::Generate => {
-            let path = post::checked_path(p)?;
+            let path = post::checked_geometry_path(p)?;
             Ok(path_value(&path))
         }
         Command::Export => Ok(json!(post::gcode(p)?)),
@@ -64,7 +64,7 @@ pub struct PlaybackPreview {
 impl PlaybackPreview {
     pub fn new(project: &Project) -> Result<Self, String> {
         Ok(Self {
-            path: post::checked_path(project)?,
+            path: post::checked_geometry_path(project)?,
         })
     }
     pub fn snapshot(
@@ -258,7 +258,7 @@ pub fn simulate_project(
     progress: f64,
     resolution: usize,
 ) -> Result<Value, String> {
-    let path = post::checked_path(project)?;
+    let path = post::checked_geometry_path(project)?;
     let sim = stock::simulate(
         project,
         &path,
@@ -270,7 +270,7 @@ pub fn simulate_project(
 }
 
 pub fn stock_obj(project: &Project, progress: f64, resolution: usize) -> Result<String, String> {
-    let path = post::checked_path(project)?;
+    let path = post::checked_geometry_path(project)?;
     let simulation = stock::simulate(
         project,
         &path,

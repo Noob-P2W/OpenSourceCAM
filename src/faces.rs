@@ -14,6 +14,7 @@ pub struct Face {
     pub area: f64,
     pub triangle_count: usize,
     pub opening_count: usize,
+    pub planar_direction: bool,
     pub horizontal: bool,
     pub z: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -123,6 +124,35 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
                 face_edges.insert(edge(t[i], t[(i + 1) % 3]));
             }
         }
+        let planar_direction = if members.len() > 2 {
+            let member_set: BTreeSet<_> = members.iter().copied().collect();
+            let mut perimeter = 0.;
+            let mut hard_edges = 0.;
+            for &(a, b) in &face_edges {
+                let outside: Vec<_> = edges[&(a, b)]
+                    .iter()
+                    .filter(|i| !member_set.contains(i))
+                    .copied()
+                    .collect();
+                if outside.is_empty() {
+                    continue;
+                }
+                let length = (0..3)
+                    .map(|i| (vertices[a][i] - vertices[b][i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                perimeter += length;
+                if outside
+                    .iter()
+                    .any(|i| (0..3).map(|axis| n[axis] * normals[*i][axis]).sum::<f64>() < 0.5)
+                {
+                    hard_edges += length;
+                }
+            }
+            perimeter > 0. && hard_edges >= perimeter * 0.5
+        } else {
+            false
+        };
         let opening_count =
             (1 + face_edges.len()).saturating_sub(face_vertices.len() + members.len());
         groups.push(Group {
@@ -133,6 +163,7 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
                 area,
                 triangle_count: members.len(),
                 opening_count,
+                planar_direction,
                 horizontal: n[2] > 1. - 1e-8,
                 z: origin[2],
                 segments: Vec::new(),
@@ -143,11 +174,15 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
     }
     Ok(groups)
 }
-pub(crate) fn opening_faces(part: &Part) -> Result<Vec<Face>, String> {
+pub(crate) fn survey_faces(part: &Part) -> Result<Vec<Face>, String> {
     Ok(groups(part)?
         .into_iter()
         .map(|g| g.face)
-        .filter(|f| f.opening_count > 0)
+        .filter(|f| {
+            f.opening_count > 0
+                || (f.triangle_count > 2 && f.planar_direction)
+                || f.normal.iter().any(|n| n.abs() > 1. - 1e-8)
+        })
         .collect())
 }
 pub fn list(part: &Part) -> Result<Vec<Face>, String> {
@@ -189,6 +224,13 @@ pub fn face(part: &Part, triangle: usize) -> Result<Face, String> {
     Ok(face)
 }
 pub fn pick(part: &Part, origin: [f64; 3], direction: [f64; 3]) -> Result<Face, String> {
+    face(part, ray_hit(part, origin, direction)?.0)
+}
+pub(crate) fn ray_hit(
+    part: &Part,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<(usize, f64), String> {
     if origin
         .iter()
         .chain(direction.iter())
@@ -231,14 +273,27 @@ pub fn pick(part: &Part, origin: [f64; 3], direction: [f64; 3]) -> Result<Face, 
             selected = Some(id)
         }
     }
-    face(part, selected.ok_or("No model face at this point")?)
+    Ok((selected.ok_or("No model face at this point")?, nearest))
 }
 pub fn setup(project: &mut Project, triangle: usize, align: bool) -> Result<(), String> {
+    let selected = face(
+        project
+            .part
+            .as_ref()
+            .ok_or("Import a model before selecting a plane")?,
+        triangle,
+    )?;
+    setup_selected(project, &selected, align)
+}
+pub(crate) fn setup_selected(
+    project: &mut Project,
+    selected: &Face,
+    align: bool,
+) -> Result<(), String> {
     let part = project
         .part
         .as_mut()
         .ok_or("Import a model before selecting a plane")?;
-    let selected = face(part, triangle)?;
     if !selected.horizontal {
         if !align {
             return Err("This face needs a new setup: align it to +Z before 2.5D machining".into());

@@ -225,7 +225,9 @@ fn operation_tools_drive_radius_pecks_feeds_and_tool_changes() {
         .moves
         .iter()
         .any(|m| m.operation == 1 && m.feed == 80.0));
-    assert!(post::gcode(&p).unwrap_err().contains("Multiple tools"));
+    assert!(post::gcode(&p)
+        .unwrap_err()
+        .contains("manual tool-change position"));
     p.post.processor = post::PostProcessor::Mach3;
     let changer = &mut p.machine.as_mut().unwrap().tool_changer;
     changer.mode = ChangeMode::MillingAtc;
@@ -381,4 +383,77 @@ fn legacy_playback_uses_setup_dimensions_without_mutating_or_guessing_a_holder()
         .iter()
         .all(|v| v[0].hypot(v[1]) <= 2. + 1e-8));
     assert_eq!(p, original);
+}
+
+#[test]
+fn manual_changes_stop_at_configured_position_restore_offsets_and_need_no_atc() {
+    let mut p = two_tools();
+    // Path planning works before choosing any post/tool-change configuration.
+    opensourcecam::commands::execute_project(&p, opensourcecam::commands::Command::Generate)
+        .unwrap();
+    let c = &mut p.machine.as_mut().unwrap().tool_changer;
+    c.mode = ChangeMode::Manual;
+    c.manual_position = Some([10., 10., 25.]);
+    for tool in &mut p.tool_library.tools {
+        tool.post.pocket = None;
+    }
+    let code = post::gcode(&p).unwrap();
+    assert!(code.contains("G0 Z25.0000\nG0 X10.0000 Y10.0000\n(MANUAL CHANGE"));
+    assert!(code.contains("T2\nM0\nG21\nG90\nG17\nG94\nG54\nG43 H2\nG0 Z5.0000"));
+    assert!(!code.contains("M6"));
+    let pause = code.find("\nM0\n").unwrap();
+    assert!(code[..pause].rfind("M5").is_some());
+    assert!(code[..pause].rfind("M9").is_some());
+    assert!(code[pause..].contains("G0 X90.0000 Y60.0000"));
+    p.post.processor = post::PostProcessor::LinuxCnc;
+    assert!(post::gcode(&p)
+        .unwrap_err()
+        .contains("hal_manualtoolchange"));
+    p.machine.as_mut().unwrap().tool_changer.controller_managed = true;
+    let code = post::gcode(&p).unwrap();
+    assert!(code.contains("T2 M6\nG21\nG90\nG17\nG94\nG54\nG43 H2"));
+    p.tool_library.tools[1].post.length_offset = None;
+    assert!(post::gcode(&p).unwrap_err().contains("calibrated H"));
+}
+
+#[test]
+fn missing_machine_never_falls_back_to_unconfigured_automatic_tool_change() {
+    let mut p = two_tools();
+    p.machine = None;
+    assert!(post::gcode(&p)
+        .unwrap_err()
+        .to_lowercase()
+        .contains("machine"));
+}
+
+#[test]
+fn manual_change_routes_enforce_clearance_travel_and_fixture_checks() {
+    let mut p = two_tools();
+    let machine = p.machine.as_mut().unwrap();
+    machine.tool_changer.mode = ChangeMode::Manual;
+    machine.tool_changer.manual_position = Some([10., 10., 1.]);
+    assert!(post::gcode(&p).unwrap_err().contains("travel clearance"));
+    let m = p.machine.as_mut().unwrap();
+    m.enforce_limits = true;
+    m.axis_min = [-200.; 3];
+    m.axis_max = [200.; 3];
+    m.work_origin = [0.; 3];
+    m.tool_changer.manual_position = Some([1000., 10., 25.]);
+    assert!(post::gcode(&p).unwrap_err().contains("travel exceeds"));
+    p.machine.as_mut().unwrap().tool_changer.manual_position = Some([155., 20., 30.]);
+    let mut fixture = opensourcecam::import::import_file(
+        std::path::Path::new("examples/models/mount.stl"),
+        opensourcecam::import::Units::Millimetres,
+    )
+    .unwrap();
+    fixture.offset = [120., 10., 10.];
+    p.workspace
+        .push(opensourcecam::workspace::WorkspaceModel::new(
+            1,
+            opensourcecam::workspace::ModelKind::Fixture,
+            fixture,
+        ));
+    // The cutting path avoids this fixture; only the manual-change return hits it.
+    opensourcecam::post::checked_geometry_path(&p).unwrap();
+    assert!(post::gcode(&p).unwrap_err().contains("contacts fixture"));
 }

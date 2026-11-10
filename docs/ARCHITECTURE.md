@@ -225,3 +225,7 @@ retains one in-flight request and slows updates as resolution increases. See
 [MACHINING_WORKFLOW.md](MACHINING_WORKFLOW.md) for scope and limits.
 
 Surface contact now uses `contact.rs`: a triangle bounding hierarchy, analytic capsule/triangle contact for flat cutters, clipped local patches, conservative ball-cutter contact bounds and cancellable subdivision. `surface.rs` makes adaptive finishing spans; `roughing.rs` retains its separate bounded clearing grid. Browser Setup surveys use `GeometryQuery::Survey`, while contextual plane recognition remains available to legacy planning/native callers. Geometry-only feature drafts resolve selections against Rust recognition and defer cutter-fit validation until tooling can be edited.
+
+Detailed feature surveys augment conservative prismatic planning with connected wall-profile chains and recessed floor regions. `Feature.detail.triangles` refers to the original mesh ordering for exact surface highlighting; profile/island metadata supports inspection without enabling unsupported simple machining. Browser markers and the part tree share a single selection and pending operation draft.
+
+`post::checked_geometry_path` is the shared planning/simulation preflight; `checked_path` adds export post/tool-change validation. Manual-change approach/return routes receive travel and fixture checks in addition to the cutting path. Export emits calibrated compensation and controller-specific operator stops; controller-managed M6 motion remains the controller's responsibility.

@@ -125,6 +125,7 @@ impl Default for Configuration {
 pub enum ChangeMode {
     #[default]
     MountedTool,
+    Manual,
     MillingAtc,
     TurningTurret,
 }
@@ -134,6 +135,8 @@ pub struct ToolChanger {
     pub mode: ChangeMode,
     pub capacity: u32,
     pub controller_managed: bool,
+    #[serde(default)]
+    pub manual_position: Option<[f64; 3]>,
 }
 impl Default for ToolChanger {
     fn default() -> Self {
@@ -141,6 +144,7 @@ impl Default for ToolChanger {
             mode: ChangeMode::MountedTool,
             capacity: 20,
             controller_managed: false,
+            manual_position: None,
         }
     }
 }
@@ -507,10 +511,20 @@ impl MachineSetup {
         {
             range(value, 0.001, 1e6, "Machine rating")?;
         }
+        if self
+            .tool_changer
+            .manual_position
+            .is_some_and(|p| p.iter().any(|v| !v.is_finite() || v.abs() > 1_000_000.))
+        {
+            return Err("Manual tool-change position must contain finite work coordinates".into());
+        }
         if !(1..=9999).contains(&self.tool_changer.capacity) {
             return Err("Tool changer capacity must be between 1 and 9999".into());
         }
-        if (self.tool_changer.mode == ChangeMode::MillingAtc && process != Process::Milling)
+        if (matches!(
+            self.tool_changer.mode,
+            ChangeMode::MillingAtc | ChangeMode::Manual
+        ) && process != Process::Milling)
             || (self.tool_changer.mode == ChangeMode::TurningTurret && process != Process::Turning)
         {
             return Err("Tool changer type does not match the machine process".into());

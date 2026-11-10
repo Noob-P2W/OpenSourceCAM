@@ -50,8 +50,58 @@ pub struct Feature {
     pub bottom_z: f64,
     pub through: bool,
     pub outline: Vec<[f64; 3]>,
+    #[serde(default)]
+    pub detail: Detail,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Shape {
+    #[default]
+    Prismatic,
+    ChamferedBore,
+    FilletedBore,
+    TaperedHole,
+    TaperedPocket,
+    PocketWithIslands,
+    OpenPocket,
+}
+impl Shape {
+    pub fn machinable(self) -> bool {
+        matches!(
+            self,
+            Self::Prismatic | Self::ChamferedBore | Self::FilletedBore
+        )
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Prismatic => "",
+            Self::ChamferedBore => "Hole with entry chamfer",
+            Self::FilletedBore => "Hole with rounded transition",
+            Self::TaperedHole => "Tapered hole",
+            Self::TaperedPocket => "Tapered pocket",
+            Self::PocketWithIslands => "Pocket with islands",
+            Self::OpenPocket => "Open pocket / ledge",
+        }
+    }
+}
+#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Detail {
+    pub shape: Shape,
+    pub triangles: Vec<usize>,
+    pub profiles: Vec<Vec<[f64; 3]>>,
+    pub islands: Vec<Vec<[f64; 3]>>,
+    pub floor_z: Option<f64>,
+    pub floor_triangles: Vec<usize>,
 }
 impl Feature {
+    pub fn label(&self) -> &'static str {
+        if self.detail.shape == Shape::Prismatic {
+            self.kind.label()
+        } else {
+            self.detail.shape.label()
+        }
+    }
     pub fn depth(&self) -> f64 {
         self.opening_z - self.bottom_z
     }
@@ -335,11 +385,7 @@ impl Topology {
                     }
                 }
             }
-            let loops = if class == Class::Other {
-                Vec::new()
-            } else {
-                trace_loops(&boundary).unwrap_or_default()
-            };
+            let loops = trace_loops(&boundary).unwrap_or_default();
             result.components.push(Component {
                 class,
                 loops,
@@ -479,6 +525,16 @@ impl Topology {
             bottom_z: low_z,
             through,
             outline,
+            detail: Detail {
+                triangles: wall
+                    .faces
+                    .iter()
+                    .chain(if through { [].iter() } else { end.faces.iter() })
+                    .copied()
+                    .collect(),
+                floor_z: (!through).then_some(low_z),
+                ..Default::default()
+            },
         })
     }
 }
@@ -617,7 +673,9 @@ pub fn recognize_project_with_cancel(
     )
 }
 pub fn recognize_level_for_selection(part: &Part, level: f64) -> Result<Report, String> {
-    recognize_level(part, Some(level), &AtomicBool::new(false))
+    let cancel = AtomicBool::new(false);
+    let topology = Topology::build(part, &cancel)?;
+    recognize_detailed(part, Some(level), &topology, &cancel)
 }
 fn recognize_level(part: &Part, level: Option<f64>, cancel: &AtomicBool) -> Result<Report, String> {
     let topology = Topology::build(part, cancel)?;
@@ -835,6 +893,9 @@ pub fn draft(
     if let Some(part) = &project.part {
         accessible(part, feature)?;
     }
+    if !feature.detail.shape.machinable() {
+        return Err("This feature needs 3D surface machining or a dedicated strategy; a simple pocket/drill would remove its taper or islands".into());
+    }
     let compatible = match feature.kind {
         FeatureKind::RectangularPocket => {
             matches!(strategy, Strategy::Pocket | Strategy::InsideProfile)
@@ -885,10 +946,11 @@ pub fn draft(
 pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
     let part = project.part.as_ref().ok_or("Import a model first")?;
     validate_closed(part, &AtomicBool::new(false))?;
-    let faces = crate::faces::opening_faces(part)?;
+    let faces = crate::faces::survey_faces(part)?;
     let mut directions: Vec<[f64; 3]> = Vec::new();
     let mut results: Vec<serde_json::Value> = Vec::new();
     let mut identities = BTreeMap::<String, usize>::new();
+    let mut owned = BTreeSet::new();
     let cancel = AtomicBool::new(false);
     for face in faces {
         if directions
@@ -904,7 +966,7 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
         }
         directions.push(face.normal);
         let mut oriented = project.clone();
-        crate::faces::setup(&mut oriented, face.id, true)?;
+        crate::faces::setup_selected(&mut oriented, &face, true)?;
         let aligned = oriented.part.as_ref().unwrap();
         let topology = Topology::build(aligned, &cancel)?;
         let mut levels = Vec::<f64>::new();
@@ -921,50 +983,70 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
             }
         }
         let matrix = crate::blank::rotation(aligned.rotation);
+        let mut report = recognize_detailed(aligned, None, &topology, &cancel)?;
         for z in levels {
-            let report = recognize_topology(aligned, Some(z), &topology, &cancel)?;
-            for feature in report.features {
-                let transform = |p: [f64; 3]| {
-                    let q: [f64; 3] = std::array::from_fn(|i| p[i] - aligned.offset[i]);
-                    part.point(std::array::from_fn(|i| {
-                        (0..3).map(|j| matrix[j][i] * q[j]).sum::<f64>() / aligned.units.factor()
-                    }))
-                };
-                let outline: Vec<_> = feature.outline.iter().map(|p| transform(*p)).collect();
-                let mut axis = [
-                    transform([feature.center[0], feature.center[1], feature.opening_z])
-                        .map(|v| (v / TOLERANCE).round() as i64),
-                    transform([feature.center[0], feature.center[1], feature.bottom_z])
-                        .map(|v| (v / TOLERANCE).round() as i64),
-                ];
-                axis.sort();
-                let identity = if feature.through && feature.kind == FeatureKind::CircularHole {
-                    format!("{axis:?}:{:.3}", feature.diameter.unwrap_or(0.))
-                } else {
-                    format!("unique:{}", results.len())
-                };
-                let direction = serde_json::json!({"normal":face.normal,"face":face.id,"current":face.horizontal});
-                let entry = serde_json::json!({"feature":feature,"outline":outline,"normal":face.normal,"face":face.id,"current_orientation":face.horizontal,"orientations":[direction.clone()]});
-                if let Some(&index) = identities.get(&identity) {
-                    let existing = &mut results[index];
-                    let mut orientations = existing["orientations"].as_array().unwrap().clone();
-                    orientations.push(direction);
-                    if face.horizontal {
-                        *existing = entry;
-                    }
-                    existing["orientations"] = serde_json::json!(orientations);
-                } else {
-                    identities.insert(identity, results.len());
-                    results.push(entry);
+            if (z - aligned.bounds().max[2]).abs() > TOLERANCE {
+                report
+                    .features
+                    .extend(recognize_detailed(aligned, Some(z), &topology, &cancel)?.features);
+            }
+        }
+        for feature in report.features {
+            if feature.detail.shape != Shape::OpenPocket {
+                owned.extend(feature.detail.triangles.iter().copied());
+            }
+            let transform = |p: [f64; 3]| {
+                let q: [f64; 3] = std::array::from_fn(|i| p[i] - aligned.offset[i]);
+                part.point(std::array::from_fn(|i| {
+                    (0..3).map(|j| matrix[j][i] * q[j]).sum::<f64>() / aligned.units.factor()
+                }))
+            };
+            let outline: Vec<_> = feature.outline.iter().map(|p| transform(*p)).collect();
+            let mut axis = [
+                transform([feature.center[0], feature.center[1], feature.opening_z])
+                    .map(|v| (v / TOLERANCE).round() as i64),
+                transform([feature.center[0], feature.center[1], feature.bottom_z])
+                    .map(|v| (v / TOLERANCE).round() as i64),
+            ];
+            axis.sort();
+            let identity = if feature.through && feature.kind == FeatureKind::CircularHole {
+                format!("{axis:?}:{:.3}", feature.diameter.unwrap_or(0.))
+            } else {
+                format!("unique:{}", results.len())
+            };
+            let direction =
+                serde_json::json!({"normal":face.normal,"face":face.id,"current":face.horizontal});
+            let entry = serde_json::json!({"label":feature.label(),"machinable":feature.detail.shape.machinable(),"marker":transform([feature.center[0],feature.center[1],feature.opening_z]),"feature":feature,"outline":outline,"normal":face.normal,"face":face.id,"current_orientation":face.horizontal,"orientations":[direction.clone()]});
+            if let Some(&index) = identities.get(&identity) {
+                let existing = &mut results[index];
+                let mut orientations = existing["orientations"].as_array().unwrap().clone();
+                orientations.push(direction);
+                if face.horizontal {
+                    *existing = entry;
                 }
-                if results.len() > 500 {
-                    return Err("Recognition exceeds 500 candidates; split the model".into());
-                }
+                existing["orientations"] = serde_json::json!(orientations);
+            } else {
+                identities.insert(identity, results.len());
+                results.push(entry);
+            }
+            if results.len() > 500 {
+                return Err("Recognition exceeds 500 candidates; split the model".into());
             }
         }
     }
+    // A wall of an already recognized feature is not another open pocket when
+    // the same part is inspected from a different orientation.
+    results.retain(|entry| {
+        entry["feature"]["detail"]["shape"] != "open_pocket"
+            || entry["feature"]["detail"]["floor_triangles"]
+                .as_array()
+                .is_none_or(|ids| {
+                    !ids.iter()
+                        .all(|id| id.as_u64().is_some_and(|i| owned.contains(&(i as usize))))
+                })
+    });
     Ok(
-        serde_json::json!({"features":results,"notes":["Surveys supported circular holes and rectangular pockets across planar levels and orientations. Tapers, islands, intersecting cavities and general freeform features remain unsupported. Candidates require accessibility and tooling review; no operations are recommended or created."]}),
+        serde_json::json!({"features":results,"notes":["Inspects holes (including entry chamfers and rounded transitions), tapers, pockets with islands and open pockets across model orientations. Taper/island/open-pocket candidates are inspection geometry and require a suitable 3D or dedicated operation; simple drilling/pocketing is restricted to compatible bores and prismatic cavities. Intersecting or unclassified freeform geometry can remain unrecognized."]}),
     )
 }
 
@@ -981,6 +1063,9 @@ pub fn pick_feature(
     let cancel = AtomicBool::new(false);
     let topology = Topology::build(part, &cancel)?;
     let mut levels = Vec::<f64>::new();
+    let nearest = crate::faces::ray_hit(part, origin, direction)
+        .ok()
+        .map(|(_, t)| t);
     let mut found = Vec::new();
     for c in &topology.components {
         if c.class == Class::Up {
@@ -993,26 +1078,31 @@ pub fn pick_feature(
             }
         }
     }
+    let mut candidates = recognize_detailed(part, None, &topology, &cancel)?.features;
     for z in levels {
-        for feature in recognize_topology(part, Some(z), &topology, &cancel)?.features {
-            let t = (z - origin[2]) / direction[2];
-            if t < 0. {
-                continue;
+        if (z - part.bounds().max[2]).abs() > TOLERANCE {
+            candidates.extend(recognize_detailed(part, Some(z), &topology, &cancel)?.features);
+        }
+    }
+    for feature in candidates {
+        let z = feature.opening_z;
+        let t = (z - origin[2]) / direction[2];
+        if t < 0. || nearest.is_some_and(|hit| t > hit + TOLERANCE) {
+            continue;
+        }
+        let p = [origin[0] + t * direction[0], origin[1] + t * direction[1]];
+        let mut inside = false;
+        for i in 0..feature.outline.len() {
+            let a = feature.outline[i];
+            let b = feature.outline[(i + 1) % feature.outline.len()];
+            if (a[1] > p[1]) != (b[1] > p[1])
+                && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+            {
+                inside = !inside;
             }
-            let p = [origin[0] + t * direction[0], origin[1] + t * direction[1]];
-            let mut inside = false;
-            for i in 0..feature.outline.len() {
-                let a = feature.outline[i];
-                let b = feature.outline[(i + 1) % feature.outline.len()];
-                if (a[1] > p[1]) != (b[1] > p[1])
-                    && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
-                {
-                    inside = !inside;
-                }
-            }
-            if inside {
-                found.push((t, feature));
-            }
+        }
+        if inside {
+            found.push((t, feature));
         }
     }
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1021,4 +1111,326 @@ pub fn pick_feature(
         .next()
         .map(|(_, f)| f)
         .ok_or("Click inside a supported hole or rectangular pocket opening".into())
+}
+
+impl Topology {
+    fn chain_candidate(
+        &self,
+        top: &[usize],
+        top_component: usize,
+        top_z: f64,
+        part_bottom: f64,
+    ) -> Option<Feature> {
+        let outline: Vec<_> = top.iter().map(|i| self.vertices[*i]).collect();
+        let top_circle = circle(&outline);
+        let mut rings = vec![outline.clone()];
+        let mut faces = BTreeSet::new();
+        let mut previous = top_component;
+        let mut boundary = top.to_vec();
+        let mut level = top_z;
+        let mut bore: Option<(f64, f64, f64)> = None;
+        let mut curved = false;
+        let mut through = false;
+        let mut floor = None;
+        for _ in 0..32 {
+            let id = self.across(&boundary, previous)?;
+            let c = &self.components[id];
+            if matches!(c.class, Class::Up | Class::Down) {
+                through = c.class == Class::Down && (level - part_bottom).abs() <= TOLERANCE;
+                if !through && !(c.class == Class::Up && c.loops.len() == 1) {
+                    return None;
+                }
+                if !through {
+                    faces.extend(c.faces.iter().copied());
+                    floor = Some(level);
+                }
+                break;
+            }
+            if c.loops.len() != 2 {
+                return None;
+            }
+            let lower = c
+                .loops
+                .iter()
+                .find(|l| self.level(l).is_some_and(|z| z < level - TOLERANCE))?;
+            let z = self.level(lower)?;
+            let points: Vec<_> = lower.iter().map(|i| self.vertices[*i]).collect();
+            if c.faces.iter().flat_map(|i| self.triangles[*i]).any(|i| {
+                self.vertices[i][2] > level + TOLERANCE || self.vertices[i][2] < z - TOLERANCE
+            }) {
+                return None;
+            }
+            if let (Some((center, r0)), Some((c1, r1))) = (circle(rings.last()?), circle(&points)) {
+                if (center[0] - c1[0]).hypot(center[1] - c1[1]) > TOLERANCE {
+                    return None;
+                }
+                let cylindrical = c.class == Class::Wall
+                    && (r0 - r1).abs() <= TOLERANCE
+                    && c.faces.iter().flat_map(|i| self.triangles[*i]).all(|i| {
+                        ((self.vertices[i][0] - center[0]).hypot(self.vertices[i][1] - center[1])
+                            - r0)
+                            .abs()
+                            <= TOLERANCE
+                    });
+                if cylindrical && bore.is_none_or(|(a, b, _)| level - z > a - b) {
+                    bore = Some((level, z, r0));
+                }
+                if c.class == Class::Other {
+                    curved |= c.faces.iter().flat_map(|i| self.triangles[*i]).any(|i| {
+                        let p = self.vertices[i];
+                        let expected = r1 + (r0 - r1) * (p[2] - z) / (level - z);
+                        ((p[0] - center[0]).hypot(p[1] - center[1]) - expected).abs() > TOLERANCE
+                    });
+                }
+            } else if top_circle.is_some() {
+                return None;
+            }
+            faces.extend(c.faces.iter().copied());
+            rings.push(points);
+            previous = id;
+            boundary = lower.clone();
+            level = z;
+        }
+        if floor.is_none() && !through {
+            return None;
+        }
+        let min =
+            std::array::from_fn(|i| outline.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min));
+        let max = std::array::from_fn(|i| {
+            outline
+                .iter()
+                .map(|p| p[i])
+                .fold(f64::NEG_INFINITY, f64::max)
+        });
+        let (kind, center, diameter, shape, bottom) = if let Some((center, r)) = top_circle {
+            if let Some((bore_top, bore_bottom, radius)) = bore {
+                let entry_fits = rings
+                    .iter()
+                    .filter(|ring| ring[0][2] >= bore_top - TOLERANCE)
+                    .all(|ring| circle(ring).is_some_and(|(_, r)| r >= radius - TOLERANCE));
+                if !entry_fits {
+                    return None;
+                }
+                let lower_fits = rings
+                    .iter()
+                    .filter(|ring| ring[0][2] < bore_bottom - TOLERANCE)
+                    .all(|ring| circle(ring).is_some_and(|(_, r)| r >= radius - TOLERANCE));
+                (
+                    FeatureKind::CircularHole,
+                    center,
+                    Some(radius * 2.),
+                    if curved || !lower_fits {
+                        Shape::FilletedBore
+                    } else {
+                        Shape::ChamferedBore
+                    },
+                    if lower_fits { level } else { bore_bottom },
+                )
+            } else {
+                (
+                    FeatureKind::CircularHole,
+                    center,
+                    Some(r * 2.),
+                    Shape::TaperedHole,
+                    level,
+                )
+            }
+        } else {
+            (
+                FeatureKind::RectangularPocket,
+                [(min[0] + max[0]) / 2., (min[1] + max[1]) / 2.],
+                None,
+                Shape::TaperedPocket,
+                level,
+            )
+        };
+        Some(Feature {
+            kind,
+            min,
+            max,
+            center,
+            diameter,
+            opening_z: top_z,
+            bottom_z: bottom,
+            through,
+            outline,
+            detail: Detail {
+                shape,
+                triangles: faces.into_iter().collect(),
+                profiles: rings,
+                islands: vec![],
+                floor_z: floor,
+                floor_triangles: vec![],
+            },
+        })
+    }
+    fn floor_candidates(&self, top_z: f64) -> Vec<Feature> {
+        let mut result = Vec::new();
+        for (id, c) in self
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.class == Class::Up)
+        {
+            let Some(z) = c.loops.first().and_then(|l| self.level(l)) else {
+                continue;
+            };
+            if z >= top_z - TOLERANCE {
+                continue;
+            }
+            let Some(outer) = c
+                .loops
+                .iter()
+                .filter(|l| {
+                    signed_area(&l.iter().map(|i| self.vertices[*i]).collect::<Vec<_>>())
+                        > TOLERANCE * TOLERANCE
+                })
+                .max_by_key(|l| l.len())
+            else {
+                continue;
+            };
+            let outline: Vec<_> = outer.iter().map(|i| self.vertices[*i]).collect();
+            let mut perimeter = 0.;
+            let mut steep_edges = 0.;
+            let mut up = false;
+            let mut open = false;
+            let mut opening = z;
+            let mut adjacent = BTreeSet::new();
+            for i in 0..outer.len() {
+                let a = self.vertices[outer[i]];
+                let b = self.vertices[outer[(i + 1) % outer.len()]];
+                let edge_length = (a[0] - b[0]).hypot(a[1] - b[1]);
+                perimeter += edge_length;
+                let edge = edge(outer[i], outer[(i + 1) % outer.len()]);
+                for &face in &self.edges[&edge] {
+                    if self.owners[face] == id {
+                        continue;
+                    }
+                    let tri = self.triangles[face].map(|v| self.vertices[v]);
+                    let n = normal(tri);
+                    let length = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    if length > 1e-15 && (n[2] / length).abs() < 0.5 {
+                        steep_edges += edge_length;
+                    }
+                    let hi = tri.iter().map(|p| p[2]).fold(z, f64::max);
+                    let lo = tri.iter().map(|p| p[2]).fold(z, f64::min);
+                    up |= hi > z + TOLERANCE;
+                    open |= lo < z - TOLERANCE;
+                    adjacent.insert(self.owners[face]);
+                }
+            }
+            let islands: Vec<_> = c
+                .loops
+                .iter()
+                .filter(|l| {
+                    signed_area(&l.iter().map(|i| self.vertices[*i]).collect::<Vec<_>>())
+                        < -TOLERANCE * TOLERANCE
+                })
+                .map(|l| l.iter().map(|i| self.vertices[*i]).collect::<Vec<_>>())
+                .collect();
+            if !up || (!open && islands.is_empty()) || steep_edges < perimeter * 0.5 {
+                continue;
+            }
+            for ring in &c.loops {
+                for i in 0..ring.len() {
+                    for &face in &self.edges[&edge(ring[i], ring[(i + 1) % ring.len()])] {
+                        if self.owners[face] != id {
+                            adjacent.insert(self.owners[face]);
+                        }
+                    }
+                }
+            }
+            let min: [f64; 2] =
+                std::array::from_fn(|i| outline.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min));
+            let max: [f64; 2] = std::array::from_fn(|i| {
+                outline
+                    .iter()
+                    .map(|p| p[i])
+                    .fold(f64::NEG_INFINITY, f64::max)
+            });
+            let mut triangles = c.faces.clone();
+            for other in adjacent {
+                for &face in &self.components[other].faces {
+                    let tri = self.triangles[face].map(|i| self.vertices[i]);
+                    if tri.iter().all(|p| {
+                        p[2] >= z - TOLERANCE
+                            && (0..2)
+                                .all(|i| p[i] >= min[i] - TOLERANCE && p[i] <= max[i] + TOLERANCE)
+                    }) {
+                        opening = tri.iter().map(|p| p[2]).fold(opening, f64::max);
+                        triangles.push(face);
+                    }
+                }
+            }
+            if opening <= z + TOLERANCE {
+                continue;
+            }
+            result.push(Feature {
+                kind: FeatureKind::RectangularPocket,
+                min,
+                max,
+                center: std::array::from_fn(|i| (min[i] + max[i]) / 2.),
+                diameter: None,
+                opening_z: opening,
+                bottom_z: z,
+                through: false,
+                outline,
+                detail: Detail {
+                    shape: if open {
+                        Shape::OpenPocket
+                    } else {
+                        Shape::PocketWithIslands
+                    },
+                    triangles,
+                    profiles: vec![],
+                    islands,
+                    floor_z: Some(z),
+                    floor_triangles: c.faces.clone(),
+                },
+            });
+        }
+        result
+    }
+}
+fn recognize_detailed(
+    part: &Part,
+    level: Option<f64>,
+    topology: &Topology,
+    cancel: &AtomicBool,
+) -> Result<Report, String> {
+    let mut report = recognize_topology(part, level, topology, cancel)?;
+    let bounds = part.bounds();
+    for (id, c) in topology
+        .components
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.class == Class::Up)
+    {
+        for boundary in &c.loops {
+            let Some(z) = topology.level(boundary) else {
+                continue;
+            };
+            if (level.unwrap_or(bounds.max[2]) - z).abs() > TOLERANCE {
+                continue;
+            }
+            let outline: Vec<_> = boundary.iter().map(|i| topology.vertices[*i]).collect();
+            if signed_area(&outline) >= -TOLERANCE * TOLERANCE
+                || topology.candidate(boundary, id, z, bounds.min[2]).is_some()
+            {
+                continue;
+            }
+            if let Some(f) = topology.chain_candidate(boundary, id, z, bounds.min[2]) {
+                report.features.push(f);
+            }
+        }
+    }
+    if level.is_none() {
+        report
+            .features
+            .extend(topology.floor_candidates(bounds.max[2]));
+    }
+    if report.features.len() > MAX_FEATURES {
+        return Err("Recognition exceeds 500 candidates; split the model".into());
+    }
+    Ok(report)
 }

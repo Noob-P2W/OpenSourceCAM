@@ -156,6 +156,34 @@ impl Workbench {
             if self.project.process == Process::Milling {
                 ui.selectable_value(
                     &mut machine.tool_changer.mode,
+                    ChangeMode::Manual,
+                    "Manual changes / operator stop",
+                );
+                if machine.tool_changer.mode == ChangeMode::Manual {
+                    let mut configured = machine.tool_changer.manual_position.is_some();
+                    if ui
+                        .checkbox(
+                            &mut configured,
+                            "Configure manual change position (work coordinates)",
+                        )
+                        .changed()
+                    {
+                        machine.tool_changer.manual_position =
+                            configured.then_some([0., 0., self.project.clearance + 20.]);
+                    }
+                    if let Some(position) = &mut machine.tool_changer.manual_position {
+                        for (i, value) in position.iter_mut().enumerate() {
+                            numeric(
+                                ui,
+                                &format!("Change {}", "XYZ".as_bytes()[i] as char),
+                                value,
+                                "mm",
+                            );
+                        }
+                    }
+                }
+                ui.selectable_value(
+                    &mut machine.tool_changer.mode,
                     ChangeMode::MillingAtc,
                     "Automatic tool changer",
                 );

@@ -149,10 +149,162 @@ pub fn checked_path(project: &Project) -> Result<crate::cam::Toolpath, String> {
             project.process.label()
         ));
     }
+    let path = checked_geometry_path(project)?;
+    validate_tool_changes(project)?;
+    validate_manual_routes(project, &path)?;
+    Ok(path)
+}
+
+/// Path planning/simulation does not require an export tool-change configuration.
+/// Geometry, setup, tool capability and fixture preflight remain mandatory.
+pub fn checked_geometry_path(project: &Project) -> Result<crate::cam::Toolpath, String> {
     let path = generate(project)?;
     crate::collision::check(project, &path)?;
-    validate_tool_changes(project)?;
     Ok(path)
+}
+fn manual(project: &Project) -> bool {
+    let mut tools = std::collections::BTreeSet::new();
+    for op in project.operations.iter().filter(|o| o.enabled) {
+        tools.insert(op.tool_id.or(project.active_tool));
+    }
+    let mode = project
+        .machine
+        .as_ref()
+        .map_or(crate::machine::ChangeMode::MountedTool, |m| {
+            m.tool_changer.mode
+        });
+    mode == crate::machine::ChangeMode::Manual
+        || (mode == crate::machine::ChangeMode::MountedTool && tools.len() > 1)
+}
+fn manual_change(
+    output: &mut String,
+    project: &Project,
+    op: &crate::model::Operation,
+) -> Result<(), String> {
+    let record = project
+        .library_tool(Some(op))?
+        .ok_or("Manual tool changes require library tools")?;
+    let p = project
+        .machine
+        .as_ref()
+        .and_then(|m| m.tool_changer.manual_position)
+        .ok_or("Configure a manual tool-change position in Setup / Machine")?;
+    writeln!(
+        output,
+        "G0 Z{:.4}\nM5\nM9\nG0 Z{:.4}\nG0 X{:.4} Y{:.4}",
+        project.travel_clearance(),
+        p[2],
+        p[0],
+        p[1]
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "(MANUAL CHANGE - T{} {} - calibrated H{})",
+        record.post.number,
+        comment(&record.name),
+        record
+            .post
+            .length_offset
+            .ok_or("Assign a calibrated H length-offset register to every manual-change tool")?
+    )
+    .unwrap();
+    if project.post.processor == PostProcessor::LinuxCnc {
+        // LinuxCNC's configured hal_manualtoolchange provides the operator handshake.
+        writeln!(output, "T{} M6", record.post.number).unwrap();
+    } else {
+        // M0 is mandatory; M1 can be disabled by the controller's optional-stop switch.
+        writeln!(output, "T{}\nM0", record.post.number).unwrap();
+    }
+    writeln!(
+        output,
+        "G21\nG90\nG17\nG94\n{}",
+        project.post.work_offset.code()
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "G43 H{}\nG0 Z{:.4}",
+        record.post.length_offset.unwrap(),
+        project.travel_clearance()
+    )
+    .unwrap();
+    Ok(())
+}
+fn validate_manual_routes(project: &Project, path: &crate::cam::Toolpath) -> Result<(), String> {
+    if !manual(project) {
+        return Ok(());
+    }
+    use crate::cam::{Motion, Move, Point3};
+    let machine = project
+        .machine
+        .as_ref()
+        .ok_or("Manual changes need a machine setup")?;
+    let p = machine
+        .tool_changer
+        .manual_position
+        .ok_or("Configure a manual tool-change position in Setup / Machine")?;
+    let position = Point3 {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    };
+    if position.z < project.travel_clearance() {
+        return Err("Manual tool-change Z must be at or above setup travel clearance".into());
+    }
+    let mut routes = crate::cam::Toolpath {
+        moves: Vec::new(),
+        cut_length: 0.,
+        rapid_length: 0.,
+        estimated_seconds: 0.,
+    };
+    let mut last = None;
+    let mut previous_index = None;
+    for movement in &path.moves {
+        let id = project
+            .library_tool(Some(&project.operations[movement.operation]))?
+            .map(|t| t.id);
+        if id != last && previous_index.is_some() {
+            let start = Point3 {
+                x: movement.from.x,
+                y: movement.from.y,
+                z: project.travel_clearance(),
+            };
+            let high = Point3 {
+                z: position.z,
+                ..start
+            };
+            let old = previous_index.unwrap_or(movement.operation);
+            let low = Point3 {
+                z: project.travel_clearance(),
+                ..position
+            };
+            for (from, to, operation) in [
+                (start, high, old),
+                (high, position, old),
+                (position, low, movement.operation),
+                (low, start, movement.operation),
+            ] {
+                if from.distance(to) <= 1e-9 {
+                    continue;
+                }
+                let m = Move {
+                    from,
+                    to,
+                    motion: Motion::Rapid,
+                    feed: machine.rapid_feed,
+                    operation,
+                };
+                machine.check_point(from)?;
+                machine.check_point(to)?;
+                machine.check_move(&m)?;
+                routes.moves.push(m);
+            }
+        }
+        last = id;
+        previous_index = Some(movement.operation);
+    }
+    crate::collision::check(project, &routes)
 }
 
 /// Metric, absolute G-code. Regenerates and preflights current project data.
@@ -175,8 +327,11 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         .machine
         .as_ref()
         .is_some_and(|m| m.tool_changer.mode == crate::machine::ChangeMode::MillingAtc);
+    let manual = manual(project);
     output.push_str(if automatic {
         "(Metric - stock top Z0 - controller-managed ATC)\n"
+    } else if manual {
+        "(Metric - stock top Z0 - manual changes with calibrated tool lengths)\n"
     } else {
         "(Metric - stock top Z0 - mounted single tool)\n"
     });
@@ -215,6 +370,17 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         first_tool.diameter
     )
     .unwrap();
+    if manual {
+        let record = first_record.ok_or("Manual changes require library tools")?;
+        writeln!(
+            output,
+            "(START WITH T{} ALREADY MOUNTED AND CALIBRATED)\nM5\nT{}\nG43 H{}",
+            record.post.number,
+            record.post.number,
+            record.post.length_offset.unwrap()
+        )
+        .unwrap();
+    }
     if automatic {
         output.push_str("M5\n");
         let record = first_record.ok_or("ATC requires a library tool")?;
@@ -266,18 +432,22 @@ pub fn gcode(project: &Project) -> Result<String, String> {
             let id = record.map(|t| t.id);
             if current_tool != id {
                 let record = record.ok_or("Missing operation tool")?;
-                writeln!(
-                    output,
-                    "G0 Z{:.4}\nM5\nM9\nT{} M6\nG43 H{}\nG0 Z{:.4}",
-                    project.travel_clearance(),
-                    record.post.number,
-                    record
-                        .post
-                        .length_offset
-                        .ok_or("ATC requires a length offset")?,
-                    project.travel_clearance()
-                )
-                .unwrap();
+                if manual {
+                    manual_change(&mut output, project, op)?;
+                } else {
+                    writeln!(
+                        output,
+                        "G0 Z{:.4}\nM5\nM9\nT{} M6\nG43 H{}\nG0 Z{:.4}",
+                        project.travel_clearance(),
+                        record.post.number,
+                        record
+                            .post
+                            .length_offset
+                            .ok_or("ATC requires a length offset")?,
+                        project.travel_clearance()
+                    )
+                    .unwrap();
+                }
                 writeln!(output, "G0 X{:.4} Y{:.4}", movement.from.x, movement.from.y).unwrap();
                 writeln!(
                     output,
@@ -439,8 +609,42 @@ pub fn validate_tool_changes(project: &Project) -> Result<(), String> {
             return Err("ATC requires library tool assignments".into());
         }
     }
-    if used.len() > 1 && !automatic {
-        return Err("Multiple tools require a configured ATC and compatible post; mounted-tool mode supports one tool".into());
+    if manual(project) {
+        if project.post.processor == PostProcessor::Grbl {
+            return Err("GRBL has no M6 or calibrated H registers. Plan/simulate multiple tools here; export one tool per file for a manual change and re-zero between programs".into());
+        }
+        let machine = project
+            .machine
+            .as_ref()
+            .ok_or("Manual changes require machine setup")?;
+        if project.post.processor == PostProcessor::LinuxCnc
+            && !machine.tool_changer.controller_managed
+        {
+            return Err("Enable the configured LinuxCNC manual M6 / hal_manualtoolchange handshake in Setup / Machine; no ATC is required".into());
+        }
+        if machine.tool_changer.manual_position.is_none() {
+            return Err("Configure a manual tool-change position in Setup / Machine".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let mut numbers = std::collections::BTreeSet::new();
+        let mut registers = std::collections::BTreeSet::new();
+        for op in project.operations.iter().filter(|o| o.enabled) {
+            let tool = project
+                .library_tool(Some(op))?
+                .ok_or("Manual changes require library tool assignments")?;
+            if ids.insert(tool.id) {
+                if !numbers.insert(tool.post.number) {
+                    return Err("Different manual-change tools need unique tool numbers".into());
+                }
+                let h=tool.post.length_offset.ok_or("Assign a calibrated H length-offset register to each manual-change tool in the tool library")?;
+                if !registers.insert(h) {
+                    return Err(
+                        "Different manual-change tools require separate calibrated H registers"
+                            .into(),
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }
