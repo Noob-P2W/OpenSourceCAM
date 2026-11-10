@@ -49,9 +49,9 @@ impl Settings {
         }
         if self
             .surface_step
-            .is_some_and(|v| !v.is_finite() || !(0.05..=5.0).contains(&v))
+            .is_some_and(|v| !v.is_finite() || !(0.005..=5.0).contains(&v))
         {
-            return Err("3D surface grid step must be between 0.05 and 5 mm".into());
+            return Err("3D surface grid step must be between 0.005 and 5 mm".into());
         }
         if self
             .path_tolerance

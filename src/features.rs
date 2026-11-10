@@ -24,7 +24,7 @@ fn edge(a: usize, b: usize) -> Edge {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureKind {
     RectangularPocket,
@@ -39,7 +39,7 @@ impl FeatureKind {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct Feature {
     pub kind: FeatureKind,
     pub min: [f64; 2],
@@ -616,8 +616,19 @@ pub fn recognize_project_with_cancel(
         cancel,
     )
 }
+pub fn recognize_level_for_selection(part: &Part, level: f64) -> Result<Report, String> {
+    recognize_level(part, Some(level), &AtomicBool::new(false))
+}
 fn recognize_level(part: &Part, level: Option<f64>, cancel: &AtomicBool) -> Result<Report, String> {
     let topology = Topology::build(part, cancel)?;
+    recognize_topology(part, level, &topology, cancel)
+}
+fn recognize_topology(
+    part: &Part,
+    level: Option<f64>,
+    topology: &Topology,
+    cancel: &AtomicBool,
+) -> Result<Report, String> {
     let bounds = part.bounds();
     let top_z = level.unwrap_or(bounds.max[2]);
     let mut features = Vec::new();
@@ -793,35 +804,12 @@ pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, Stri
             )
         }
     };
-    let mut op = Operation {
-        model_link: None,
-        settings: crate::operation::Settings {
-            start_depth: (feature.opening_z < -TOLERANCE).then_some(-feature.opening_z),
-            machining_face: project.setup_face,
-            ..Default::default()
-        },
-        tool_id: Some(tool.id),
-        preset_id: Some(project.active_preset.unwrap_or(tool.default_preset)),
-        name: format!(
-            "Recognized {} (review)",
-            feature.kind.label().to_lowercase()
-        ),
-        enabled: true,
-        strategy,
-        x: if matches!(strategy, Strategy::Drill | Strategy::CircularPocket) {
-            feature.center[0]
-        } else {
-            feature.min[0]
-        },
-        y: if matches!(strategy, Strategy::Drill | Strategy::CircularPocket) {
-            feature.center[1]
-        } else {
-            feature.min[1]
-        },
-        width: feature.diameter.unwrap_or(feature.max[0] - feature.min[0]),
-        height: feature.diameter.unwrap_or(feature.max[1] - feature.min[1]),
-        depth: -feature.bottom_z,
-    };
+    let mut op = draft(project, feature, strategy)?;
+    op.settings.machining_face = project.setup_face;
+    if let Some(part) = &project.part {
+        crate::machining::link(&mut op, part);
+    }
+    op.enabled = true;
     if strategy == Strategy::Drill && feature.through {
         let angle = tool.dimension("point_angle").to_radians() / 2.0;
         op.depth += tool.dimension("diameter") / 2.0 / angle.tan();
@@ -837,4 +825,200 @@ pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, Stri
     crate::cam::generate(&check)?;
     op.enabled = false;
     Ok(op)
+}
+/// Geometry-only draft: tooling is selected in the operation editor and checked on save/generate.
+pub fn draft(
+    project: &Project,
+    feature: &Feature,
+    strategy: Strategy,
+) -> Result<Operation, String> {
+    if let Some(part) = &project.part {
+        accessible(part, feature)?;
+    }
+    let compatible = match feature.kind {
+        FeatureKind::RectangularPocket => {
+            matches!(strategy, Strategy::Pocket | Strategy::InsideProfile)
+        }
+        FeatureKind::CircularHole => strategy == Strategy::CircularPocket || strategy.is_drilling(),
+    };
+    if !compatible {
+        return Err("Choose a strategy compatible with this feature".into());
+    }
+    let mut op = Operation {
+        model_link: None,
+        settings: crate::operation::Settings {
+            start_depth: (feature.opening_z < -TOLERANCE).then_some(-feature.opening_z),
+            machining_face: None,
+            ..Default::default()
+        },
+        tool_id: project.active_tool,
+        preset_id: project.active_preset,
+        name: format!(
+            "Recognized {} (review)",
+            feature.kind.label().to_lowercase()
+        ),
+        enabled: true,
+        strategy,
+        x: if strategy.is_drilling() || strategy == Strategy::CircularPocket {
+            feature.center[0]
+        } else {
+            feature.min[0]
+        },
+        y: if strategy.is_drilling() || strategy == Strategy::CircularPocket {
+            feature.center[1]
+        } else {
+            feature.min[1]
+        },
+        width: feature.diameter.unwrap_or(feature.max[0] - feature.min[0]),
+        height: feature.diameter.unwrap_or(feature.max[1] - feature.min[1]),
+        depth: -feature.bottom_z,
+    };
+    if let Some(part) = &project.part {
+        crate::machining::link(&mut op, part);
+    }
+    op.enabled = false;
+    Ok(op)
+}
+
+/// Survey supported prismatic features at every planar level in each model orientation.
+/// Results remain candidates; no setup or operations are changed.
+pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
+    let part = project.part.as_ref().ok_or("Import a model first")?;
+    validate_closed(part, &AtomicBool::new(false))?;
+    let faces = crate::faces::opening_faces(part)?;
+    let mut directions: Vec<[f64; 3]> = Vec::new();
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut identities = BTreeMap::<String, usize>::new();
+    let cancel = AtomicBool::new(false);
+    for face in faces {
+        if directions
+            .iter()
+            .any(|n| n.iter().zip(face.normal).map(|(a, b)| a * b).sum::<f64>() > 1. - 1e-8)
+        {
+            continue;
+        }
+        if directions.len() >= 64
+            || (directions.len() + 1) * part.geometry.mesh.triangles.len() > 4_000_000
+        {
+            return Err("Model survey exceeds its orientation work budget. Split the model; manual face selection remains available".into());
+        }
+        directions.push(face.normal);
+        let mut oriented = project.clone();
+        crate::faces::setup(&mut oriented, face.id, true)?;
+        let aligned = oriented.part.as_ref().unwrap();
+        let topology = Topology::build(aligned, &cancel)?;
+        let mut levels = Vec::<f64>::new();
+        for component in &topology.components {
+            if component.class != Class::Up {
+                continue;
+            }
+            for boundary in &component.loops {
+                if let Some(z) = topology.level(boundary) {
+                    if !levels.iter().any(|v| (v - z).abs() <= TOLERANCE) {
+                        levels.push(z);
+                    }
+                }
+            }
+        }
+        let matrix = crate::blank::rotation(aligned.rotation);
+        for z in levels {
+            let report = recognize_topology(aligned, Some(z), &topology, &cancel)?;
+            for feature in report.features {
+                let transform = |p: [f64; 3]| {
+                    let q: [f64; 3] = std::array::from_fn(|i| p[i] - aligned.offset[i]);
+                    part.point(std::array::from_fn(|i| {
+                        (0..3).map(|j| matrix[j][i] * q[j]).sum::<f64>() / aligned.units.factor()
+                    }))
+                };
+                let outline: Vec<_> = feature.outline.iter().map(|p| transform(*p)).collect();
+                let mut axis = [
+                    transform([feature.center[0], feature.center[1], feature.opening_z])
+                        .map(|v| (v / TOLERANCE).round() as i64),
+                    transform([feature.center[0], feature.center[1], feature.bottom_z])
+                        .map(|v| (v / TOLERANCE).round() as i64),
+                ];
+                axis.sort();
+                let identity = if feature.through && feature.kind == FeatureKind::CircularHole {
+                    format!("{axis:?}:{:.3}", feature.diameter.unwrap_or(0.))
+                } else {
+                    format!("unique:{}", results.len())
+                };
+                let direction = serde_json::json!({"normal":face.normal,"face":face.id,"current":face.horizontal});
+                let entry = serde_json::json!({"feature":feature,"outline":outline,"normal":face.normal,"face":face.id,"current_orientation":face.horizontal,"orientations":[direction.clone()]});
+                if let Some(&index) = identities.get(&identity) {
+                    let existing = &mut results[index];
+                    let mut orientations = existing["orientations"].as_array().unwrap().clone();
+                    orientations.push(direction);
+                    if face.horizontal {
+                        *existing = entry;
+                    }
+                    existing["orientations"] = serde_json::json!(orientations);
+                } else {
+                    identities.insert(identity, results.len());
+                    results.push(entry);
+                }
+                if results.len() > 500 {
+                    return Err("Recognition exceeds 500 candidates; split the model".into());
+                }
+            }
+        }
+    }
+    Ok(
+        serde_json::json!({"features":results,"notes":["Surveys supported circular holes and rectangular pockets across planar levels and orientations. Tapers, islands, intersecting cavities and general freeform features remain unsupported. Candidates require accessibility and tooling review; no operations are recommended or created."]}),
+    )
+}
+
+/// Direct selection inspects all XY opening levels, without a separate recognition action.
+pub fn pick_feature(
+    project: &Project,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<Feature, String> {
+    let part = project.part.as_ref().ok_or("Import a model first")?;
+    if direction[2].abs() < 1e-12 {
+        return Err("View the opening from above to select it".into());
+    }
+    let cancel = AtomicBool::new(false);
+    let topology = Topology::build(part, &cancel)?;
+    let mut levels = Vec::<f64>::new();
+    let mut found = Vec::new();
+    for c in &topology.components {
+        if c.class == Class::Up {
+            for boundary in &c.loops {
+                if let Some(z) = topology.level(boundary) {
+                    if !levels.iter().any(|v| (v - z).abs() < TOLERANCE) {
+                        levels.push(z);
+                    }
+                }
+            }
+        }
+    }
+    for z in levels {
+        for feature in recognize_topology(part, Some(z), &topology, &cancel)?.features {
+            let t = (z - origin[2]) / direction[2];
+            if t < 0. {
+                continue;
+            }
+            let p = [origin[0] + t * direction[0], origin[1] + t * direction[1]];
+            let mut inside = false;
+            for i in 0..feature.outline.len() {
+                let a = feature.outline[i];
+                let b = feature.outline[(i + 1) % feature.outline.len()];
+                if (a[1] > p[1]) != (b[1] > p[1])
+                    && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+                {
+                    inside = !inside;
+                }
+            }
+            if inside {
+                found.push((t, feature));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found
+        .into_iter()
+        .next()
+        .map(|(_, f)| f)
+        .ok_or("Click inside a supported hole or rectangular pocket opening".into())
 }

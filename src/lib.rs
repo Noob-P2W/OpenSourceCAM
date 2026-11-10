@@ -26,3 +26,5 @@ pub mod workspace;
 
 #[cfg(feature = "web")]
 pub mod web;
+
+mod contact;

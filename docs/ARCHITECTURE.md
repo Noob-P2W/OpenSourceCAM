@@ -212,7 +212,7 @@ only a preceding whole-stock facing pass proves that higher stock can be skipped
 stored setup plane. Browser recognition is a responsive nonmodal dock so the list
 and actual highlighted workpiece can be inspected together.
 
-`roughing` constructs conservative free regions from the target heightfield and
+`roughing` constructs conservative free regions from triangle-hierarchy cutter contact and
 clears offset contours at successive tool step-downs. Eroded grid shells bound
 spacing in both axes; routing links only traverse protected free-cell edges.
 Connected regions stay at Z; separate components retract. Surface finishing retains
@@ -223,3 +223,5 @@ cells per side. High-detail generated meshes have a separate bounded triangle
 budget; input mesh limits and removal-work limits remain unchanged. Live stock
 retains one in-flight request and slows updates as resolution increases. See
 [MACHINING_WORKFLOW.md](MACHINING_WORKFLOW.md) for scope and limits.
+
+Surface contact now uses `contact.rs`: a triangle bounding hierarchy, analytic capsule/triangle contact for flat cutters, clipped local patches, conservative ball-cutter contact bounds and cancellable subdivision. `surface.rs` makes adaptive finishing spans; `roughing.rs` retains its separate bounded clearing grid. Browser Setup surveys use `GeometryQuery::Survey`, while contextual plane recognition remains available to legacy planning/native callers. Geometry-only feature drafts resolve selections against Rust recognition and defer cutter-fit validation until tooling can be edited.

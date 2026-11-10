@@ -508,10 +508,9 @@ pub fn generate_with_cancel(
         let top = material_top(project, index);
         let layers = ((depth - top) / tool.step_down).ceil() as usize;
         if op.strategy.is_surface() {
-            let field = crate::surface::Field::build(
+            let field = crate::surface::Field::finishing(
                 project.part.as_ref().unwrap(),
                 project,
-                op.settings.surface_step.unwrap_or(0.5),
                 &mut surface_budget,
             )?;
             if op.strategy == Strategy::SurfaceRough {

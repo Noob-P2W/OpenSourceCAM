@@ -4,7 +4,7 @@ use crate::{
     model::{Operation, Project, Strategy},
 };
 use serde::Serialize;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone, Serialize)]
 pub struct Face {
@@ -13,10 +13,13 @@ pub struct Face {
     pub center: [f64; 3],
     pub area: f64,
     pub triangle_count: usize,
+    pub opening_count: usize,
     pub horizontal: bool,
     pub z: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub segments: Vec<[f64; 3]>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fill: Vec<[[f64; 3]; 3]>,
 }
 type BoundaryEdges = BTreeMap<([i64; 3], [i64; 3]), ([f64; 3], [f64; 3], usize)>;
 struct Group {
@@ -111,6 +114,17 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
             continue;
         }
         center = center.map(|v| v / area);
+        let mut face_edges = BTreeSet::new();
+        let mut face_vertices = BTreeSet::new();
+        for &id in &members {
+            let t = triangles[id];
+            for i in 0..3 {
+                face_vertices.insert(t[i]);
+                face_edges.insert(edge(t[i], t[(i + 1) % 3]));
+            }
+        }
+        let opening_count =
+            (1 + face_edges.len()).saturating_sub(face_vertices.len() + members.len());
         groups.push(Group {
             face: Face {
                 id: seed,
@@ -118,14 +132,23 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
                 center,
                 area,
                 triangle_count: members.len(),
+                opening_count,
                 horizontal: n[2] > 1. - 1e-8,
                 z: origin[2],
                 segments: Vec::new(),
+                fill: Vec::new(),
             },
             triangles: members,
         });
     }
     Ok(groups)
+}
+pub(crate) fn opening_faces(part: &Part) -> Result<Vec<Face>, String> {
+    Ok(groups(part)?
+        .into_iter()
+        .map(|g| g.face)
+        .filter(|f| f.opening_count > 0)
+        .collect())
 }
 pub fn list(part: &Part) -> Result<Vec<Face>, String> {
     let mut faces: Vec<_> = groups(part)?.into_iter().map(|g| g.face).collect();
@@ -143,6 +166,7 @@ pub fn face(part: &Part, triangle: usize) -> Result<Face, String> {
     for id in group.triangles {
         let p = part.geometry.mesh.triangles[id]
             .map(|v| part.point(part.geometry.mesh.vertices[v as usize]));
+        face.fill.push(p);
         for i in 0..3 {
             let (mut a, mut b) = (p[i], p[(i + 1) % 3]);
             let (mut ka, mut kb) = (

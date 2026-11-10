@@ -160,6 +160,15 @@ pub fn operation_template(
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeometryQuery {
     Faces,
+    Survey,
+    PickFeature {
+        origin: [f64; 3],
+        direction: [f64; 3],
+    },
+    FeatureGeometry {
+        feature: crate::features::Feature,
+        strategy: crate::model::Strategy,
+    },
     Face {
         triangle: usize,
     },
@@ -184,6 +193,24 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
         .as_ref()
         .ok_or("Import a model to select machining geometry")?;
     match query {
+        GeometryQuery::PickFeature { origin, direction } => Ok(json!(
+            crate::features::pick_feature(project, origin, direction)?
+        )),
+        GeometryQuery::Survey => crate::features::survey(project),
+        GeometryQuery::FeatureGeometry { feature, strategy } => {
+            // Resolve client selection against recognition; never trust submitted dimensions.
+            let report = crate::features::recognize_level_for_selection(part, feature.opening_z)?;
+            let found = report
+                .features
+                .iter()
+                .find(|f| {
+                    f.kind == feature.kind
+                        && f.center == feature.center
+                        && (f.bottom_z - feature.bottom_z).abs() < 0.002
+                })
+                .ok_or("Selected feature changed; recognize the model again")?;
+            Ok(json!(crate::features::draft(project, found, strategy)?))
+        }
         GeometryQuery::Faces => Ok(json!(crate::faces::list(part)?)),
         GeometryQuery::Face { triangle } => Ok(json!(crate::faces::face(part, triangle)?)),
         GeometryQuery::Pick { origin, direction } => {
@@ -193,28 +220,12 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             Ok(json!(crate::faces::facing(project, triangle)?))
         }
         GeometryQuery::FeatureDraft { index, strategy } => {
-            use crate::{features::FeatureKind, model::Strategy};
             let report = crate::features::recognize_project(project)?;
             let feature = report
                 .features
                 .get(index)
                 .ok_or("Recognize and select an available feature")?;
-            let mut op = crate::features::operation(project, feature)?;
-            let compatible = match feature.kind {
-                FeatureKind::RectangularPocket => {
-                    matches!(strategy, Strategy::Pocket | Strategy::InsideProfile)
-                }
-                FeatureKind::CircularHole => {
-                    if op.strategy.is_drilling() {
-                        strategy.is_drilling()
-                    } else {
-                        strategy == Strategy::CircularPocket
-                    }
-                }
-            };
-            if !compatible {
-                return Err("This strategy does not match the selected feature and tool. Choose a pocket/inside contour for a rectangular pocket, or circular pocket/drilling for a hole".into());
-            }
+            let mut op = crate::features::draft(project, feature, strategy)?;
             op.strategy = strategy;
             op.name = format!("{} · selected {}", strategy.label(), feature.kind.label());
             crate::machining::link(&mut op, part);

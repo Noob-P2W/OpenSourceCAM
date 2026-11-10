@@ -16,7 +16,7 @@ export class Viewport {
    else {this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
-  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.onPick&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onPick(this.pickRay(event.clientX-rect.left,event.clientY-rect.top))}};canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
+  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.onPick&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onPick(this.pickRay(event.clientX-rect.left,event.clientY-rect.top))}};canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>{event.preventDefault();if(this.onInspect&&this.pickRay){const r=canvas.getBoundingClientRect();this.onInspect(this.pickRay(event.clientX-r.left,event.clientY-r.top))}});
   canvas.addEventListener('wheel',event=>{event.preventDefault();this.magnify(Math.exp(-event.deltaY*.001))},{passive:false});
   canvas.addEventListener('dblclick',()=>this.fit());
  }
@@ -66,7 +66,12 @@ export class Viewport {
   const canvas=this.canvas,w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||this.lost)return;
   const dpr=Math.min(devicePixelRatio||1,2,Math.sqrt(4000000/(w*h)));if(canvas.width!==Math.round(w*dpr))canvas.width=Math.round(w*dpr);if(canvas.height!==Math.round(h*dpr))canvas.height=Math.round(h*dpr);
   if(this.scene!==project||this.simulation!==simulation)this.rebuild(project,workspace,simulation);this.updatePath(path,filter);
-  if(this.highlightSource!==highlight){if(this.highlightBuffer){if(this.highlightBuffer.buffer)this.gl?.deleteBuffer(this.highlightBuffer.buffer);this.buffers.splice(this.buffers.indexOf(this.highlightBuffer),1)}this.highlightSource=highlight;this.highlightBuffer=highlight?this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.6,.1]):null}
+  if(this.highlightSource!==highlight){
+   for(const item of this.highlightItems||[]){if(item.buffer)this.gl?.deleteBuffer(item.buffer);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
+   this.highlightItems=[];this.highlightSource=highlight;
+   if(highlight){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}this.highlightItems.push(this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.45,.04]));}
+  }
+
   // Both the model's tip and the old marker use the shared estimated-time cursor.
   const time=path?Math.max(0,Math.min(100,progress))/100*path.seconds:0;
   let completed=0;
@@ -92,7 +97,7 @@ export class Viewport {
    for(const item of visible){
     let drawBuffer=item.buffer,drawCount=item.count,mode=item.lines?gl.LINES:gl.TRIANGLES;
     if(wireframe&&!item.lines){if(!item.wireBuffer){const stride=Math.max(1,Math.ceil(item.count/3/12000)),edges=[];for(let i=0;i<item.count;i+=3*stride)for(const j of [0,1,1,2,2,0])edges.push(...item.data.subarray((i+j)*6,(i+j)*6+6));const wireData=new Float32Array(edges);item.wireBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,item.wireBuffer);gl.bufferData(gl.ARRAY_BUFFER,wireData,gl.STATIC_DRAW);item.wireCount=wireData.length/6}drawBuffer=item.wireBuffer;drawCount=item.wireCount;mode=gl.LINES}
-    gl.bindBuffer(gl.ARRAY_BUFFER,drawBuffer);gl.enableVertexAttribArray(this.locations.position);gl.enableVertexAttribArray(this.locations.normal);gl.vertexAttribPointer(this.locations.position,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(this.locations.normal,3,gl.FLOAT,false,24,12);gl.uniform3fv(this.locations.color,item.color);gl.uniform1f(this.locations.shaded,item.lines||wireframe?0:1);let count=drawCount;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];gl.drawArrays(mode,0,count)}
+    gl.bindBuffer(gl.ARRAY_BUFFER,drawBuffer);gl.enableVertexAttribArray(this.locations.position);gl.enableVertexAttribArray(this.locations.normal);gl.vertexAttribPointer(this.locations.position,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(this.locations.normal,3,gl.FLOAT,false,24,12);gl.uniform3fv(this.locations.color,item.color);gl.uniform1f(this.locations.shaded,item.lines||wireframe?0:1);let count=drawCount;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];if(item.selection){gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(-2,-2)}gl.drawArrays(mode,0,count);if(item.selection)gl.disable(gl.POLYGON_OFFSET_FILL)}
    if(tool){gl.uniform3fv(this.locations.offset,cursor);for(const item of this.toolBuffers){gl.bindBuffer(gl.ARRAY_BUFFER,item.buffer);gl.vertexAttribPointer(this.locations.position,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(this.locations.normal,3,gl.FLOAT,false,24,12);gl.uniform3fv(this.locations.color,item.color);gl.uniform1f(this.locations.shaded,1);gl.drawArrays(gl.TRIANGLES,0,item.count)}}
    else if(showCursor){gl.bindBuffer(gl.ARRAY_BUFFER,this.markerBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array([...cursor,0,0,0]));gl.vertexAttribPointer(this.locations.position,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(this.locations.normal,3,gl.FLOAT,false,24,12);gl.uniform3fv(this.locations.color,[1,.35,.08]);gl.uniform1f(this.locations.shaded,0);gl.disable(gl.DEPTH_TEST);gl.drawArrays(gl.POINTS,0,1)}
    canvas.dataset.renderer='webgl';

@@ -288,3 +288,24 @@ fn offset_roughing_clears_top_down_and_stays_down_between_connected_contours() {
         "Offset clearing must wrap the region instead of using independent X rasters"
     );
 }
+
+#[test]
+fn fine_finishing_uses_model_hierarchy_instead_of_whole_blank_grid() {
+    let mut p = plan(true);
+    p.stock.width = 100.;
+    p.stock.height = 20.;
+    // This represents 800,000 cells under the old grid implementation.
+    // Call the shared generator with roughing kept inexpensive using its independent coarse grid.
+    p.operations[0].settings.surface_step = Some(2.);
+    p.operations[1].settings.surface_step = Some(0.05);
+    p.operations[1].settings.step_over_percent = Some(50.);
+    for op in &mut p.operations {
+        op.width = 100.;
+        op.height = 20.;
+        if let Some(part) = &p.part {
+            machining::link(op, part);
+        }
+    }
+    let path = cam::generate(&p).unwrap();
+    assert!(path.moves.iter().any(|m| m.operation == 1));
+}

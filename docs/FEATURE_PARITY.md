@@ -82,3 +82,11 @@ engagement control. Facing stops at the highest imported target surface; lower
 recessed levels require a suitable strategy. Recognized operations retain the feature opening and clear stock above it in
 bounded depth passes; earlier whole-stock facing can establish a cleared starting
 level. See [machining geometry and clearing](MACHINING_WORKFLOW.md).
+
+## Machining workflow update
+
+Browser playback uses the Rust feed/rapid timeline: 1× is estimated elapsed machining time, excluding controller acceleration and tool-change delays. Face opens direct model picking and returns to the same operation draft. Pocket/hole drafts can bind picked geometry before choosing a tool; generation retains cutter-fit checks. The separate Setup → Auto recognize survey groups opposite views of a through-hole and inspects supported prismatic openings across all planar levels and opening-face orientations (bounded to 64 orientations / four million triangle-orientation visits / 500 candidates). It changes neither setup nor operations. Other directions require explicit setup orientation and fixture review; there is no automatic workflow recommendation. Right-click inspects current-axis holes/pockets or a model face. Selected geometry has an orange surface shade and outline.
+
+Finishing and roughing contact queries use a bounded triangle hierarchy with analytic swept-flat-cutter contact and conservative ball-cutter subdivision rather than a fine whole-stock height grid. Finishing uses adaptive parallel spans, with separate sampling (0.005–5 mm), contact tolerance and stepover controls. Roughing still uses a bounded 262,144-cell clearing grid. The 50-million-work and 200,000-move safeguards remain; fine sampling is not a guaranteed global surface-error bound. Mesh tessellation and cutter/stepover still constrain finish. Simulation resolution remains separate from machining accuracy.
+
+Example vise seating is edited in Setup → Workholding → Reseat stock / edit jaw grip. The diagram distinguishes jaw grip from backing material; reserving backing can grow blank thickness. Imported fixtures retain measured offsets and rotations.

@@ -9,7 +9,7 @@ export async function generate(page){await ribbon(page,'Actions','Generate paths
 export async function inspect(page){await ribbon(page,'Actions','Stock simulation');}
 export async function planning(page,{fit=false,replace=false}={}){await ribbon(page,'3D milling','Rough + finish…');await page.locator('#use-setup-stock').setChecked(!fit);await page.locator('#replace-operations').setChecked(replace);}
 export async function plan(page,options={}){await planning(page,options);await page.locator('#surface').click();await page.locator('#status').filter({hasText:'Operations planned'}).waitFor({timeout:60000});}
-export async function recognize(page){await ribbon(page,'2.5D milling','Recognize');await page.locator('#recognize').click();}
+export async function recognize(page){await ribbon(page,'Setup','Auto recognize');}
 export async function idle(page){await page.waitForFunction(()=>!document.getElementById('software-settings').disabled,{},{timeout:120000});}
 export async function state(page){await idle(page);return page.evaluate(()=>JSON.parse(localStorage.getItem('oc-project')));}
 export async function importModel(page,file,role='part'){await section(page,'import');await page.locator('#import-role').selectOption(role);void acceptNextConfirmation(page);await page.locator('#model').setInputFiles(file);await page.locator('#status').filter({hasText:'Model imported'}).waitFor({timeout:120000});}

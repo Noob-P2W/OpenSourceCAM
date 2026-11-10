@@ -281,3 +281,66 @@ fn desktop_detail_resolves_small_removal_with_bounded_resolution() {
     assert!(high.geometry.mesh.triangles.len() > low.geometry.mesh.triangles.len());
     assert!(stock::simulate(&p, &path, 1., 513, &cancel).is_err());
 }
+
+#[test]
+fn survey_finds_multiple_levels_and_both_sides_without_changing_setup() {
+    let p = two_levels(false);
+    let original = p.clone();
+    let survey = features::survey(&p).unwrap();
+    let entries = survey["features"].as_array().unwrap();
+    assert!(entries.len() >= 10);
+    let top: Vec<_> = entries
+        .iter()
+        .filter(|e| e["current_orientation"] == true)
+        .collect();
+    assert!(top
+        .iter()
+        .any(|e| e["feature"]["opening_z"].as_f64().unwrap() < -4.));
+    assert!(entries
+        .iter()
+        .any(|e| e["orientations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["normal"][2].as_f64().unwrap() < -0.99)));
+    assert_eq!(p, original);
+}
+#[test]
+fn feature_geometry_opens_before_choosing_a_small_enough_tool() {
+    let mut p = mount();
+    p.tool_library.tools[0]
+        .geometry
+        .insert("diameter".into(), 50.);
+    let feature = features::recognize_project(&p)
+        .unwrap()
+        .features
+        .into_iter()
+        .find(|f| f.diameter.is_some())
+        .unwrap();
+    let op: Operation = serde_json::from_value(
+        commands::geometry_query(
+            &p,
+            GeometryQuery::FeatureGeometry {
+                feature: feature.clone(),
+                strategy: Strategy::CircularPocket,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(op.width, feature.diameter.unwrap());
+    assert!(!op.enabled);
+    let hit = features::pick_feature(
+        &p,
+        [feature.center[0], feature.center[1], 100.],
+        [0., 0., -1.],
+    )
+    .unwrap();
+    assert_eq!(hit.center, feature.center);
+}
+
+#[test]
+fn survey_groups_opposite_views_of_the_same_through_hole() {
+    let survey = features::survey(&mount()).unwrap();
+    assert_eq!(survey["features"].as_array().unwrap().len(), 5);
+}
