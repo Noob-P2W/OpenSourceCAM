@@ -171,7 +171,7 @@ Generated path presentation includes Rust-computed start/end seconds for each
 move. Both the cursor and stock snapshots select the same estimated-time prefix.
 WebSession caches one preflighted PlaybackPreview path, invalidating it on every
 successful edit/import/plan. A generate response includes its bounded uncut stock
-mesh. The browser requests at most four 32-cell stock snapshots per second, with
+mesh. The browser requests at most four stock snapshots per second (32 cells by default, with larger selectable previews throttled further), with
 one request in flight and only the latest target queued. Epoch and revision checks
 discard stale responses after seeking or editing. These snapshots share stock
 removal and existing budgets, omitting repeated target recognition/collision reports;

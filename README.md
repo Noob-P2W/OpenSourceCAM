@@ -28,7 +28,7 @@ current browser interface, not every feature of the native application.
 
 | Area | Current implementation |
 | --- | --- |
-| Milling | Rectangular pockets and profiles, peck drilling, supported model-linked stock machining, 3-axis raster roughing and parallel finishing |
+| Milling | Rectangular pockets and profiles, peck drilling, supported model-linked stock machining, 3-axis offset roughing and parallel finishing |
 | Inspection | Toolpath preview, approximate machining time, sampled material-removal simulation |
 | Output | Metric G-code with Generic, GRBL, Mach3 and LinuxCNC posts, subject to each post's supported configuration |
 | Projects | Local versioned JSON project files with embedded geometry |

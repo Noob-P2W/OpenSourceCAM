@@ -242,7 +242,7 @@ confirmations. Dark mode resolves foreground and button colors in the selected t
 
 With **Simulated stock** enabled, Play starts with uncut stock and updates removal
 at the current playback time. Rewind/scrub discard later stock snapshots. Playback
-uses a bounded 32-cell preview; choose **Actions → Stock simulation** for the detailed
+defaults to a bounded 32-cell preview, with higher playback Detail settings available; choose **Actions → Stock simulation** for the detailed
 inspection at the current slider position. The stock label shows the actual displayed
 percentage while a worker update is pending. Toolpath motion and removal are sampled
 against the same Rust-generated timeline.

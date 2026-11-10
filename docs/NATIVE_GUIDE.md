@@ -39,7 +39,7 @@ assignments, head limits and ATC output.
 
 ## Included
 
-- Model-linked 3D raster roughing and parallel XYZ finishing with flat or ball end
+- Model-linked 3D offset roughing and parallel XYZ finishing with flat or ball end
   mills, conservative triangle-mesh clearance, configurable surface grid, stock
   allowances and sampled material-removal preview. Three-axis upper surfaces only.
 - Resizable project/properties sidebars, directly accessible operation management,

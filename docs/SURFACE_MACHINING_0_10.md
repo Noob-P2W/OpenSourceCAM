@@ -1,3 +1,5 @@
+> Historical 0.10 raster implementation notes. Current roughing uses constant-Z offset contours; see [Machining workflow](MACHINING_WORKFLOW.md).
+
 # 3D surface machining — 0.10.0
 
 ![Curved-model stock preview](surface-stock.png)

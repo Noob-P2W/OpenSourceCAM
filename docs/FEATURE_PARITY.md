@@ -63,7 +63,7 @@ and configured holder at this position, switching with the operation's tool.
 Show tool can be disabled to return to the position marker. Assembly meshes are
 illustrative library geometry, not measured cutter flute surfaces or additional
 collision verification. Playback uses a fixed preview duration and the shared Rust estimated-time timeline.
-With Simulated stock enabled, bounded 32-cell worker snapshots update during
+With Simulated stock enabled, bounded worker snapshots (32 cells by default, up to 512 selectable) update during
 playback; rewinding immediately restores the uncut mesh. The detailed inspection
 command retains selectable resolution, target comparison and fixture reporting.
 The browser regression runs playback at normal frame intervals, checks visible
