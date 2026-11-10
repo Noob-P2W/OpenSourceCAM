@@ -11,14 +11,14 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'){const menu=
 document.querySelectorAll('[data-go-pane]').forEach(button=>button.onclick=()=>{setPane(button.dataset.goPane);window.scrollTo({top:0,behavior:'instant'})});
 let worker=createEngine(),jobCheckpoint=null,restarting=null;
 let sequence=0,pending=new Map(),project,selected=0,path=null,revision=0,busy=false;
-let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},simulation=null,highlight=null,toolFocus=null,playing=false;
+let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},simulation=null,highlight=null,toolFocus=null,playing=false,playbackFrame=null,playbackProgress=100,lastPlaybackTime=0;
 const viewport=new Viewport($('canvas'),()=>draw(),(text,error)=>status(text,error));
 function projectJSON(){return serializedProject??=JSON.stringify(project)}
 function refreshEditor(){if(!project)return;$('json').dataset.dirty='false';const data=projectJSON();const open=$('advanced-editor').open;$('json').value=(open||data.length<512*1024)?data:'';$('json').placeholder='Open this editor to load project JSON. Large models use extra memory in text form.'}
 let canUndo=false,canRedo=false,lastState,autosaved=false,fieldsDirty=false,fieldTimer;
 function scheduleFields(){clearTimeout(fieldTimer);fieldTimer=setTimeout(()=>{if(document.activeElement?.matches('input:not([type=checkbox]),textarea')){scheduleFields();return}task(async()=>{})},350)}
-function markFields(){fieldsDirty=true;serializedProject=null;autosaved=false;path=null;simulation=null;playing=false;$('play').textContent='Play paths';$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';historyButtons();draw();scheduleFields()}
-function historyButtons(){$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','recognize','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation}
+function markFields(){fieldsDirty=true;serializedProject=null;autosaved=false;path=null;simulation=null;pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';historyButtons();draw();scheduleFields()}
+function historyButtons(){$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','recognize','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation;$('play').disabled=busy||!path?.moves.length}
 function displayView(view){presentation={part_transform:view.part_transform,stock_outline:view.stock_outline,stock_definition:view.stock_definition,setup_issue:view.setup_issue};Object.defineProperty(project,'_display',{value:presentation,configurable:true});workspacePreview=view.workspace_preview||[];canUndo=view.can_undo;canRedo=view.can_redo}
 function applyView(view){project=view.project;serializedProject=null;displayView(view)}
 function persist(){try{const data=projectJSON();const previous=localStorage.getItem('oc-project');let backupWarning=false;if(previous&&previous!==data){try{localStorage.setItem('oc-backup',previous)}catch{backupWarning=true}}localStorage.setItem('oc-project',data);autosaved=true;$('saved').textContent=backupWarning?'Saved on this device · previous backup could not be refreshed':'Saved on this device';return true}catch{autosaved=false;$('saved').textContent='Not saved — download a backup';status('Browser storage unavailable or full. Download a backup before closing.',true);return false}}
@@ -40,10 +40,10 @@ $('cancel-job').onclick=()=>{
  restarting=engineCall('restore-session',{project:saved.project,history:saved.history}).then(view=>{canUndo=view.can_undo;canRedo=view.can_redo}).catch(error=>{status(`Engine recovery failed: ${error.message}. Download a backup and reload.`,true)});
 };
 function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);document.dispatchEvent(new CustomEvent('cam-status',{detail:{text,error}}))}
-async function task(fn){if(busy)return;busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){status(e.message,e.name!=='AbortError')}finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
+async function task(fn){if(busy)return;pausePlayback();busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){status(e.message,e.name!=='AbortError')}finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
 async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();persist();throw e}}
- lastState=projectJSON();revision++;path=null;simulation=null;highlight=null;playing=false;$('play').textContent='Play paths';$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';$('features').replaceChildren();refreshEditor();persist();historyButtons();draw()
+ lastState=projectJSON();revision++;path=null;simulation=null;highlight=null;pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';$('features').replaceChildren();refreshEditor();persist();historyButtons();draw()
 }
 function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap)}
 function render(){if(!project)return;selected=Math.max(0,Math.min(selected,project.operations.length-1));$('title').textContent=project.name;$('title').title=project.name;renderSetup();renderExtras();refreshEditor();shell?.render();draw()}
@@ -74,10 +74,35 @@ function paint(){
  if(result){if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
 }
 $('view').onchange=()=>viewport.setView($('view').value);$('fit-view').onclick=()=>viewport.fit();$('zoom-in').onclick=()=>viewport.magnify(1.25);$('zoom-out').onclick=()=>viewport.magnify(.8);
-for(const id of ['progress','wireframe','show-stock','show-simulation','selected-path'])$(id).oninput=draw;
+for(const id of ['wireframe','show-stock','show-simulation','selected-path'])$(id).oninput=draw;
+$('progress').oninput=()=>{pausePlayback();draw()};
 new ResizeObserver(draw).observe($('canvas'));
 $('plan-margin').oninput=()=>{$('stock-margin').value=$('plan-margin').value};$('stock-margin').oninput=()=>{$('plan-margin').value=$('stock-margin').value};
-$('play').onclick=()=>{if(!path){status('Generate paths before playback.',true);return}playing=!playing;$('play').textContent=playing?'Pause paths':'Play paths';if(playing){$('progress').value=0;let last=performance.now();const tick=now=>{if(!playing)return;$('progress').value=Math.min(100,Number($('progress').value)+(now-last)/150);last=now;draw();if(Number($('progress').value)<100)requestAnimationFrame(tick);else{playing=false;$('play').textContent='Play paths'}};requestAnimationFrame(tick)}};
+// Keep fractional playback state outside the slider: range inputs round to their step.
+function pausePlayback(){
+ playing=false;
+ if(playbackFrame!==null)cancelAnimationFrame(playbackFrame);
+ playbackFrame=null;
+ $('play').textContent='Play paths';$('play').setAttribute('aria-pressed','false');
+}
+function playbackTick(now){
+ playbackFrame=null;
+ if(!playing)return;
+ playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/150);
+ lastPlaybackTime=now;$('progress').value=playbackProgress;draw();
+ if(playbackProgress===100)pausePlayback();
+ else playbackFrame=requestAnimationFrame(playbackTick);
+}
+$('play').onclick=()=>{
+ if(playing){pausePlayback();return}
+ if(!path?.moves.length){status('Generate paths before playback.',true);return}
+ playbackProgress=Number($('progress').value);
+ if(playbackProgress>=100)playbackProgress=0;
+ $('progress').value=playbackProgress;lastPlaybackTime=performance.now();playing=true;
+ $('play').textContent='Pause paths';$('play').setAttribute('aria-pressed','true');
+ draw();playbackFrame=requestAnimationFrame(playbackTick);
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pausePlayback()});
 $('nc-preview').onclick=()=>task(async()=>{shell.close('inspect-dialog');const text=await call('export');shell.openInspect();$('nc-code').textContent=text.length>100000?text.slice(0,100000)+'\n… Preview truncated. Download G-code for the complete program.':text;status('G-code preview checked against the current project')});
 $('save-stock').onclick=()=>task(async()=>{if(!simulation)throw Error('Run stock simulation first.');const data=await call('stock-obj',{progress:simulation.summary.progress,resolution:simulation.resolution});download(data,filename('-stock.obj'));status('Sampled remaining-stock mesh downloaded')});
 $('save-machine').onclick=()=>task(async()=>{download(await call('machine-profile'),filename('.cam-machine.json'));status('CNC profile downloaded')});
@@ -131,7 +156,7 @@ resizer.onpointerdown=event=>{resizer.setPointerCapture(event.pointerId);event.p
 resizer.onkeydown=event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();resizeEditor(document.querySelector('.side-panels').clientWidth+(event.key==='ArrowLeft'?20:-20))}};
 try{const width=Number(sessionStorage.getItem('oc-editor-width'));if(width>0)bench.style.setProperty('--editor-width',`${width}px`)}catch{}
 function showWorkspace(){document.body.dataset.screen='workbench';sessionStorage.setItem('oc-screen','workbench');draw()}
-function showHome(){shell?.closeAll();document.body.dataset.screen='home';sessionStorage.setItem('oc-screen','home');$('resume-name').textContent=project?`Current workspace: ${project.name}`:'';playing=false;$('play').textContent='Play paths';window.scrollTo({top:0,behavior:'instant'})}
+function showHome(){shell?.closeAll();document.body.dataset.screen='home';sessionStorage.setItem('oc-screen','home');$('resume-name').textContent=project?`Current workspace: ${project.name}`:'';pausePlayback();window.scrollTo({top:0,behavior:'instant'})}
 function renderHome(){
  $('process-cards').replaceChildren();$('new-strategy').replaceChildren();for(const strategy of catalog.strategies||[])$('new-strategy').add(new Option(strategy.label,strategy.id));
  for(const process of catalog.processes){const button=document.createElement('button');button.className='process-card'+(process.ready?'':' planned');const name=document.createElement('strong'),description=document.createElement('span'),availability=document.createElement('span');name.textContent=process.label;description.textContent=process.description;availability.className='availability';availability.textContent=process.ready?'2.5D + upper-surface 3D machining':'Reference workspace · motion engine planned';button.append(name,description,availability);button.dataset.process=process.id;button.onclick=()=>task(async()=>{if(project&&(project.part||canUndo)&&!confirm('Start a new workspace? Save the current project first if needed.'))return;await sessionEdit({kind:'new_project',process:process.id});showWorkspace();setPane('import');viewport.setView(shell.prefs().defaultView);status(`${process.label} workspace opened.${process.ready?' Import a part to begin.':' Import, view and save models; machining strategies are planned.'}`)});$('process-cards').append(button)}shell?.homeIcons();
