@@ -247,6 +247,14 @@ inspection at the current slider position. The stock label shows the actual disp
 percentage while a worker update is pending. Toolpath motion and removal are sampled
 against the same Rust-generated timeline.
 
+**Show tool** is enabled by default in Toolpath playback. It draws the operation's
+library cutter, shaft and configured holder at actual scale, with the tip following
+the path. The model switches at tool changes; the viewport label identifies the
+current tool. It works with simulated stock and in software graphics fallback.
+Disable Show tool to use the smaller position marker. These are the same illustrative
+assembly surfaces shown by the library; they do not replace the shared cutting and
+fixture checks. Older projects without a library use their legacy setup dimensions.
+
 **Drilling → Drill hole** creates a single-feed cycle; **Peck drilling** creates a
 full-retract chip-clearing cycle. Select a measured drill from the library and review
 its feed, tip depth, R plane and peck settings. See [drilling and cutter offsets](DRILLING_AND_COMPENSATION.md).

@@ -1,6 +1,93 @@
 //! Illustrative tool/holder surfaces shared by both UIs, never collision geometry.
 use crate::tool_library::{LibraryTool, ToolKind, ToolLibrary};
 
+/// The same tip-at-zero assembly is used by the library and moving-tool display.
+pub fn meshes(tool: &LibraryTool, library: &ToolLibrary) -> [crate::import::Mesh; 2] {
+    let mut meshes = std::array::from_fn(|_| crate::import::Mesh {
+        vertices: Vec::new(),
+        triangles: Vec::new(),
+    });
+    for (vertices, cutting) in assembly(tool, library) {
+        let mesh = &mut meshes[usize::from(cutting)];
+        let base = mesh.vertices.len() as u32;
+        mesh.vertices.extend(vertices);
+        mesh.triangles.push([base, base + 1, base + 2]);
+    }
+    meshes
+}
+
+#[derive(serde::Serialize)]
+pub struct PlaybackTool {
+    pub library_id: Option<u64>,
+    pub number: Option<u32>,
+    pub name: String,
+    pub meshes: [crate::import::Mesh; 2],
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+/// Resolve the effective operation binding without changing the project. Older
+/// single-tool jobs use their setup dimensions, with library defaults for absent
+/// assembly data. This surface is illustrative, never collision/cutting geometry.
+pub fn playback(project: &crate::model::Project, index: usize) -> Result<PlaybackTool, String> {
+    let op = project.operations.get(index).ok_or("Operation not found")?;
+    let legacy;
+    let selected = project.library_tool(Some(op))?;
+    let tool = if let Some(tool) = selected {
+        tool
+    } else {
+        use crate::machine::{CutterKind, Tooling};
+        let mut record = LibraryTool::new(0, 1, ToolKind::FlatEndMill);
+        record.name = project.tool.name.clone();
+        record
+            .geometry
+            .insert("diameter".into(), project.tool.diameter);
+        record
+            .geometry
+            .insert("shaft_diameter".into(), project.tool.diameter);
+        if let Some(Tooling::Milling {
+            kind,
+            flute_length,
+            overall_length,
+            stickout,
+            shank_diameter,
+            ..
+        }) = project.machine.as_ref().map(|m| &m.tooling)
+        {
+            if *kind == CutterKind::Drill {
+                record.kind = ToolKind::Drill;
+            }
+            for (key, value) in [
+                ("flute_length", *flute_length),
+                ("overall_length", *overall_length),
+                ("stickout", *stickout),
+                ("shaft_diameter", *shank_diameter),
+            ] {
+                record.geometry.insert(key.into(), value);
+            }
+        }
+        legacy = record;
+        &legacy
+    };
+    let meshes = meshes(tool, &project.tool_library);
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for point in meshes.iter().flat_map(|m| &m.vertices) {
+        for i in 0..3 {
+            min[i] = min[i].min(point[i]);
+            max[i] = max[i].max(point[i]);
+        }
+    }
+    Ok(PlaybackTool {
+        library_id: selected.map(|t| t.id),
+        number: selected.map(|t| t.post.number),
+        name: tool.name.clone(),
+        meshes,
+        min,
+        max,
+    })
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Dimension {
     pub key: String,

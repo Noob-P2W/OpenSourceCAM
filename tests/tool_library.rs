@@ -314,3 +314,71 @@ fn focused_tool_dimensions_match_supplied_geometry_in_assembly_coordinates() {
         assert!(d.start.into_iter().chain(d.end).all(f64::is_finite));
     }
 }
+
+#[test]
+fn playback_uses_the_library_assembly_holder_and_effective_operation_binding() {
+    use opensourcecam::tool_preview;
+    let mut p = two_tools();
+    p.operations[0].tool_id = None;
+    p.active_tool = Some(1);
+    let mut holder = LibraryTool::new(3, 3, ToolKind::Holder);
+    holder.geometry.insert("body_diameter".into(), 30.);
+    holder.geometry.insert("overall_length".into(), 80.);
+    p.tool_library.tools.push(holder);
+    let mill = &mut p.tool_library.tools[0];
+    mill.holder = Some(3);
+    mill.geometry.insert("stickout".into(), 35.);
+    let original = p.clone();
+    let first = tool_preview::playback(&p, 0).unwrap();
+    assert_eq!(first.library_id, Some(1));
+    assert_eq!(first.number, Some(1));
+    assert_eq!(
+        first.meshes,
+        tool_preview::meshes(&p.tool_library.tools[0], &p.tool_library)
+    );
+    assert_eq!(first.min, [-15., -15., 0.]);
+    assert_eq!(first.max, [15., 15., 115.]);
+    let second = tool_preview::playback(&p, 1).unwrap();
+    assert_eq!(second.library_id, Some(2));
+    assert_eq!(second.number, Some(2));
+    assert_eq!(
+        second.meshes,
+        tool_preview::meshes(&p.tool_library.tools[1], &p.tool_library)
+    );
+    assert_eq!(
+        second.min[2], 0.,
+        "The drill tip must stay at the path cursor"
+    );
+    assert_eq!(
+        p, original,
+        "Preview must not edit or initialize the library"
+    );
+    p.operations[1].tool_id = Some(999);
+    assert!(tool_preview::playback(&p, 1).is_err());
+    assert!(tool_preview::playback(&p, 1000).is_err());
+}
+
+#[test]
+fn legacy_playback_uses_setup_dimensions_without_mutating_or_guessing_a_holder() {
+    let mut p = Project::default();
+    p.tool.diameter = 4.;
+    if let opensourcecam::machine::Tooling::Milling {
+        overall_length,
+        shank_diameter,
+        ..
+    } = &mut p.machine.as_mut().unwrap().tooling
+    {
+        *overall_length = 73.;
+        *shank_diameter = 6.;
+    }
+    let original = p.clone();
+    let preview = opensourcecam::tool_preview::playback(&p, 0).unwrap();
+    assert_eq!(preview.library_id, None);
+    assert_eq!(preview.min, [-3., -3., 0.]);
+    assert_eq!(preview.max, [3., 3., 73.]);
+    assert!(preview.meshes[1]
+        .vertices
+        .iter()
+        .all(|v| v[0].hypot(v[1]) <= 2. + 1e-8));
+    assert_eq!(p, original);
+}

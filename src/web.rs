@@ -231,23 +231,13 @@ impl WebSession {
     pub fn tool_preview(&self, id: u64) -> Result<String, JsValue> {
         let library = &self.inner.project().tool_library;
         let tool = library.get(id).map_err(|e| JsValue::from_str(&e))?;
-        let mut meshes = [
-            crate::import::Mesh {
-                vertices: Vec::new(),
-                triangles: Vec::new(),
-            },
-            crate::import::Mesh {
-                vertices: Vec::new(),
-                triangles: Vec::new(),
-            },
-        ];
-        for (vertices, cutting) in crate::tool_preview::assembly(tool, library) {
-            let mesh = &mut meshes[usize::from(cutting)];
-            let base = mesh.vertices.len() as u32;
-            mesh.vertices.extend(vertices);
-            mesh.triangles.push([base, base + 1, base + 2]);
-        }
+        let meshes = crate::tool_preview::meshes(tool, library);
         serde_json::to_string(&serde_json::json!({"meshes":meshes,"dimensions":crate::tool_preview::dimensions(tool)})).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn playback_tool(&self, index: usize) -> Result<String, JsValue> {
+        crate::tool_preview::playback(self.inner.project(), index)
+            .and_then(|tool| serde_json::to_string(&tool).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn simulate(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
         crate::commands::simulate_project(self.inner.project(), progress, resolution)

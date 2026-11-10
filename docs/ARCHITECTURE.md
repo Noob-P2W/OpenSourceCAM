@@ -184,3 +184,13 @@ by the browser. Tool-preview dimension anchors and values come from Rust in the
 assembly coordinate frame; SVG overlays project those points using the display
 camera. Focusing a dimension selects a front view, and the drawing stays visible
 while editing on small screens.
+
+Playback resolves the effective operation tool in Rust and reuses the library's
+tip-at-zero assembly meshes, including the configured shaft and holder. The page
+keeps at most four assemblies, requests one at a time and preloads the next
+distinct tool. Only the current tool occupies GPU buffers; stock updates do not
+rebuild those buffers. A display translation places its tip at the shared cursor,
+with depth-tested solids in WebGL and depth-sorted faces in software fallback.
+The camera includes a retained swept tool envelope rather than following each
+move. Legacy jobs use their setup dimensions and are labeled as legacy tools.
+Display geometry does not alter collision envelopes, removal or posted tool offsets.

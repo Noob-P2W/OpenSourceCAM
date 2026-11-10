@@ -10,7 +10,7 @@ This is an implementation inventory, not a release promise or certification.
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
-| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots on the same estimated-time timeline as the cutter, and OBJ download |
+| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots on the same estimated-time timeline as the library tool assembly, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
@@ -58,7 +58,11 @@ Toolpath playback keeps fractional progress independently of the slider and paus
 when scrubbing, leaving the workspace, changing the project or starting a calculation.
 Pause/resume retains position; Play after completion replays from the start. The
 contrasting position marker interpolates between supplied move endpoints in WebGL
-and software rendering. Playback uses a fixed preview duration and the shared Rust estimated-time timeline.
+and software rendering. By default the browser draws the library cutter, shaft
+and configured holder at this position, switching with the operation's tool.
+Show tool can be disabled to return to the position marker. Assembly meshes are
+illustrative library geometry, not measured cutter flute surfaces or additional
+collision verification. Playback uses a fixed preview duration and the shared Rust estimated-time timeline.
 With Simulated stock enabled, bounded 32-cell worker snapshots update during
 playback; rewinding immediately restores the uncut mesh. The detailed inspection
 command retains selectable resolution, target comparison and fixture reporting.
