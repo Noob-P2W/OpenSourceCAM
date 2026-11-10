@@ -16,7 +16,8 @@ export class Viewport {
    else {this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
-  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.onPick&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onPick(this.pickRay(event.clientX-rect.left,event.clientY-rect.top))}};canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>{event.preventDefault();if(this.onInspect&&this.pickRay){const r=canvas.getBoundingClientRect();this.onInspect(this.pickRay(event.clientX-r.left,event.clientY-r.top))}});
+  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.pickRay){const rect=canvas.getBoundingClientRect();const ray=this.pickRay(event.clientX-rect.left,event.clientY-rect.top);if(this.onPick)this.onPick(ray);else this.onInspect?.(ray)}};
+  canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
   canvas.addEventListener('wheel',event=>{event.preventDefault();this.magnify(Math.exp(-event.deltaY*.001))},{passive:false});
   canvas.addEventListener('dblclick',()=>this.fit());
  }
@@ -57,9 +58,9 @@ export class Viewport {
   const axis=Math.max(.001,Math.min(stock.width,stock.height,stock.thickness)*.5);this.axisBuffers=[this.lines([[0,0,0],[axis,0,0]],[.88,.22,.22]),this.lines([[0,0,0],[0,axis,0]],[.2,.65,.3]),this.lines([[0,0,0],[0,0,axis]],[.2,.42,.9])];const grid=[],extent=Math.max(stock.width,stock.height),step=10**Math.floor(Math.log10(extent/8)),cx=stock.width/2,cy=stock.height/2,z=-stock.thickness-.01;for(let i=-10;i<=10;i++){grid.push([cx+i*step,cy-10*step,z],[cx+i*step,cy+10*step,z],[cx-10*step,cy+i*step,z],[cx+10*step,cy+i*step,z])}this.gridLines=this.lines(grid,this.controls.dark?[.16,.21,.26]:[.83,.85,.86]);
  }
  updatePath(path,filter){
-  if(this.pathSource===path&&this.pathFilter===filter)return;if(this.toolPath!==path){this.toolEnvelope=null;this.toolPath=path}this.pathSource=path;this.pathFilter=filter;
+  const visibility=[...(this.controls.hiddenOperations||[])].sort().join(',');if(this.pathSource===path&&this.pathFilter===filter&&this.pathVisibility===visibility)return;this.pathVisibility=visibility;if(this.toolPath!==path){this.toolEnvelope=null;this.toolPath=path}this.pathSource=path;this.pathFilter=filter;
   for(const item of this.pathBuffers||[]){if(item.buffer)this.gl?.deleteBuffer(item.buffer);this.buffers.splice(this.buffers.indexOf(item),1)}this.pathBuffers=[];this.pathBounds=null;
-  if(!path)return;this.pathBounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};const cuts=[],rapids=[];this.pathPrefixes=[new Uint32Array(path.moves.length+1),new Uint32Array(path.moves.length+1)];path.moves.forEach((move,index)=>{for(const p of [move.from,move.to])for(let i=0;i<3;i++){this.pathBounds.min[i]=Math.min(this.pathBounds.min[i],p[i]);this.pathBounds.max[i]=Math.max(this.pathBounds.max[i],p[i])}const included=filter===null||move.operation===filter;if(included)(move.rapid?rapids:cuts).push(move.from,move.to);for(let i=0;i<2;i++)this.pathPrefixes[i][index+1]=this.pathPrefixes[i][index]+(included&&Number(move.rapid)===i?2:0)});
+  if(!path)return;this.pathBounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};const cuts=[],rapids=[];this.pathPrefixes=[new Uint32Array(path.moves.length+1),new Uint32Array(path.moves.length+1)];path.moves.forEach((move,index)=>{for(const p of [move.from,move.to])for(let i=0;i<3;i++){this.pathBounds.min[i]=Math.min(this.pathBounds.min[i],p[i]);this.pathBounds.max[i]=Math.max(this.pathBounds.max[i],p[i])}const included=(filter===null||move.operation===filter)&&!this.controls.hiddenOperations?.has(move.operation);if(included)(move.rapid?rapids:cuts).push(move.from,move.to);for(let i=0;i<2;i++)this.pathPrefixes[i][index+1]=this.pathPrefixes[i][index]+(included&&Number(move.rapid)===i?2:0)});
   this.pathBuffers=[this.lines(cuts,this.controls.dark?[.33,.96,.77]:[.02,.5,.4]),this.lines(rapids,[.76,.48,.28])];
  }
  draw(project,workspace,path,progress,simulation,highlight,wireframe,showStock,filter=null,toolForOperation=null){
@@ -90,7 +91,7 @@ export class Viewport {
   let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))*this.zoom;
   this.pickRay=(x,y)=>{const u=(x-w/2-this.pan[0])/scale,v=(h/2+this.pan[1]-y)/scale;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*radius*4),direction:depth.map(c=>-c)}};
   const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
-  const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(item!==this.pathBuffers[1]||this.controls.rapids));
+  const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!this.pathBuffers.includes(item)||this.controls.paths!==false)&&(item!==this.pathBuffers[1]||this.controls.rapids));
   if(this.gl){
    const gl=this.gl;gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(...(this.controls.dark?[.055,.09,.12,1]:[.95,.96,.965,1]));gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.useProgram(this.program);
    const sx=2*scale/w,sy2=2*scale/h,sz=-1/(radius*4);const matrix=new Float32Array([right[0]*sx,up[0]*sy2,depth[0]*sz,0,right[1]*sx,up[1]*sy2,depth[1]*sz,0,right[2]*sx,up[2]*sy2,depth[2]*sz,0,-dot(center,right)*sx+this.pan[0]*2/w,-dot(center,up)*sy2-this.pan[1]*2/h,-dot(center,depth)*sz,1]);gl.uniformMatrix4fv(this.locations.matrix,false,matrix);gl.uniform3fv(this.locations.offset,[0,0,0]);
@@ -110,8 +111,8 @@ export class Viewport {
    if(showCursor&&!tool){const p=projectPoint(cursor);ctx.fillStyle='#e65100';ctx.beginPath();ctx.arc(p[0],p[1],4,0,Math.PI*2);ctx.fill()}
    canvas.dataset.renderer='canvas';
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
-  canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
+  canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
   canvas.dataset.toolTriangles=String((this.toolBuffers||[]).reduce((n,item)=>n+item.count/3,0));canvas.dataset.toolId=tool?String(tool.library_id??'legacy'):'';canvas.dataset.toolTip=showCursor?cursor.join(','):'';canvas.dataset.toolOperation=showCursor?String(move.operation):'';
-  return {triangles:this.triangleCount,fallback:!this.gl,projectPoint,operation:showCursor?move.operation:null,tool};
+  return {triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
  }
 }
