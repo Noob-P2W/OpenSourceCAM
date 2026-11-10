@@ -16,9 +16,9 @@ let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},s
 let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null,lastStockRequest=0;
 let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
 const playbackToolCache=new Map();
-const geometryState={key:null,faces:null,face:null,report:null,feature:null,exterior:false};
+const geometryState={key:null,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false};
 function geometryKey(){return project?.part?`${presentation.part_fingerprint}:${project.setup_face??'top'}`:null}
-function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,exterior:false});$('features').replaceChildren();highlight=null}}
+function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false});$('features').replaceChildren();highlight=null}}
 
 const viewport=new Viewport($('canvas'),()=>draw(),(text,error)=>status(text,error));
 function projectJSON(){return serializedProject??=JSON.stringify(project)}
@@ -156,11 +156,12 @@ function pausePlayback(){
  $('play').textContent='Play paths';$('play').setAttribute('aria-pressed','false');
 }
 $('playback-speed').onchange=()=>{lastPlaybackTime=performance.now()};
+function formatTime(seconds){const n=Math.floor(seconds);return `${Math.floor(n/3600)}:${String(Math.floor(n/60)%60).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
 function playbackTick(now){
  playbackFrame=null;
  if(!playing)return;
- playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/150*Number($('playback-speed').value));
- lastPlaybackTime=now;$('progress').value=playbackProgress;requestStockPreview();draw();
+ playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/1000/Math.max(path?.seconds||0,0.001)*100*Number($('playback-speed').value));
+ lastPlaybackTime=now;$('progress').value=playbackProgress;$('playback-clock').textContent=`${formatTime(playbackProgress/100*(path?.seconds||0))} / ${formatTime(path?.seconds||0)}`;requestStockPreview();draw();
  if(playbackProgress===100)pausePlayback();
  else playbackFrame=requestAnimationFrame(playbackTick);
 }
@@ -189,78 +190,64 @@ function renderSetup(){
  if(project.machine){field(m,'CNC name',project.machine,'name','text');for(const k of ['axis_min','axis_max','work_origin'])for(let i=0;i<3;i++)field(m,`${k.replaceAll('_',' ')} ${'XYZ'[i]} · mm`,project.machine[k],i);field(m,'Enforce travel limits',project.machine,'enforce_limits','checkbox');field(m,'Check tool reach',project.machine,'check_tool_reach','checkbox');for(const k of ['rapid_feed','max_feed','max_spindle_rpm'])field(m,({rapid_feed:'Rapid feed · mm/min',max_feed:'Maximum feed · mm/min',max_spindle_rpm:'Maximum spindle · RPM'})[k],project.machine,k)}
  field(m,'Postprocessor',project.post,'processor','text',[['generic','Generic metric'],['grbl','GRBL'],['mach3','Mach3'],['linuxcnc','LinuxCNC'],...(project.process==='printing_3d'?[['klipper','Klipper (planned)']]:[])]);field(m,'Work offset',project.post,'work_offset','text',['G54','G55','G56','G57','G58','G59'].map(v=>[v,v]));field(m,'Coolant',project.post,'coolant','text',[['off','Off'],['flood','Flood']]);field(m,'Use tool coolant settings',project.post,'use_tool_coolant','checkbox');
  const work=$('workholding');const openModels=new Set([...work.querySelectorAll('details[open]')].map(el=>el.dataset.modelId));work.replaceChildren();if(!project.workspace.length){const p=document.createElement('p');p.textContent='No reference models loaded. Import a vise, fixture or CNC reference geometry in Import.';work.append(p)}
- for(const model of project.workspace){const box=document.createElement('details');box.dataset.modelId=String(model.id);box.open=openModels.has(String(model.id));const summary=document.createElement('summary');summary.textContent=`${model.kind}: ${model.name}`;box.append(summary);field(box,'Visible',model.part,'visible','checkbox');field(box,'Coordinate frame',model,'frame','text',[['work','Work coordinates'],['machine','Machine coordinates']]);for(let i=0;i<3;i++){field(box,`${model.name} offset ${'XYZ'[i]} · mm`,model.part.offset,i);field(box,`${model.name} rotation ${'XYZ'[i]} · degrees`,model.rotation,i)}if(model.vise){const edit=document.createElement('button');edit.textContent='Edit vise dimensions / reseat';edit.onclick=()=>shell.openVise(model);box.append(edit)}const remove=document.createElement('button');remove.textContent='Remove reference model';remove.onclick=()=>task(()=>sessionEdit({kind:'remove_workspace',id:model.id}));box.append(remove);work.append(box)}
+ for(const model of project.workspace){const box=document.createElement('details');box.dataset.modelId=String(model.id);box.open=openModels.has(String(model.id));const summary=document.createElement('summary');summary.textContent=`${model.kind}: ${model.name}`;box.append(summary);field(box,'Visible',model.part,'visible','checkbox');field(box,'Coordinate frame',model,'frame','text',[['work','Work coordinates'],['machine','Machine coordinates']]);for(let i=0;i<3;i++){field(box,`${model.name} offset ${'XYZ'[i]} · mm`,model.part.offset,i);field(box,`${model.name} rotation ${'XYZ'[i]} · degrees`,model.rotation,i)}const remove=document.createElement('button');remove.textContent='Remove reference model';remove.onclick=()=>task(()=>sessionEdit({kind:'remove_workspace',id:model.id}));box.append(remove);work.append(box);if(model.vise){const edit=document.createElement('button');edit.innerHTML='<span aria-hidden="true">↕</span> Reseat stock / edit jaw grip';edit.onclick=()=>shell.openVise(model);work.append(edit)}}
  const toolsRoot=$('tool-setup'),toolOpen=toolsRoot.querySelector('details')?.open;toolsRoot.replaceChildren();let tools=toolsRoot;if(!project.tool_library.tools.length){field(toolsRoot,'Tool name',project.tool,'name','text');tools=setupGroup(toolsRoot,'Tool dimensions & cutting data',toolOpen);for(const [k,n] of [['diameter','Tool diameter · mm'],['feed','Cut feed · mm/min'],['plunge','Plunge · mm/min'],['spindle_rpm','Spindle · RPM'],['step_down','Step down · mm'],['step_over','Step over · fraction']])field(tools,n,project.tool,k);const b=document.createElement('button');b.textContent='Create library tool from current tool';b.onclick=()=>task(()=>sessionEdit({kind:'initialize_tools'}));toolsRoot.append(b)}else{
  field(tools,'Active tool',project,'active_tool','id',[['','Choose a tool'],...project.tool_library.tools.filter(t=>t.uses.includes(project.process)).map(t=>[String(t.id),t.name])]);const tool=project.tool_library.tools.find(t=>t.id===project.active_tool);if(tool){if(!tool.presets.some(p=>p.id===project.active_preset)){const hint=document.createElement('p');hint.textContent='Select a cutting preset before planning.';tools.append(hint)}field(tools,'Cutting preset',project,'active_preset','id',[['','Choose a preset'],...tool.presets.map(p=>[String(p.id),p.name])]);tools=setupGroup(toolsRoot,'Tool dimensions & cutting data',toolOpen);for(const key of ['diameter','flute_length','stickout'])if(key in tool.geometry)field(tools,`${key.replaceAll('_',' ')} · mm`,tool.geometry,key);const preset=tool.presets.find(p=>p.id===project.active_preset);if(preset)for(const key of ['cut_feed','plunge_feed','spindle_rpm','step_down','step_over'])if(key in preset.values)field(tools,({cut_feed:'Cut feed · mm/min',plunge_feed:'Plunge feed · mm/min',spindle_rpm:'Spindle · RPM',step_down:'Step down · mm',step_over:'Step over · %'})[key],preset.values,key)} }
 }
 $('tools-file').onchange=()=>task(async()=>{const f=$('tools-file').files[0];if(!f)return;$('tools-file').value='';if(f.size>8*1024*1024)throw Error('Tool library exceeds 8 MiB');await sessionEdit({kind:'import_library',data:await f.text(),replace:$('replace-library').checked});status('Tool library imported. Select an active tool and cutting preset in Setup.')});
-let faceLoad=null;
-function describeFace(){
- const face=geometryState.face;
- $('plane-description').textContent=face?(face.horizontal?`XY machining plane at Z ${face.z.toFixed(3)} mm · tool axis +Z. Recognize features on this level.`:`Selected face normal ${face.normal.map(v=>v.toFixed(2)).join(', ')}. Align it to +Z and fit a new setup before machining.`):'Select a model face, then recognize its holes and pockets. Stock top is Z=0.';
- $('use-machining-face').hidden=!face;$('use-machining-face').textContent=face?.horizontal?'Use this machining plane':'Align face to +Z & fit stock';
- $('face-selected').hidden=!face?.horizontal;
- if(face)$('machining-face').value=String(face.id);
+
+// Display-only overlay of the recognized cavity walls/floor; never used for machining.
+function featureHighlight(feature,outline=feature.outline,normal=[0,0,1]){
+ const bottom=outline.map(p=>p.map((v,i)=>v-normal[i]*(feature.opening_z-feature.bottom_z))),fill=[];
+ outline.forEach((p,i)=>{const j=(i+1)%outline.length;fill.push([p,outline[j],bottom[j]],[p,bottom[j],bottom[i]])});
+ if(!feature.through)for(let i=1;i+1<bottom.length;i++)fill.push([bottom[0],bottom[i],bottom[i+1]]);
+ return {outline,fill};
 }
-async function loadGeometryFaces(){
- updateGeometryState();if(!project?.part){describeFace();return}
- const key=geometryKey();
- try{
-  if(!geometryState.faces){
-   if(faceLoad?.key===key)return;
-   const request={key};faceLoad=request;
-   try{const faces=await engineCall('geometry',{data:{action:'faces'}});if(geometryKey()!==key)return;geometryState.faces=faces}finally{if(faceLoad===request)faceLoad=null}
-  }
-  if(geometryKey()!==key)return;
-  const select=$('machining-face');select.replaceChildren(new Option('Highest XY face / stock top',''));
-  for(const face of geometryState.faces)select.add(new Option(`Face ${face.id+1} · ${face.horizontal?`Z ${face.z.toFixed(2)} mm`:`normal ${face.normal.map(v=>v.toFixed(1)).join(',')}`} · ${face.area.toFixed(1)} mm²`,String(face.id)));
-  if(project.setup_face!==null&&project.setup_face!==undefined&&!geometryState.face){const face=await engineCall('geometry',{data:{action:'face',triangle:project.setup_face}});if(geometryKey()!==key)return;geometryState.face=face;highlight=face;draw()}
-  describeFace();
- }catch(error){if(geometryKey()===key)status(error.message,true)}
+function clearGeometrySelection(){geometryState.feature=null;geometryState.exterior=false;highlight=null;draw()}
+function cancelPicking(){viewport.onPick=null;$('pick-face').hidden=true;$('selection-hint').hidden=true;draw()}
+function beginPick(callback,label='Pick a face on the model'){
+ shell.close('feature-dialog');shell.close('operation-dialog');$('show-simulation').checked=false;clearStockRequests();
+ $('pick-face').hidden=false;$('selection-hint').hidden=false;$('selection-hint').textContent=label;
+ viewport.onPick=ray=>task(async()=>{await callback(ray);cancelPicking()});draw();status(label);
 }
-async function selectMachiningFace(face){
- $('show-simulation').checked=false;clearStockRequests();
- if(face.horizontal&&project.setup_face!==face.id)await sessionEdit({kind:'set_machining_face',triangle:face.id,align:false});
- geometryState.face=face;geometryState.feature=null;geometryState.exterior=false;highlight=face;describeFace();draw();
- status(face.horizontal?'Machining plane selected. Recognize features on this face level.':'Face selected. Use Align face to +Z & fit stock for a new setup.');
-}
-function clearGeometrySelection(){geometryState.feature=null;geometryState.exterior=false;highlight=geometryState.face;draw()}
+$('pick-face').onclick=()=>{cancelPicking();shell.resumeOperation?.()};
 async function geometryDraft(strategy,index){
- if(index!==undefined){const draft=await call('geometry',{data:{action:'feature_draft',index,strategy}});geometryState.feature=index;geometryState.exterior=false;highlight=geometryState.report?.features[index]||null;draw();return draft;}
- if(strategy==='facing')return geometryState.face?call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}}):null;
- if(geometryState.exterior)return call('geometry',{data:{action:'exterior_draft',strategy}});
- if(Number.isInteger(geometryState.feature))return call('geometry',{data:{action:'feature_draft',index:geometryState.feature,strategy}});
- if(geometryState.face&&!geometryState.face.horizontal)throw Error('Align the selected machining face to +Z before creating 2.5D toolpaths');
+ const feature=index!==undefined?geometryState.report?.features[index]:geometryState.selectedFeature;
+ if(feature&&((feature.kind==='rectangular_pocket'&&['pocket','inside_profile'].includes(strategy))||(feature.kind==='circular_hole'&&['circular_pocket','drill','drill_once'].includes(strategy))))return call('geometry',{data:{action:'feature_geometry',feature,strategy}});
  if(strategy==='facing'&&geometryState.face)return call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}});
  return null;
 }
-$('load-faces').onclick=()=>task(loadGeometryFaces);
-$('machining-face').onchange=()=>task(async()=>{const value=$('machining-face').value;if(value===''){project.setup_face=null;await changed();await loadGeometryFaces();return}await selectMachiningFace(await call('geometry',{data:{action:'face',triangle:Number(value)}}))});
-$('use-machining-face').onclick=()=>task(async()=>{const face=geometryState.face;if(!face)return;await sessionEdit({kind:'set_machining_face',triangle:face.id,align:!face.horizontal});await loadGeometryFaces();status(face.horizontal?'Machining plane selected':'Face aligned to +Z and stock fitted. Review fixture placement and rebuild model-linked operations.');viewport.fit()});
-$('face-selected').onclick=()=>shell.newOperation('facing');
-$('clear-geometry').onclick=clearGeometrySelection;
-function toggleFacePicking(){const enabled=!viewport.onPick;if(enabled){$('show-simulation').checked=false;clearStockRequests();draw();}$('pick-face').setAttribute('aria-pressed',String(enabled));viewport.onPick=enabled?ray=>task(async()=>{const face=await call('geometry',{data:{action:'pick',...ray}});await selectMachiningFace(face);shell.open('feature-dialog')}):null;status(enabled?'Tap or click a model face. Drag still rotates the view.':'Face picking off')}
-$('pick-face').onclick=toggleFacePicking;$('pick-face-panel').onclick=()=>{if(!viewport.onPick)toggleFacePicking();shell.close('feature-dialog')};
-$('recognize').onclick=()=>task(async()=>{
- shell.close('feature-dialog');const container=$('features');container.replaceChildren();
- const message=text=>{const p=document.createElement('p');p.textContent=text;container.append(p)};
- status('Recognizing supported features…');
- let report;
- try{report=await call('recognize')}catch(error){
-  message('Recognition could not inspect this model.');message(error.message);
-  message('Review the error above. For mesh errors, check that the STL is a closed solid with consistent face orientation; repair it in your CAD/mesh application and reimport it. STEP is also available if you have the original CAD model.');
-  shell.open('feature-dialog');throw error;
+async function pickOperation(strategy,commit){
+ beginPick(async ray=>{
+  if(strategy==='facing'){
+   const face=await call('geometry',{data:{action:'pick',...ray}});highlight=face;geometryState.face=face;draw();
+   const draft=await call('geometry',{data:{action:'facing_draft',triangle:face.id}});await commit(draft);
+  }else{
+   const feature=await call('geometry',{data:{action:'pick_feature',...ray}});geometryState.selectedFeature=feature;highlight=featureHighlight(feature);draw();
+   await commit(await call('geometry',{data:{action:'feature_geometry',feature,strategy}}));
+  }
+ },strategy==='facing'?'Click the surface to face down to · drag to rotate':'Click inside the hole or pocket opening · drag to rotate');
+}
+async function recognizeAll(){
+ status('Inspecting features across model orientations and levels…');
+ $('features').replaceChildren();let survey;try{survey=await call('geometry',{data:{action:'survey'}})}catch(error){const p=document.createElement('p');p.textContent=`Recognition could not inspect this model. ${error.message}`;$('features').append(p);shell.open('feature-dialog');throw error;}geometryState.survey=survey;
+ const container=$('features');container.replaceChildren();
+ const note=document.createElement('p');note.textContent=`${survey.features.length} supported feature candidates across the part. Select one to inspect it. Recognition does not create operations.`;container.append(note);
+ for(const entry of survey.features){
+  const feature=entry.feature,card=document.createElement('div');card.className='feature-card';const button=document.createElement('button');button.dataset.featureView='true';button.textContent=`${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`Ø ${feature.diameter.toFixed(2)} mm`:`${(feature.max[0]-feature.min[0]).toFixed(2)} × ${(feature.max[1]-feature.min[1]).toFixed(2)} mm`} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;
+  button.onclick=()=>{geometryState.selectedFeature=entry.current_orientation?feature:null;highlight=featureHighlight(feature,entry.outline,entry.normal);$('show-simulation').checked=false;clearStockRequests();container.querySelectorAll('[data-feature-view]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));draw();status(`${button.textContent} · tool direction ${entry.normal.map(n=>n.toFixed(2)).join(', ')}`)};card.append(button);
+  for(const orientation of entry.orientations.filter(o=>!o.current)){const align=document.createElement('button');align.textContent='Orient this side upward…';align.onclick=()=>task(async()=>{if(!await confirmAction({title:'Change machining setup?',message:'Rotate the part and refit the stock for this direction? Existing model-linked paths will need rebuilding. Reseat fixtures after changing the setup.',accept:'Orient & fit stock'}))return;await sessionEdit({kind:'set_machining_face',triangle:orientation.face,align:true});viewport.fit();await recognizeAll()});card.append(align)}
+  container.append(card);
  }
- geometryState.report=report;geometryState.feature=null;geometryState.exterior=false;shell.open('feature-dialog');const count=report.features.length;
- message(count?`${count} candidate features found. Review dimensions and accessibility before adding operations.`:'No supported features found. This recognizer looks for openings on the highest horizontal face, along the Z axis. Sideways features, curved surfaces, tapers, counterbores and pockets with islands are not currently supported.');
- if(report.skipped_openings)message(`${report.skipped_openings} top-face openings were skipped because their geometry is unsupported.`);
- if(report.machining_error)message(`Complete stock planning unavailable: ${report.machining_error}`);
- const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Recognition limits';details.append(summary);
- for(const text of report.notes){const p=document.createElement('p');p.textContent=text;details.append(p)}container.append(details);
- if(!count){const useSurface=document.createElement('button');useSurface.textContent='Use 3D surface planning';useSurface.onclick=()=>{shell.close('feature-dialog');shell.openPlanning('surface');status('Use Plan 3D surface for accessible upper surfaces. Review blank allowances and tooling first.')};container.append(useSurface)}
- report.features.forEach((feature,index)=>{const review=document.createElement('button');review.textContent=`View ${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`Ø ${feature.diameter.toFixed(2)} mm`:`${(feature.max[0]-feature.min[0]).toFixed(2)} × ${(feature.max[1]-feature.min[1]).toFixed(2)} mm`}`;review.dataset.featureView=String(index);review.onclick=()=>{$('show-simulation').checked=false;clearStockRequests();geometryState.feature=index;geometryState.exterior=false;highlight=feature;container.querySelectorAll('[data-feature-view]').forEach(button=>button.setAttribute('aria-pressed',String(button===review)));document.body.dataset.preview='true';viewport.fit();draw();status('Feature highlighted in orange. Review the dimensions and accessibility before adding.')};container.append(review);const b=document.createElement('button');b.dataset.featureAdd='true';b.textContent=`Add ${feature.kind.replaceAll('_',' ')} · depth ${(feature.opening_z-feature.bottom_z).toFixed(2)} mm`;b.onclick=()=>task(async()=>{if(!project.tool_library.tools.length)await sessionEdit({kind:'initialize_tools'});await sessionEdit({kind:'feature_operation',index});shell.close('feature-dialog');shell.openOperation(selected);status('Feature operation added disabled. Review tooling, depth and placement before enabling it.')});container.append(b)});
- if(report.exterior){const exterior=document.createElement('button');exterior.textContent='Select part exterior';exterior.onclick=()=>{const e=report.exterior;geometryState.exterior=true;geometryState.feature=null;highlight={outline:[[e.min[0],e.min[1],e.top_z],[e.max[0],e.min[1],e.top_z],[e.max[0],e.max[1],e.top_z],[e.min[0],e.max[1],e.top_z]]};draw();status('Part exterior selected for outside contour or clearing')};container.append(exterior)}
- status(count?'Recognition complete. Candidates require review; choose suitable tooling in Setup before adding.':'Recognition complete: no supported features found. See the explanation in Operations.');
+ if(!survey.features.length){const b=document.createElement('button');b.textContent='Use 3D surface planning';b.onclick=()=>{shell.close('feature-dialog');shell.openPlanning('surface')};container.append(b)}
+ for(const text of survey.notes){const p=document.createElement('p');p.className='note';p.textContent=text;container.append(p)}
+ shell.open('feature-dialog');status(survey.features.length?'Recognition complete. Select candidates to inspect; create operations from the machining toolbar.':'Recognition complete: no supported features found. Use 3D surface planning for general surfaces.');
+}
+$('recognize').onclick=()=>task(recognizeAll);
+viewport.onInspect=ray=>task(async()=>{
+ let feature;try{feature=await call('geometry',{data:{action:'pick_feature',...ray}})}catch{}
+ if(feature){highlight=featureHighlight(feature);geometryState.selectedFeature=feature;status(`${feature.kind.replaceAll('_',' ')} · ${feature.diameter?`diameter ${feature.diameter.toFixed(3)} mm · `:''}depth ${(feature.opening_z-feature.bottom_z).toFixed(3)} mm · opening Z ${feature.opening_z.toFixed(3)} mm`)}
+ else {const face=await call('geometry',{data:{action:'pick',...ray}});highlight=face;status(`Surface · area ${face.area.toFixed(2)} mm² · normal ${face.normal.map(n=>n.toFixed(2)).join(', ')} · Z ${face.z.toFixed(3)} mm`)}draw();
 });
 function closeOperationMenu(){$('operation-menu').hidden=true}
 function showOperationMenu(index,x,y){
@@ -362,7 +349,7 @@ $('redo').onclick=()=>task(()=>sessionEdit({kind:'redo'}));
 $('backup').onclick=()=>download(projectJSON(),filename('.draft.json'));
 $('recover').onclick=()=>task(async()=>{const data=localStorage.getItem('oc-backup');if(!data)throw Error('No previous autosave is available');const p=await call('draft',{project:data});if(await confirmAction({title:'Restore previous autosave?',message:'The current workspace remains available through Undo.',accept:'Restore autosave'})){await adopt(p);status('Previous autosave restored')}});
 window.addEventListener('beforeunload',e=>{if(!autosaved){e.preventDefault();e.returnValue=''}});
-shell=initShell({project:()=>project,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,select:index=>{selected=index},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,geometryPanel:loadGeometryFaces,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
+shell=initShell({project:()=>project,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,select:index=>{selected=index},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,pickOperation,recognizeAll,cancelPicking,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
 $('machine-file').onchange=()=>task(async()=>{const file=$('machine-file').files[0];if(!file)return;$('machine-file').value='';await shell.importMachine(file);shell.openMachines()});
 await task(async()=>{catalog=await call('catalog');await shell.restoreLibraries();renderHome();let saved,failed=false;try{saved=localStorage.getItem('oc-project')}catch{failed=true}if(saved){try{project=await call('draft',{project:saved}).catch(()=>call('normalize',{project:saved}))}catch{failed=true;$('recovery').hidden=false;$('raw-backup').onclick=()=>download(saved,'recovered-workspace.draft.json')}}if(!project)project=await call('sample');applyView(await call('session-start'));lastState=projectJSON();render();viewport.setView(shell.prefs().defaultView);if(sessionStorage.getItem('oc-screen')==='workbench')showWorkspace();autosaved=!failed;status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':'Ready · All machining calculations run on this device',failed);$('saved').textContent=failed?'Recovery required':'Workspace restored';});
 if('serviceWorker'in navigator){
