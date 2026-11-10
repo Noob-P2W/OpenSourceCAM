@@ -36,3 +36,5 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .playback-controls{flex-wrap:wrap}.playback-controls>input[type=range]{min-width:100px;flex:1 1 180px}.playback-controls .inline-check{white-space:nowrap;flex-shrink:0}
 
 @media(max-width:700px){#tool-editor-dialog .tool-preview{position:sticky;top:-18px;z-index:3;background:var(--panel);padding:8px 0;margin-top:-18px;box-shadow:0 9px 10px var(--panel)}#tool-editor-dialog #tool-canvas{height:clamp(100px,22dvh,175px)}#tool-editor-dialog #tool-dimension-caption{margin:4px 0}#tool-editor-dialog #tool-preview-note{font-size:10px;line-height:1.3;margin:3px 0}}
+
+.playback-controls .playback-speed{display:flex;flex-direction:row;align-items:center;gap:6px;margin:0;white-space:nowrap}.playback-speed select{width:76px;min-height:32px;padding:4px 7px}

@@ -150,10 +150,11 @@ function pausePlayback(){
  playbackFrame=null;
  $('play').textContent='Play paths';$('play').setAttribute('aria-pressed','false');
 }
+$('playback-speed').onchange=()=>{lastPlaybackTime=performance.now()};
 function playbackTick(now){
  playbackFrame=null;
  if(!playing)return;
- playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/150);
+ playbackProgress=Math.min(100,playbackProgress+Math.max(0,now-lastPlaybackTime)/150*Number($('playback-speed').value));
  lastPlaybackTime=now;$('progress').value=playbackProgress;requestStockPreview();draw();
  if(playbackProgress===100)pausePlayback();
  else playbackFrame=requestAnimationFrame(playbackTick);

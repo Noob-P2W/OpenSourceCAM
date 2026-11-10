@@ -18,6 +18,7 @@ try{
   assert.ok(await progress()>2&&await progress()<6,`Playback should advance at normal frame rates, got ${await progress()}%`);
   await page.locator('#play').click();const paused=await progress();await page.clock.runFor(500);assert.equal(await progress(),paused);
   await page.locator('#play').click();assert.equal(await progress(),paused,'Resume must keep the paused position');await page.clock.runFor(300);assert.ok(await progress()>paused+1);
+  await page.locator('#play').click();await page.locator('#playback-speed').selectOption('2');const speedStart=await progress();await page.locator('#play').click();await page.clock.runFor(300);assert.ok(Math.abs(await progress()-speedStart-4)<.3,'2× speed must double playback progress');await page.locator('#play').click();await page.locator('#playback-speed').selectOption('0.5');const slowStart=await progress();await page.locator('#play').click();await page.clock.runFor(300);assert.ok(Math.abs(await progress()-slowStart-1)<.2,'0.5× speed must halve playback progress');await page.locator('#playback-speed').selectOption('1');
   await seek(60.5);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');await page.clock.runFor(500);assert.equal(await progress(),60.5,'Scrubbing pauses at the requested fraction');
   await page.locator('#play').click();await page.clock.runFor(300);assert.ok(await progress()>61.5);
   // Pick two times inside the first Rust-supplied move. The cursor interpolates
