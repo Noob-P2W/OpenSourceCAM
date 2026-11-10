@@ -12,6 +12,7 @@ export class WebSession {
     constructor(data: string);
     operation_draft(strategy: string): string;
     plan(action: string, options: string): string;
+    playback_tool(index: number): string;
     restore_history(data: string): string;
     run(action: string): string;
     save_project(): string;
@@ -66,6 +67,7 @@ export interface InitOutput {
     readonly websession_new: (a: number, b: number, c: number) => void;
     readonly websession_operation_draft: (a: number, b: number, c: number, d: number) => void;
     readonly websession_plan: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly websession_playback_tool: (a: number, b: number, c: number) => void;
     readonly websession_restore_history: (a: number, b: number, c: number, d: number) => void;
     readonly websession_run: (a: number, b: number, c: number, d: number) => void;
     readonly websession_save_project: (a: number, b: number) => void;

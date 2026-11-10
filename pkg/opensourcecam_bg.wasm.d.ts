@@ -18,6 +18,7 @@ export const websession_machine_record: (a: number, b: number) => void;
 export const websession_new: (a: number, b: number, c: number) => void;
 export const websession_operation_draft: (a: number, b: number, c: number, d: number) => void;
 export const websession_plan: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const websession_playback_tool: (a: number, b: number, c: number) => void;
 export const websession_restore_history: (a: number, b: number, c: number, d: number) => void;
 export const websession_run: (a: number, b: number, c: number, d: number) => void;
 export const websession_save_project: (a: number, b: number) => void;

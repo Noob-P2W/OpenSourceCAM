@@ -14,6 +14,8 @@ let worker=createEngine(),jobCheckpoint=null,restarting=null;
 let sequence=0,pending=new Map(),project,selected=0,path=null,revision=0,busy=false;
 let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},simulation=null,highlight=null,toolFocus=null,playing=false,playbackFrame=null,playbackProgress=100,lastPlaybackTime=0;
 let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null,lastStockRequest=0;
+let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
+const playbackToolCache=new Map();
 const viewport=new Viewport($('canvas'),()=>draw(),(text,error)=>status(text,error));
 function projectJSON(){return serializedProject??=JSON.stringify(project)}
 function refreshEditor(){if(!project)return;$('json').dataset.dirty='false';const data=projectJSON();const open=$('advanced-editor').open;$('json').value=(open||data.length<512*1024)?data:'';$('json').placeholder='Open this editor to load project JSON. Large models use extra memory in text form.'}
@@ -59,7 +61,7 @@ $('open').onchange=()=>task(async()=>{const file=$('open').files[0];if(!file)ret
 $('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;$('model').value='';if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');const role=$('import-role').value;if(!await confirmAction({title:role==='part'?'Import workpiece?':'Add reference model?',message:role==='part'?'Create a new project fitted to this workpiece? Save the current project first if you need a copy.':'Add this model to the current setup for positioning and workholding?',accept:role==='part'?'Import workpiece':'Add model',destructive:role==='part'}))return;shell.close('import-dialog');status('Importing model…');const imported=await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},role,inches:$('units').value==='inch'});applyView(imported);selected=0;await changed(false);render();shell.afterImport(role);document.body.dataset.preview='true';$('preview-toggle').textContent='Hide preview';$('preview-toggle').setAttribute('aria-pressed','true');status(`Model imported. Review stock fitting, CNC, vise and tooling in Setup.${autosaved?'':' Autosave is unavailable: download a project backup before closing.'}`,!autosaved)});
 $('add').onclick=()=>task(async()=>{selected=project.operations.length;await sessionEdit({kind:'add_strategy',strategy:$('new-strategy').value})});
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
-$('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;simulation=null;clearStockRequests();$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;if($('show-simulation').checked)requestStockPreview(true);draw();status('Paths generated and checked')});
+$('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;resetPlaybackTools();if(p.moves.length)queuePlaybackTool(p.moves[0].operation);simulation=null;clearStockRequests();$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;if($('show-simulation').checked)requestStockPreview(true);draw();status('Paths generated and checked')});
 $('export').onclick=()=>task(async()=>{const gcode=await call('export');download(gcode,filename('.nc'));status('G-code generated from current project and downloaded')});
 $('simulate').onclick=()=>task(async()=>{shell.close('inspect-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value)});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value)};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`Sampled stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
 for(const action of ['plan','surface'])$(action).onclick=()=>task(async()=>{
@@ -72,14 +74,47 @@ let drawPending=false;
 function draw(){if(drawPending)return;drawPending=true;requestAnimationFrame(()=>{drawPending=false;paint()})}
 function paint(){
  if(!project)return;
- const result=viewport.draw(project,workspacePreview,path,Number($('progress').value),$('show-simulation').checked?simulation:null,highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null);
+const result=viewport.draw(project,workspacePreview,path,Number($('progress').value),$('show-simulation').checked?simulation:null,highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null,$('show-tool').checked?playbackTool:null);
+ if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
  if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}%${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;if(viewport.preset)$('view').value=viewport.preset;$('preview-detail').textContent=result.fallback?`Software preview: sampled surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;$('view-dimensions').textContent=`Stock: ${project.stock.width} × ${project.stock.height} × ${project.stock.thickness} mm · top Z=0`;}
 }
 $('view').onchange=()=>viewport.setView($('view').value);$('fit-view').onclick=()=>viewport.fit();$('zoom-in').onclick=()=>viewport.magnify(1.25);$('zoom-out').onclick=()=>viewport.magnify(.8);
-for(const id of ['wireframe','show-stock','selected-path'])$(id).oninput=draw;
+for(const id of ['wireframe','show-stock','selected-path','show-tool'])$(id).oninput=draw;
 $('show-simulation').oninput=()=>{clearStockRequests();if($('show-simulation').checked)requestStockPreview(true);else $('stock-playback-state').textContent='';draw()};
 $('progress').oninput=()=>{pausePlayback();requestStockPreview(true);draw()};
 new ResizeObserver(draw).observe($('canvas'));
+// Load library assemblies on demand. Keep four CPU meshes and only the active
+// tool's GPU buffers, independent of stock snapshots and animation frames.
+function playbackToolKey(index){return project.operations[index]?.tool_id??project.active_tool??'legacy'}
+function resetPlaybackTools(){playbackToolPath=path;playbackToolCache.clear();playbackToolWanted=null}
+function queuePlaybackTool(index,prefetch=false){
+ if(!path||!project.operations[index])return;
+ if(playbackToolPath!==path)resetPlaybackTools();
+ const key=playbackToolKey(index);
+ if(playbackToolCache.has(key)||(playbackToolRequest?.path===path&&playbackToolRequest.key===key))return;
+ if(prefetch&&(playbackToolRequest||playbackToolWanted))return;
+ playbackToolWanted={path,revision,index,key};pumpPlaybackTool();
+}
+function pumpPlaybackTool(){
+ if(playbackToolRequest||!playbackToolWanted)return;
+ const request=playbackToolWanted;playbackToolWanted=null;playbackToolRequest=request;
+ const current=()=>request.path===path&&request.path===playbackToolPath&&request.revision===revision;
+ const retain=value=>{playbackToolCache.set(request.key,value);while(playbackToolCache.size>4)playbackToolCache.delete(playbackToolCache.keys().next().value);draw()};
+ engineCall('playback-tool',{index:request.index}).then(tool=>{
+  if(!current())return;
+  retain(tool);
+ }).catch(error=>{if(current())retain({error:error.message})}).finally(()=>{playbackToolRequest=null;pumpPlaybackTool()});
+}
+function playbackTool(index){
+ if(playbackToolPath!==path)resetPlaybackTools();
+ const key=playbackToolKey(index),tool=playbackToolCache.get(key);
+ if(!tool){queuePlaybackTool(index);return null}
+ playbackToolCache.delete(key);playbackToolCache.set(key,tool);
+ // Preload the next distinct tool without queuing an entire job's assemblies.
+ const next=project.operations.findIndex((op,i)=>i>index&&op.enabled&&playbackToolKey(i)!==key);
+ if(next>=0)queuePlaybackTool(next,true);
+ return tool.error?null:tool;
+}
 $('plan-margin').oninput=()=>{$('stock-margin').value=$('plan-margin').value};$('stock-margin').oninput=()=>{$('plan-margin').value=$('stock-margin').value};
 // One background stock request at a time, at most four per second. Reset
 // immediately to the shared uncut mesh on rewind; stale worker results cannot
