@@ -263,3 +263,22 @@ In the tool definition window, focus a diameter or length field to show a blue
 dimension on the assembly preview. Diameter, shaft diameter, overall length, length
 below holder, shoulder, flute and gauge dimensions use the entered units. The
 preview stays visible while editing on a phone and can still be orbited or zoomed.
+
+## Geometry selection and roughing
+
+Use **2.5D milling → Recognize** to list or pick a model face, then recognize
+features on that plane. The dock stays open while a feature is highlighted. A
+matching operation uses the selected feature; its Geometry tab can choose other
+recognized targets. Side/tilted faces use **Align face to +Z & fit stock** for an
+explicit new setup. Existing linked operations then require rebuilding.
+
+**3D roughing** uses successive constant-Z offset contours and stays down where
+protected free regions connect. It is conventional clearing, without adaptive
+engagement control. **Face** derives its target from the model and cannot cut below
+its highest surface. Add top allowance if the model already touches blank top.
+
+**New tool** appends a separate definition through a type chooser. Tool-table search
+can be combined with the cutting-tool type filter. Live playback has a **Detail**
+selector up to 512 cells; its Quick setting stays at 32 cells. Detailed inspection
+also offers desktop detail up to 512 cells. Higher settings use more memory and
+calculation time. [Workflow and implementation limits](MACHINING_WORKFLOW.md).

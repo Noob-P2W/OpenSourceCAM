@@ -142,7 +142,9 @@ fn setup_is_atomic_undoable_and_legacy_projects_migrate() {
             rotation: [0., 90., 0.],
             offset: Some([f64::NAN, 0., 0.]),
             clearance: 5.,
-            fit_margin: Some(5.)
+            fit_margin: Some(5.),
+            fit_top: None,
+            fit_backing: None,
         })
         .is_err());
     assert_eq!(s.project(), &before);
@@ -156,6 +158,8 @@ fn setup_is_atomic_undoable_and_legacy_projects_migrate() {
         offset: None,
         clearance: 6.,
         fit_margin: Some(5.),
+        fit_top: None,
+        fit_backing: None,
     })
     .unwrap();
     blank::contains_part(&s.project().stock, s.project().part.as_ref().unwrap()).unwrap();

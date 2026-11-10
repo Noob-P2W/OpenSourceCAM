@@ -76,6 +76,14 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
     for v in [op.x, op.y, op.width, op.height, op.depth] {
         hash.number(v);
     }
+    if let Some(face) = op.settings.machining_face {
+        hash.bytes(b"machining-face");
+        hash.bytes(&(face as u64).to_le_bytes());
+    }
+    if let Some(depth) = op.settings.start_depth {
+        hash.bytes(b"opening-depth");
+        hash.number(depth);
+    }
     hash.finish()
 }
 pub fn link(op: &mut Operation, part: &Part) {
@@ -185,6 +193,11 @@ pub fn from_stock(
         .ok_or("Import the target part before machining from stock")?;
     crate::blank::contains_part(&result.stock, part)?;
     let bounds = part.bounds();
+    if crate::faces::level(&result)?
+        .is_some_and(|z| (z - bounds.max[2]).abs() > features::TOLERANCE)
+    {
+        return Err("The complete stock plan starts at the highest model face. Select that plane, or program individual features on the selected level".into());
+    }
     if cancel.load(Ordering::Relaxed) {
         return Err("Machining plan cancelled".into());
     }

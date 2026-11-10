@@ -5,6 +5,18 @@ const MAX_LAYERS: usize = 2_000;
 const MAX_ROWS: usize = 10_000;
 const EPS: f64 = 1e-7;
 
+// A model opening is not proof that stock above it is already air. Only an
+// earlier whole-blank facing pass establishes a cleared starting level here.
+fn material_top(project: &Project, index: usize) -> f64 {
+    let requested = project.operations[index].settings.start_depth.unwrap_or(0.);
+    let cleared = project.operations[..index]
+        .iter()
+        .filter(|op| op.enabled && op.strategy == Strategy::Facing)
+        .map(|op| op.depth - op.settings.axial_allowance)
+        .fold(0., f64::max);
+    requested.min(cleared)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point3 {
     pub x: f64,
@@ -267,10 +279,35 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
             }
             let tool = project.operation_tool(op)?;
             validate_cutting_tool(&tool)?;
+            if (op.strategy.is_surface() || op.strategy == Strategy::Facing)
+                && op.settings.start_depth.unwrap_or(0.) != 0.
+            {
+                return Err("Facing and 3D strategies start from stock top Z=0".into());
+            }
+            if let Some(id) = op.settings.machining_face {
+                crate::faces::face_level(
+                    project
+                        .part
+                        .as_ref()
+                        .ok_or("Selected machining face needs its model")?,
+                    id,
+                )?;
+            }
+            if op.strategy == Strategy::Facing {
+                if let Some(part) = &project.part {
+                    let limit = -part.bounds().max[2];
+                    if limit <= 0.0001 {
+                        return Err("No facing stock above the model. Add a top allowance in Setup before facing".into());
+                    }
+                    if op.depth - op.settings.axial_allowance > limit + 1e-7 {
+                        return Err("Facing would cut into the target model. Face only to its highest surface; use 3D clearing for recessed areas".into());
+                    }
+                }
+            }
             positive(op.depth, "Depth", project.stock.thickness)?;
             positive(
-                op.depth - op.settings.axial_allowance,
-                "Depth after axial stock allowance",
+                op.depth - op.settings.axial_allowance - op.settings.start_depth.unwrap_or(0.),
+                "Depth below operation top after axial stock allowance",
                 project.stock.thickness,
             )?;
             let clearance = op.settings.clearance.unwrap_or(project.clearance);
@@ -287,7 +324,9 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
                 );
             }
             if op.strategy != Strategy::DrillOnce
-                && ((op.depth - op.settings.axial_allowance) / tool.step_down).ceil()
+                && ((op.depth - op.settings.axial_allowance - material_top(project, index))
+                    / tool.step_down)
+                    .ceil()
                     > MAX_LAYERS as f64
             {
                 return Err("Too many depth passes (maximum 2,000)".into());
@@ -466,7 +505,8 @@ pub fn generate_with_cancel(
         let r = tool.diameter / 2.0;
         b.operation = index;
         let depth = op.depth - op.settings.axial_allowance;
-        let layers = (depth / tool.step_down).ceil() as usize;
+        let top = material_top(project, index);
+        let layers = ((depth - top) / tool.step_down).ceil() as usize;
         if op.strategy.is_surface() {
             let field = crate::surface::Field::build(
                 project.part.as_ref().unwrap(),
@@ -474,6 +514,29 @@ pub fn generate_with_cancel(
                 op.settings.surface_step.unwrap_or(0.5),
                 &mut surface_budget,
             )?;
+            if op.strategy == Strategy::SurfaceRough {
+                let clearing =
+                    crate::roughing::Clearing::build(&field, project, op, &mut surface_budget)?;
+                for layer in 1..=layers {
+                    let z = -(layer as f64 * tool.step_down).min(depth) + 0.0002;
+                    for chain in clearing.layer(
+                        z,
+                        op.settings.direction == crate::operation::Direction::Clockwise,
+                        &mut surface_budget,
+                    )? {
+                        if let Some(first) = chain.first() {
+                            b.enter(first.x, first.y, z)?;
+                            for point in chain.iter().skip(1) {
+                                b.cut(point.x, point.y, z)?;
+                            }
+                            b.retract()?;
+                        }
+                    }
+                }
+                b.clearance = project.travel_clearance();
+                b.retract()?;
+                continue;
+            }
             let rows = field.rows(project, op, &mut surface_budget)?;
             let passes = if op.strategy == Strategy::ParallelFinish {
                 1
@@ -543,7 +606,7 @@ pub fn generate_with_cancel(
                 if peck > 1 {
                     // Only re-enter this same, already drilled bore. Stop above
                     // its previous bottom; all entry into new material is feed.
-                    let previous = -((peck - 1) as f64 * tool.step_down).min(depth);
+                    let previous = -(top + (peck - 1) as f64 * tool.step_down).min(depth);
                     b.go(
                         Point3 {
                             x: op.x,
@@ -556,7 +619,7 @@ pub fn generate_with_cancel(
                 let z = if op.strategy == Strategy::DrillOnce {
                     -depth
                 } else {
-                    -(peck as f64 * tool.step_down).min(depth)
+                    -(top + peck as f64 * tool.step_down).min(depth)
                 };
                 b.go(
                     Point3 {
@@ -580,7 +643,7 @@ pub fn generate_with_cancel(
             continue;
         }
         for layer in 1..=layers {
-            let z = -(layer as f64 * tool.step_down).min(depth);
+            let z = -(top + layer as f64 * tool.step_down).min(depth);
             if op.strategy == Strategy::Facing {
                 if op.settings.radial_allowance > 0.0 {
                     return Err("Whole-blank facing does not accept radial stock to leave".into());

@@ -7,7 +7,7 @@ export class Viewport {
   if(!this.gl)this.ctx=canvas.getContext('2d');
   canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();this.lost=true;onStatus('3D graphics paused by the browser. Waiting to restore the view…',true)});
   canvas.addEventListener('webglcontextrestored',()=>{this.lost=false;this.buffers=[];this.toolBuffers=[];this.toolSource=null;this.scene=null;this.initGL();requestDraw();onStatus('3D view restored')});
-  canvas.addEventListener('pointerdown',event=>{canvas.setPointerCapture(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);this.gesture=null;if(this.pointers.size===2){const points=[...this.pointers.values()];this.gesture={distance:Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center:[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2]}}});
+  canvas.addEventListener('pointerdown',event=>{this.pickStart=this.pointers.size===0&&event.button===0?[event.clientX,event.clientY]:null;canvas.setPointerCapture(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);this.gesture=null;if(this.pointers.size===2){const points=[...this.pointers.values()];this.gesture={distance:Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center:[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2]}}});
   canvas.addEventListener('pointermove',event=>{
    if(!this.pointers.has(event.pointerId))return;
    const old=this.pointers.get(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);const points=[...this.pointers.values()];
@@ -16,7 +16,7 @@ export class Viewport {
    else {this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
-  const release=event=>{this.pointers.delete(event.pointerId);this.gesture=null};canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
+  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.onPick&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onPick(this.pickRay(event.clientX-rect.left,event.clientY-rect.top))}};canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
   canvas.addEventListener('wheel',event=>{event.preventDefault();this.magnify(Math.exp(-event.deltaY*.001))},{passive:false});
   canvas.addEventListener('dblclick',()=>this.fit());
  }
@@ -66,7 +66,7 @@ export class Viewport {
   const canvas=this.canvas,w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||this.lost)return;
   const dpr=Math.min(devicePixelRatio||1,2,Math.sqrt(4000000/(w*h)));if(canvas.width!==Math.round(w*dpr))canvas.width=Math.round(w*dpr);if(canvas.height!==Math.round(h*dpr))canvas.height=Math.round(h*dpr);
   if(this.scene!==project||this.simulation!==simulation)this.rebuild(project,workspace,simulation);this.updatePath(path,filter);
-  if(this.highlightSource!==highlight){if(this.highlightBuffer){if(this.highlightBuffer.buffer)this.gl?.deleteBuffer(this.highlightBuffer.buffer);this.buffers.splice(this.buffers.indexOf(this.highlightBuffer),1)}this.highlightSource=highlight;this.highlightBuffer=highlight?this.lines(highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.6,.1]):null}
+  if(this.highlightSource!==highlight){if(this.highlightBuffer){if(this.highlightBuffer.buffer)this.gl?.deleteBuffer(this.highlightBuffer.buffer);this.buffers.splice(this.buffers.indexOf(this.highlightBuffer),1)}this.highlightSource=highlight;this.highlightBuffer=highlight?this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.6,.1]):null}
   // Both the model's tip and the old marker use the shared estimated-time cursor.
   const time=path?Math.max(0,Math.min(100,progress))/100*path.seconds:0;
   let completed=0;
@@ -83,6 +83,7 @@ export class Viewport {
   const center=bounds.min.map((v,i)=>(v+bounds.max[i])/2),radius=Math.max(.001,Math.hypot(...bounds.max.map((v,i)=>v-bounds.min[i]))/2);
   const cy=Math.cos(this.yaw),sy=Math.sin(this.yaw),ce=Math.cos(this.elevation),se=Math.sin(this.elevation);const right=[-sy,cy,0],up=[-se*cy,-se*sy,ce],depth=[ce*cy,ce*sy,se];const dot=(a,b)=>a.reduce((n,x,i)=>n+x*b[i],0);
   let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))*this.zoom;
+  this.pickRay=(x,y)=>{const u=(x-w/2-this.pan[0])/scale,v=(h/2+this.pan[1]-y)/scale;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*radius*4),direction:depth.map(c=>-c)}};
   const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
   const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(item!==this.pathBuffers[1]||this.controls.rapids));
   if(this.gl){

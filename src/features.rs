@@ -598,9 +598,28 @@ pub(crate) fn validate_closed(part: &Part, cancel: &AtomicBool) -> Result<(), St
     Topology::build(part, cancel).map(|_| ())
 }
 pub fn recognize_with_cancel(part: &Part, cancel: &AtomicBool) -> Result<Report, String> {
+    recognize_level(part, None, cancel)
+}
+pub fn recognize_project(project: &Project) -> Result<Report, String> {
+    recognize_project_with_cancel(project, &AtomicBool::new(false))
+}
+pub fn recognize_project_with_cancel(
+    project: &Project,
+    cancel: &AtomicBool,
+) -> Result<Report, String> {
+    recognize_level(
+        project
+            .part
+            .as_ref()
+            .ok_or("Import a model before recognizing features")?,
+        crate::faces::level(project)?,
+        cancel,
+    )
+}
+fn recognize_level(part: &Part, level: Option<f64>, cancel: &AtomicBool) -> Result<Report, String> {
     let topology = Topology::build(part, cancel)?;
     let bounds = part.bounds();
-    let top_z = bounds.max[2];
+    let top_z = level.unwrap_or(bounds.max[2]);
     let mut features = Vec::new();
     let mut skipped_openings = 0;
     let mut used = BTreeSet::new();
@@ -661,13 +680,78 @@ pub fn recognize_with_cancel(part: &Part, cancel: &AtomicBool) -> Result<Report,
     ]})
 }
 
+fn accessible(part: &Part, feature: &Feature) -> Result<(), String> {
+    if part.bounds().max[2] <= feature.opening_z + TOLERANCE {
+        return Ok(());
+    }
+    for triangle in &part.geometry.mesh.triangles {
+        let mut poly = crate::surface::clip(
+            triangle
+                .iter()
+                .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
+                .collect(),
+            2,
+            feature.opening_z + TOLERANCE,
+            true,
+        );
+        if poly.is_empty() {
+            continue;
+        }
+        let blocked = if let Some(diameter) = feature.diameter {
+            let center = feature.center;
+            let mut minimum = f64::INFINITY;
+            let (mut positive, mut negative) = (false, false);
+            for i in 0..poly.len() {
+                let a = poly[i];
+                let b = poly[(i + 1) % poly.len()];
+                let d = [b[0] - a[0], b[1] - a[1]];
+                let len = d[0] * d[0] + d[1] * d[1];
+                let t = if len > 1e-20 {
+                    ((center[0] - a[0]) * d[0] + (center[1] - a[1]) * d[1]) / len
+                } else {
+                    0.
+                }
+                .clamp(0., 1.);
+                minimum =
+                    minimum.min((center[0] - a[0] - t * d[0]).hypot(center[1] - a[1] - t * d[1]));
+                let cross = d[0] * (center[1] - a[1]) - d[1] * (center[0] - a[0]);
+                positive |= cross > 1e-10;
+                negative |= cross < -1e-10;
+            }
+            if poly.len() >= 3 && signed_area(&poly).abs() > 1e-10 && !(positive && negative) {
+                minimum = 0.;
+            }
+            minimum < diameter / 2. - TOLERANCE
+        } else {
+            for (axis, bound, greater) in [
+                (0, feature.min[0] + TOLERANCE, true),
+                (0, feature.max[0] - TOLERANCE, false),
+                (1, feature.min[1] + TOLERANCE, true),
+                (1, feature.max[1] - TOLERANCE, false),
+            ] {
+                poly = crate::surface::clip(poly, axis, bound, greater);
+            }
+            !poly.is_empty()
+        };
+        if blocked {
+            return Err("This feature is obstructed above the selected plane. Change the setup or clear the overhang with a suitable strategy".into());
+        }
+    }
+    Ok(())
+}
 /// Copy reviewed geometry into a disabled operation; do not guess a suitable tool.
 pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, String> {
+    if crate::faces::level(project)?.is_some_and(|z| (z - feature.opening_z).abs() > TOLERANCE) {
+        return Err("Recognize the selected machining plane before adding this feature".into());
+    }
     if project.process != Process::Milling {
         return Err("Recognized operations currently require the Milling workspace".into());
     }
     if project.operations.len() >= 1000 {
         return Err("Maximum 1,000 operations".into());
+    }
+    if let Some(part) = &project.part {
+        accessible(part, feature)?;
     }
     if !feature.opening_z.is_finite()
         || feature.opening_z > TOLERANCE
@@ -711,7 +795,11 @@ pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, Stri
     };
     let mut op = Operation {
         model_link: None,
-        settings: Default::default(),
+        settings: crate::operation::Settings {
+            start_depth: (feature.opening_z < -TOLERANCE).then_some(-feature.opening_z),
+            machining_face: project.setup_face,
+            ..Default::default()
+        },
         tool_id: Some(tool.id),
         preset_id: Some(project.active_preset.unwrap_or(tool.default_preset)),
         name: format!(

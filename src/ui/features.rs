@@ -3,6 +3,7 @@ use opensourcecam::features::{self, Report};
 
 pub(super) struct FeatureState {
     pub(super) source: Option<Part>,
+    source_face: Option<usize>,
     report: Option<Report>,
     receiver: Option<mpsc::Receiver<Result<Report, String>>>,
     cancel: Arc<AtomicBool>,
@@ -19,6 +20,7 @@ impl Default for FeatureState {
     fn default() -> Self {
         Self {
             source: None,
+            source_face: None,
             report: None,
             receiver: None,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -52,7 +54,7 @@ impl FeatureState {
         result
     }
     fn current(&self, project: &Project) -> bool {
-        self.source.as_ref() == project.part.as_ref()
+        self.source.as_ref() == project.part.as_ref() && self.source_face == project.setup_face
     }
     pub(super) fn selected(&self, project: &Project) -> Option<&features::Feature> {
         if !self.current(project) {
@@ -62,8 +64,9 @@ impl FeatureState {
     }
     pub(super) fn capture(&mut self, project: &Project) {
         self.source = project.part.clone();
-        if let Some(part) = &self.source {
-            match features::recognize(part) {
+        self.source_face = project.setup_face;
+        if self.source.is_some() {
+            match features::recognize_project(project) {
                 Ok(report) => self.report = Some(report),
                 Err(error) => self.error = Some(error),
             }
@@ -80,11 +83,13 @@ impl Workbench {
             return;
         };
         self.features_ui.source = Some(part.clone());
+        self.features_ui.source_face = self.project.setup_face;
+        let project = self.project.clone();
         let cancel = self.features_ui.cancel.clone();
         let (sender, receiver) = mpsc::channel();
         self.features_ui.receiver = Some(receiver);
         std::thread::spawn(move || {
-            let _ = sender.send(features::recognize_with_cancel(&part, &cancel));
+            let _ = sender.send(features::recognize_project_with_cancel(&project, &cancel));
         });
     }
     pub(super) fn poll_features(&mut self, ctx: &egui::Context) {

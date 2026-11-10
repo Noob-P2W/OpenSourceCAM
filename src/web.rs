@@ -106,6 +106,8 @@ impl WebSession {
         }
         #[derive(serde::Serialize)]
         struct BrowserView<'a> {
+            part_fingerprint: Option<String>,
+            setup_allowances: [f64; 2],
             #[serde(flatten)]
             view: crate::session::View<'a>,
             workspace_preview: Vec<Preview>,
@@ -152,6 +154,19 @@ impl WebSession {
             })
             .collect();
         serde_json::to_string(&BrowserView {
+            setup_allowances: self.inner.project().part.as_ref().map_or([0.; 2], |part| {
+                let b = part.bounds();
+                [
+                    (-b.max[2]).max(0.),
+                    (self.inner.project().stock.thickness + b.min[2]).max(0.),
+                ]
+            }),
+            part_fingerprint: self
+                .inner
+                .project()
+                .part
+                .as_ref()
+                .map(crate::machining::model_fingerprint),
             view: self.inner.view(),
             workspace_preview: preview,
             part_transform: self.inner.project().part.as_ref().map(|p| p.matrix()),
@@ -252,6 +267,13 @@ impl WebSession {
             strategy,
         ))
         .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn geometry(&self, query: &str) -> Result<String, JsValue> {
+        serde_json::from_str(query)
+            .map_err(|e| e.to_string())
+            .and_then(|q| crate::commands::geometry_query(self.inner.project(), q))
+            .and_then(|v| serde_json::to_string(&v).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn machine_record(&self) -> Result<String, JsValue> {
         crate::machine_library::MachineRecord::from_project(self.inner.project())

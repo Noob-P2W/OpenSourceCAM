@@ -42,6 +42,8 @@ struct WorkspaceRef {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectRef {
+    #[serde(default)]
+    setup_face: Option<usize>,
     workspace: Vec<WorkspaceRef>,
     tool_library: ToolLibrary,
     active_tool: Option<u64>,
@@ -95,6 +97,7 @@ impl Pool {
     }
     fn project(&mut self, p: &Project) -> ProjectRef {
         ProjectRef {
+            setup_face: p.setup_face,
             workspace: p
                 .workspace
                 .iter()
@@ -147,6 +150,7 @@ impl ProjectRef {
             return Err("Unsupported recovery project version".into());
         }
         Ok(Project {
+            setup_face: self.setup_face,
             workspace: self
                 .workspace
                 .into_iter()

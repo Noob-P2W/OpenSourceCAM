@@ -35,6 +35,10 @@ pub enum Edit {
         offset: Option<[f64; 3]>,
         clearance: f64,
         fit_margin: Option<f64>,
+        #[serde(default)]
+        fit_top: Option<f64>,
+        #[serde(default)]
+        fit_backing: Option<f64>,
     },
     OrientPart {
         rotation: [f64; 3],
@@ -89,6 +93,10 @@ pub enum Edit {
     },
     FeatureOperation {
         index: usize,
+    },
+    SetMachiningFace {
+        triangle: usize,
+        align: bool,
     },
     DeleteOperation {
         index: usize,
@@ -232,6 +240,9 @@ impl Session {
                 candidate = imported;
             }
             Edit::AddLibraryTool { tool_kind } => {
+                if candidate.tool_library.tools.is_empty() && !candidate.operations.is_empty() {
+                    candidate.ensure_tool_library();
+                }
                 let library = &mut candidate.tool_library;
                 let tool = crate::tool_library::LibraryTool::new(
                     library.next_id(),
@@ -241,7 +252,8 @@ impl Session {
                 let id = tool.id;
                 library.tools.push(tool);
                 library.validate()?;
-                if tool_kind.process() == candidate.process
+                if candidate.operations.is_empty()
+                    && tool_kind.process() == candidate.process
                     && !matches!(
                         tool_kind,
                         crate::tool_library::ToolKind::Holder
@@ -369,6 +381,8 @@ impl Session {
                 offset,
                 clearance,
                 fit_margin,
+                fit_top,
+                fit_backing,
             } => {
                 if !clearance.is_finite() || !(0.0..=10000.0).contains(&clearance) {
                     return Err("Clearance must be 0–10,000 mm".into());
@@ -386,7 +400,12 @@ impl Session {
                     if !margin.is_finite() || !(0.0..=1000.0).contains(&margin) {
                         return Err("Stock margin must be 0–1000 mm".into());
                     }
-                    crate::blank::fit(&mut candidate, margin, 0., 0.)?;
+                    crate::blank::fit(
+                        &mut candidate,
+                        margin,
+                        fit_top.unwrap_or(0.),
+                        fit_backing.unwrap_or(0.),
+                    )?;
                 }
             }
             Edit::OrientPart { rotation } => candidate
@@ -481,17 +500,16 @@ impl Session {
                 candidate.workspace.remove(index);
             }
             Edit::FeatureOperation { index } => {
-                let part = candidate
-                    .part
-                    .as_ref()
-                    .ok_or("Import a part before recognizing features")?;
-                let report = crate::features::recognize(part)?;
+                let report = crate::features::recognize_project(&candidate)?;
                 let feature = report
                     .features
                     .get(index)
                     .ok_or("Recognized feature is no longer available")?;
                 let operation = crate::features::operation(&candidate, feature)?;
                 candidate.operations.push(operation);
+            }
+            Edit::SetMachiningFace { triangle, align } => {
+                crate::faces::setup(&mut candidate, triangle, align)?
             }
             Edit::DeleteOperation { index } => {
                 if index >= candidate.operations.len() {

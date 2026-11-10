@@ -233,6 +233,8 @@ fn drilling_recognized_through_holes_accounts_for_point_length() {
 fn facing_accepts_non_center_cutting_face_mills_and_obeys_one_way_rows() {
     use opensourcecam::operation::Raster;
     let mut p = imported();
+    p.part.as_mut().unwrap().offset[2] -= 1.;
+    p.stock.thickness += 1.;
     p.operations = vec![opensourcecam::model::Operation {
         strategy: Strategy::Facing,
         x: 0.0,

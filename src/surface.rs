@@ -77,7 +77,7 @@ pub fn from_stock(
     Ok(crate::machining::Plan{project:result,report,notes:vec![
         "Three-axis upper-surface machining: undercuts and inaccessible material remain for another setup.".into(),
         "The grid conservatively protects the imported triangle mesh. Reduce grid step and stepover for a finer finish; CAD tessellation also limits accuracy.".into(),
-        "Constant-Z raster roughing uses center-cutting plunges and may cut full slots. Review measured tool reach, feeds, engagement and workholding. This is not adaptive clearing.".into(),
+        "Constant-Z offset roughing clears successive depth layers and links connected regions at cutting depth. Separate regions retract. Entry/link cuts can use full tool width; this is conventional offset clearing, without a constant-engagement guarantee.".into(),
         "Backing remains attached and needs a second setup. Stock preview is sampled material removal, not exact solid or machine-kinematics verification.".into(),
     ]})
 }
@@ -94,7 +94,7 @@ impl<'a> Budget<'a> {
     pub(crate) fn new(cancel: &'a std::sync::atomic::AtomicBool) -> Self {
         Self(50_000_000, cancel)
     }
-    fn tick(&mut self) -> Result<(), String> {
+    pub(crate) fn tick(&mut self) -> Result<(), String> {
         if self.1.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("3D machining cancelled".into());
         }
@@ -105,7 +105,7 @@ impl<'a> Budget<'a> {
         Ok(())
     }
 }
-fn clip(poly: Vec<[f64; 3]>, axis: usize, bound: f64, greater: bool) -> Vec<[f64; 3]> {
+pub(crate) fn clip(poly: Vec<[f64; 3]>, axis: usize, bound: f64, greater: bool) -> Vec<[f64; 3]> {
     let mut out = Vec::new();
     if poly.is_empty() {
         return out;
@@ -241,7 +241,7 @@ impl Field {
         }
         Ok(field)
     }
-    fn height(
+    pub(crate) fn height(
         &self,
         segment: [f64; 2],
         y: f64,

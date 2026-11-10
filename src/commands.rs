@@ -33,9 +33,7 @@ pub fn execute(data: &str, action: Command) -> Result<Value, String> {
 pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
     cam::validate_setup(p)?;
     match action {
-        Command::Recognize => Ok(json!(crate::features::recognize(
-            p.part.as_ref().ok_or("Import a part first")?
-        )?)),
+        Command::Recognize => Ok(json!(crate::features::recognize_project(p)?)),
         Command::Generate => {
             let path = post::checked_path(p)?;
             Ok(path_value(&path))
@@ -116,6 +114,13 @@ pub fn operation_template(
             op.y = 0.;
             op.width = s.width;
             op.height = s.height;
+            if strategy == Strategy::Facing {
+                if let Some(part) = &p.part {
+                    op.depth = -part.bounds().max[2];
+                    op.settings.machining_face = p.setup_face;
+                    crate::machining::link(&mut op, part);
+                }
+            }
             if strategy.is_surface() {
                 op.depth = p
                     .part
@@ -128,11 +133,7 @@ pub fn operation_template(
             }
         }
         Strategy::StockRough => {
-            if let Some(report) = p
-                .part
-                .as_ref()
-                .and_then(|part| crate::features::recognize(part).ok())
-            {
+            if let Ok(report) = crate::features::recognize_project(p) {
                 if let Some(e) = report.exterior {
                     op.x = e.min[0];
                     op.y = e.min[1];
@@ -144,7 +145,102 @@ pub fn operation_template(
         }
         _ => {}
     }
+    if !strategy.is_surface() && strategy != Strategy::Facing {
+        if let Ok(Some(level)) = crate::faces::level(p) {
+            if level < -0.002 {
+                op.settings.start_depth = Some(-level);
+                op.depth = (-level + 3.).min(p.stock.thickness);
+            }
+        }
+    }
     op
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GeometryQuery {
+    Faces,
+    Face {
+        triangle: usize,
+    },
+    Pick {
+        origin: [f64; 3],
+        direction: [f64; 3],
+    },
+    FeatureDraft {
+        index: usize,
+        strategy: crate::model::Strategy,
+    },
+    FacingDraft {
+        triangle: usize,
+    },
+    ExteriorDraft {
+        strategy: crate::model::Strategy,
+    },
+}
+pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, String> {
+    let part = project
+        .part
+        .as_ref()
+        .ok_or("Import a model to select machining geometry")?;
+    match query {
+        GeometryQuery::Faces => Ok(json!(crate::faces::list(part)?)),
+        GeometryQuery::Face { triangle } => Ok(json!(crate::faces::face(part, triangle)?)),
+        GeometryQuery::Pick { origin, direction } => {
+            Ok(json!(crate::faces::pick(part, origin, direction)?))
+        }
+        GeometryQuery::FacingDraft { triangle } => {
+            Ok(json!(crate::faces::facing(project, triangle)?))
+        }
+        GeometryQuery::FeatureDraft { index, strategy } => {
+            use crate::{features::FeatureKind, model::Strategy};
+            let report = crate::features::recognize_project(project)?;
+            let feature = report
+                .features
+                .get(index)
+                .ok_or("Recognize and select an available feature")?;
+            let mut op = crate::features::operation(project, feature)?;
+            let compatible = match feature.kind {
+                FeatureKind::RectangularPocket => {
+                    matches!(strategy, Strategy::Pocket | Strategy::InsideProfile)
+                }
+                FeatureKind::CircularHole => {
+                    if op.strategy.is_drilling() {
+                        strategy.is_drilling()
+                    } else {
+                        strategy == Strategy::CircularPocket
+                    }
+                }
+            };
+            if !compatible {
+                return Err("This strategy does not match the selected feature and tool. Choose a pocket/inside contour for a rectangular pocket, or circular pocket/drilling for a hole".into());
+            }
+            op.strategy = strategy;
+            op.name = format!("{} · selected {}", strategy.label(), feature.kind.label());
+            crate::machining::link(&mut op, part);
+            Ok(json!(op))
+        }
+        GeometryQuery::ExteriorDraft { strategy } => {
+            use crate::model::Strategy;
+            if !matches!(strategy, Strategy::StockRough | Strategy::OutsideProfile) {
+                return Err(
+                    "Choose outside clearing or outside contour for the part exterior".into(),
+                );
+            }
+            let e = crate::features::recognize_project(project)?
+                .exterior
+                .ok_or("The selected setup does not have a supported rectangular exterior")?;
+            let mut op = operation_template(project, strategy);
+            op.x = e.min[0];
+            op.y = e.min[1];
+            op.width = e.max[0] - e.min[0];
+            op.height = e.max[1] - e.min[1];
+            op.depth = -e.bottom_z;
+            op.settings.machining_face = project.setup_face;
+            crate::machining::link(&mut op, part);
+            Ok(json!(op))
+        }
+    }
 }
 pub fn simulate_project(
     project: &Project,

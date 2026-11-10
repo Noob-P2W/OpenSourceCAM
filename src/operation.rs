@@ -18,6 +18,8 @@ pub enum Direction {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    pub machining_face: Option<usize>,
+    pub start_depth: Option<f64>,
     pub surface_step: Option<f64>,
     pub path_tolerance: Option<f64>,
     pub feed: Option<f64>,
@@ -37,6 +39,14 @@ pub struct Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .start_depth
+            .is_some_and(|v| !v.is_finite() || !(0.0..=10000.).contains(&v))
+        {
+            return Err(
+                "Operation top depth must be between 0 and 10,000 mm below stock top".into(),
+            );
+        }
         if self
             .surface_step
             .is_some_and(|v| !v.is_finite() || !(0.05..=5.0).contains(&v))

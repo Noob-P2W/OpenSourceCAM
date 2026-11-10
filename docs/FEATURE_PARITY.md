@@ -10,16 +10,16 @@ This is an implementation inventory, not a release promise or certification.
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
-| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots on the same estimated-time timeline as the library tool assembly, and OBJ download |
+| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots (32–512 selectable cells) on the same estimated-time timeline as the library tool assembly, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
-| Tool library | 37 kinds and assembly preview | Same catalog, assembly geometry and focused dimension arrows (mm/in); local creation, search, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
+| Tool library | 37 kinds and assembly preview | Same catalog, assembly geometry and focused dimension arrows (mm/in); separate tool creation, search and type filtering, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
 | Planning controls | Blank allowances and operation replacement | Same PlanOptions in the worker; notes, XY/top/backing, 2.5D choices and explicit replacement |
 | Detailed operation editor | All implemented settings | Dedicated operation drafts with geometry/tool/pass/feed/height tabs, atomic validation/save, geometry unlinking and keyboard/context actions |
 | NC inspection | Preview and export | Checked code preview and download |
 | Stock fitting and workholding | Supported | Modal Setup: rectangular/round physical stock, XYZ stock/part orientation and offsets, shape-preserving fit, configurable example vise/backing and imported fixture transforms |
-| Feature recognition | Supported | Operations: candidate review, unsupported/open-mesh diagnostics and disabled feature operations |
+| Feature recognition | Selected stored plane respected | Face list/camera picking, explicit side-face setup, recognition at the selected XY level, linked operation targets, persistent candidate list and on-model highlights; unsupported/open-mesh diagnostics |
 | Editing / undo history | Native implementation | Rust Session, bounded undo/redo and worker cancellation that preserves both stacks |
 | Autosave / recovery | Native save protections | Local current/previous autosave and draft recovery |
 | Install/offline updates | Native packages | Service worker, version display and update prompt |
@@ -75,3 +75,10 @@ spindle overrides. Library drilling requires a drill definition. Outside profile
 and stock clearing now use circumscribed rounded corner paths; inward profiles
 and raster reversals retain radius/allowance compensation. See [drilling and
 compensation](DRILLING_AND_COMPENSATION.md) for exact behavior and primary sources.
+
+3D roughing now uses top-down constant-Z offset clearing with stay-down links in
+connected free regions. It remains conventional clearing rather than adaptive
+engagement control. Facing stops at the highest imported target surface; lower
+recessed levels require a suitable strategy. Recognized operations retain the feature opening and clear stock above it in
+bounded depth passes; earlier whole-stock facing can establish a cleared starting
+level. See [machining geometry and clearing](MACHINING_WORKFLOW.md).

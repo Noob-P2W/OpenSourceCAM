@@ -4,7 +4,7 @@ use crate::process::Process;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 pub const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -127,6 +127,8 @@ impl Default for Operation {
 #[serde(deny_unknown_fields)]
 pub struct Project {
     #[serde(default)]
+    pub setup_face: Option<usize>,
+    #[serde(default)]
     pub workspace: Vec<crate::workspace::WorkspaceModel>,
     #[serde(default)]
     pub tool_library: crate::tool_library::ToolLibrary,
@@ -153,6 +155,7 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
+            setup_face: None,
             workspace: Vec::new(),
             tool_library: Default::default(),
             active_tool: None,
@@ -536,7 +539,7 @@ impl Project {
     pub fn migrate(&mut self) -> Result<(), String> {
         // Older projects were implicitly milling projects.
         if (self.format_version == 1 && self.part.is_none())
-            || (2..=10).contains(&self.format_version)
+            || (2..=11).contains(&self.format_version)
         {
             if self.machine.is_none() {
                 self.machine = crate::machine::MachineSetup::for_process(self.process);

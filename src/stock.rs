@@ -104,11 +104,11 @@ fn calculate(
     cancel: &AtomicBool,
     verify: bool,
 ) -> Result<Simulation, String> {
-    if !(16..=192).contains(&resolution)
+    if !(16..=512).contains(&resolution)
         || !progress.is_finite()
         || !(0.0..=1.0).contains(&progress)
     {
-        return Err("Stock preview needs 16–192 cells on its longest side and a progress fraction from 0 to 1".into());
+        return Err("Stock preview needs 16–512 cells on its longest side and a progress fraction from 0 to 1".into());
     }
     crate::cam::validate_setup(project)?;
     let s = &project.stock;
@@ -261,7 +261,13 @@ fn calculate(
         triangles: Vec::new(),
     };
     let mut quad = |points: [[f64; 3]; 4]| -> Result<(), String> {
-        if mesh.triangles.len() + 2 > crate::import::MAX_TRIANGLES {
+        if mesh.triangles.len() + 2
+            > if resolution <= 192 {
+                crate::import::MAX_TRIANGLES
+            } else {
+                2_000_000
+            }
+        {
             return Err(
                 "Stock preview surface exceeds its triangle budget; reduce preview resolution"
                     .into(),

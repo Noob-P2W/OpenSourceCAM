@@ -251,3 +251,40 @@ fn curved_model_ball_paths_produce_a_bounded_stock_preview() {
     assert!(simulation.summary.sampled_gouge_mm3.is_none());
     assert!(simulation.geometry.mesh.triangles.len() <= 100000);
 }
+
+#[test]
+fn offset_roughing_clears_top_down_and_stays_down_between_connected_contours() {
+    let mut p = plan(false);
+    p.operations.truncate(1);
+    let op = &p.operations[0];
+    let tool = p.operation_tool(op).unwrap();
+    let layers = ((op.depth - op.settings.axial_allowance) / tool.step_down).ceil() as usize;
+    let path = cam::generate(&p).unwrap();
+    let lifts = path
+        .moves
+        .iter()
+        .filter(|m| m.motion == Motion::Rapid && m.from.z < 0. && m.to.z > 0.)
+        .count();
+    assert!(
+        lifts <= layers + 1,
+        "Connected roughing regions must not lift at every row: {lifts} lifts, {layers} levels"
+    );
+    let mut last = 0.;
+    let mut across_y = false;
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!(
+            (m.from.z - m.to.z).abs() < 1e-9,
+            "Roughing cuts must stay at constant Z"
+        );
+        assert!(
+            m.to.z <= last + 1e-7,
+            "Roughing must descend through the blank"
+        );
+        last = m.to.z;
+        across_y |= (m.to.y - m.from.y).abs() > tool.diameter;
+    }
+    assert!(
+        across_y,
+        "Offset clearing must wrap the region instead of using independent X rasters"
+    );
+}

@@ -194,3 +194,32 @@ with depth-tested solids in WebGL and depth-sorted faces in software fallback.
 The camera includes a retained swept tool envelope rather than following each
 move. Legacy jobs use their setup dimensions and are labeled as legacy tools.
 Display geometry does not alter collision envelopes, removal or posted tool offsets.
+
+## Geometry targets and offset clearing
+
+Project format 12 records the selected setup face and operation-specific machining
+face/opening depth. Legacy projects migrate with the highest XY plane and zero
+opening depth. Geometry-link hashes include explicit face/opening selections while
+preserving older hashes when these fields are absent. Checkpoints retain the setup
+face through undo/redo and cancellation.
+
+`faces` groups connected coplanar triangles and resolves camera-ray selection in
+Rust. `commands::geometry_query` supplies face lists, selected outlines and linked
+operation drafts. Selecting a side face is an explicit Session transaction that
+aligns its normal to +Z and fits a new blank. Recognition uses the selected level;
+features obstructed above it are rejected. Opening depth is geometric metadata;
+only a preceding whole-stock facing pass proves that higher stock can be skipped. Native recognition also respects a
+stored setup plane. Browser recognition is a responsive nonmodal dock so the list
+and actual highlighted workpiece can be inspected together.
+
+`roughing` constructs conservative free regions from the target heightfield and
+clears offset contours at successive tool step-downs. Eroded grid shells bound
+spacing in both axes; routing links only traverse protected free-cell edges.
+Connected regions stay at Z; separate components retract. Surface finishing retains
+the separate parallel path. Facing is limited to the highest target surface.
+
+Detailed stock inspection and explicitly selected live previews support up to 512
+cells per side. High-detail generated meshes have a separate bounded triangle
+budget; input mesh limits and removal-work limits remain unchanged. Live stock
+retains one in-flight request and slows updates as resolution increases. See
+[MACHINING_WORKFLOW.md](MACHINING_WORKFLOW.md) for scope and limits.
