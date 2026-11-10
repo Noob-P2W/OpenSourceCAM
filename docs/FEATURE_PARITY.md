@@ -53,3 +53,12 @@ local reproduction. The tests verify actual solid/stock pixels, camera gestures,
 fitted stock dimensions, planning, overrides, sampled simulation, NC preview and
 saved-project reload on phone/tablet viewports. This does not certify machining
 that model's interior or undercuts in one setup.
+
+Toolpath playback keeps fractional progress independently of the slider and pauses
+when scrubbing, leaving the workspace, changing the project or starting a calculation.
+Pause/resume retains position; Play after completion replays from the start. The
+contrasting position marker interpolates between supplied move endpoints in WebGL
+and software rendering. This is a movement preview at a fixed display speed;
+stock removal is a separately requested sampled snapshot at the slider position.
+The browser regression runs playback at normal frame intervals, checks visible
+movement within a segment and exercises the player on phone/tablet/desktop layouts.
