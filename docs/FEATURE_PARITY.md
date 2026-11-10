@@ -10,11 +10,11 @@ This is an implementation inventory, not a release promise or certification.
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
-| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, playback progress and OBJ download |
+| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots on the same estimated-time timeline as the cutter, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
-| Tool library | 37 kinds and assembly preview | Same catalog and assembly geometry; local creation, search, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
+| Tool library | 37 kinds and assembly preview | Same catalog, assembly geometry and focused dimension arrows (mm/in); local creation, search, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
 | Planning controls | Blank allowances and operation replacement | Same PlanOptions in the worker; notes, XY/top/backing, 2.5D choices and explicit replacement |
 | Detailed operation editor | All implemented settings | Dedicated operation drafts with geometry/tool/pass/feed/height tabs, atomic validation/save, geometry unlinking and keyboard/context actions |
 | NC inspection | Preview and export | Checked code preview and download |
@@ -58,7 +58,16 @@ Toolpath playback keeps fractional progress independently of the slider and paus
 when scrubbing, leaving the workspace, changing the project or starting a calculation.
 Pause/resume retains position; Play after completion replays from the start. The
 contrasting position marker interpolates between supplied move endpoints in WebGL
-and software rendering. This is a movement preview at a fixed display speed;
-stock removal is a separately requested sampled snapshot at the slider position.
+and software rendering. Playback uses a fixed preview duration and the shared Rust estimated-time timeline.
+With Simulated stock enabled, bounded 32-cell worker snapshots update during
+playback; rewinding immediately restores the uncut mesh. The detailed inspection
+command retains selectable resolution, target comparison and fixture reporting.
 The browser regression runs playback at normal frame intervals, checks visible
 movement within a segment and exercises the player on phone/tablet/desktop layouts.
+
+Standard drilling and full-retract peck drilling share expanded G0/G1 paths across
+Generic, GRBL, Mach3 and LinuxCNC. Per-revolution library drilling feeds follow
+spindle overrides. Library drilling requires a drill definition. Outside profiles
+and stock clearing now use circumscribed rounded corner paths; inward profiles
+and raster reversals retain radius/allowance compensation. See [drilling and
+compensation](DRILLING_AND_COMPENSATION.md) for exact behavior and primary sources.

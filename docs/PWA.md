@@ -232,3 +232,26 @@ storage warning says that the previous recovery copy could not be refreshed.
 The 100,000-triangle import regression exercises preview, editing, undo and a
 full-resolution save. It is a synthetic browser test, not verification on every
 Brave/Android device; model topology and device memory still affect workload.
+
+## Playback, dialogs and tool dimensions
+
+The **Operations** button opens **Project & operations** on phones. It shows Setup
+and the operation list; desktop/tablet keep the list visible. Application decisions
+such as replacing a workspace use themed pop-up dialogs instead of native browser
+confirmations. Dark mode resolves foreground and button colors in the selected theme.
+
+With **Simulated stock** enabled, Play starts with uncut stock and updates removal
+at the current playback time. Rewind/scrub discard later stock snapshots. Playback
+uses a bounded 32-cell preview; choose **Actions → Stock simulation** for the detailed
+inspection at the current slider position. The stock label shows the actual displayed
+percentage while a worker update is pending. Toolpath motion and removal are sampled
+against the same Rust-generated timeline.
+
+**Drilling → Drill hole** creates a single-feed cycle; **Peck drilling** creates a
+full-retract chip-clearing cycle. Select a measured drill from the library and review
+its feed, tip depth, R plane and peck settings. See [drilling and cutter offsets](DRILLING_AND_COMPENSATION.md).
+
+In the tool definition window, focus a diameter or length field to show a blue
+dimension on the assembly preview. Diameter, shaft diameter, overall length, length
+below holder, shoulder, flute and gauge dimensions use the entered units. The
+preview stays visible while editing on a phone and can still be orbited or zoomed.

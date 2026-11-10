@@ -66,6 +66,7 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
         Strategy::OutsideProfile => 2,
         Strategy::InsideProfile => 3,
         Strategy::Drill => 4,
+        Strategy::DrillOnce => 10,
         Strategy::Facing => 5,
         Strategy::CircularPocket => 6,
         Strategy::StockRough => 7,

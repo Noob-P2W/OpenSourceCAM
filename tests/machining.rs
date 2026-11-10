@@ -126,6 +126,7 @@ fn fixture_checks_use_real_triangles_and_hidden_fixtures_are_still_checked() {
     p.clearance = 10.0;
     p.operations.truncate(1);
     p.operations[0].strategy = Strategy::Drill;
+    p.tool_library.tools[0] = LibraryTool::new(1, 1, ToolKind::Drill);
     p.operations[0].x = 45.0;
     p.operations[0].y = 30.0;
     let part = import::import_file(
@@ -137,6 +138,7 @@ fn fixture_checks_use_real_triangles_and_hidden_fixtures_are_still_checked() {
         .push(WorkspaceModel::new(1, ModelKind::Vise, part));
     assert!(post::gcode(&p).is_ok(),"The opening between jaws must not collide just because their combined AABB overlaps the tool");
     p.operations[0].strategy = Strategy::OutsideProfile;
+    p.tool_library.tools[0] = LibraryTool::new(1, 1, ToolKind::FlatEndMill);
     p.operations[0].x = 20.0;
     p.operations[0].y = 1.0;
     p.operations[0].width = 20.0;
@@ -152,6 +154,7 @@ fn fixture_checks_include_a_library_holder_above_the_cutting_tool() {
     p.ensure_tool_library();
     p.operations.truncate(1);
     p.operations[0].strategy = Strategy::Drill;
+    p.tool_library.tools[0] = LibraryTool::new(1, 1, ToolKind::Drill);
     p.operations[0].x = 45.0;
     p.operations[0].y = 30.0;
     p.clearance = 10.0;

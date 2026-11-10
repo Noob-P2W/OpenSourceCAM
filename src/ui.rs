@@ -383,7 +383,8 @@ impl Workbench {
             Strategy::Pocket => "Pocket",
             Strategy::InsideProfile => "Inside profile",
             Strategy::OutsideProfile => "Outside profile",
-            Strategy::Drill => "Drill",
+            Strategy::Drill => "Peck drill",
+            Strategy::DrillOnce => "Drill",
             Strategy::Facing => "Facing",
             Strategy::CircularPocket => "Circular pocket",
             Strategy::StockRough => "Outside clearing",
@@ -395,18 +396,8 @@ impl Workbench {
             settings: Default::default(),
             name: format!("{} {:02}", label, self.project.operations.len() + 1),
             strategy,
-            x: stock.width
-                * if strategy == Strategy::Drill {
-                    0.5
-                } else {
-                    0.15
-                },
-            y: stock.height
-                * if strategy == Strategy::Drill {
-                    0.5
-                } else {
-                    0.15
-                },
+            x: stock.width * if strategy.is_drilling() { 0.5 } else { 0.15 },
+            y: stock.height * if strategy.is_drilling() { 0.5 } else { 0.15 },
             width: stock.width * 0.7,
             height: stock.height * 0.7,
             depth: 3.0_f64.min(stock.thickness),
@@ -1459,7 +1450,10 @@ impl Workbench {
                     MUTED
                 },
             );
-            if matches!(op.strategy, Strategy::Drill | Strategy::CircularPocket) {
+            if matches!(
+                op.strategy,
+                Strategy::Drill | Strategy::DrillOnce | Strategy::CircularPocket
+            ) {
                 painter.circle_stroke(
                     project(p(op.x, op.y, 0.0)),
                     ((if op.strategy == Strategy::CircularPocket {
@@ -2329,13 +2323,13 @@ mod tests {
         tap(&ctx, &mut app, "library:assign");
         assert!(!app.library_ui.open);
         assert_eq!(app.project.active_tool, Some(2));
-        tap(&ctx, &mut app, "add:Drill");
+        tap(&ctx, &mut app, "add:Inside profile");
         assert_eq!(app.project.operations[1].tool_id, Some(2));
         app.open_library(Some(0));
         tap(&ctx, &mut app, "library:tool:2");
         tap(&ctx, &mut app, "library:assign");
         assert_eq!(app.project.operations[0].tool_id, Some(2));
-        assert!(app.error.is_none());
+        assert!(app.error.is_none(), "{:?}", app.error);
         assert!(!app.code.is_empty());
     }
 

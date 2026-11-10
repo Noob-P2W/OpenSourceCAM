@@ -1,6 +1,65 @@
 //! Illustrative tool/holder surfaces shared by both UIs, never collision geometry.
 use crate::tool_library::{LibraryTool, ToolKind, ToolLibrary};
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Dimension {
+    pub key: String,
+    pub label: String,
+    pub value_mm: f64,
+    pub start: [f64; 3],
+    pub end: [f64; 3],
+}
+/// Measurement anchors share the assembly's tip-at-zero, positive-Z convention.
+/// They illustrate supplied dimensions and do not replace collision geometry.
+pub fn dimensions(tool: &LibraryTool) -> Vec<Dimension> {
+    let radius = tool.dimension("diameter") / 2.;
+    let flute = tool.dimension("flute_length");
+    let mut result = Vec::new();
+    for key in [
+        "diameter",
+        "shaft_diameter",
+        "overall_length",
+        "stickout",
+        "shoulder_length",
+        "flute_length",
+        "gauge_length",
+        "tip_diameter",
+        "neck_diameter",
+    ] {
+        let Some(value) = tool
+            .geometry
+            .get(key)
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.)
+        else {
+            continue;
+        };
+        let Some(spec) = tool.kind.geometry().into_iter().find(|p| p.key == key) else {
+            continue;
+        };
+        let (start, end) = if key.contains("diameter") {
+            let z = if key == "shaft_diameter" {
+                flute + (tool.dimension("overall_length") - flute) / 2.
+            } else if key == "tip_diameter" {
+                0.
+            } else {
+                flute / 2.
+            };
+            ([-value / 2., 0., z], [value / 2., 0., z])
+        } else {
+            ([radius, 0., 0.], [radius, 0., value])
+        };
+        result.push(Dimension {
+            key: key.into(),
+            label: spec.label.into(),
+            value_mm: value,
+            start,
+            end,
+        });
+    }
+    result
+}
+
 pub fn assembly(tool: &LibraryTool, library: &ToolLibrary) -> Vec<([[f64; 3]; 3], bool)> {
     let finite = |v: f64, default: f64| {
         if v.is_finite() && (0.001..=100000.0).contains(&v) {

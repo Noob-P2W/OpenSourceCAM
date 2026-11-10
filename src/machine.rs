@@ -714,7 +714,7 @@ pub fn validate_project(project: &Project) -> Result<(), String> {
                 if machine.check_tool_reach && (op.depth > flute_length || op.depth > stickout) {
                     return Err("Operation depth exceeds flute length or tool stickout".into());
                 }
-                if kind == CutterKind::Drill && op.strategy != crate::model::Strategy::Drill {
+                if kind == CutterKind::Drill && !op.strategy.is_drilling() {
                     return Err("A drill tool can only be used for drilling operations".into());
                 }
             }

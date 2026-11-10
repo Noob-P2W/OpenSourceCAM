@@ -145,7 +145,7 @@ and explicit tool device libraries use browser storage; project state retains it
 applied machine/post and tool definitions. Cancellation checkpoints retain part
 rotation and configurable vise metadata.
 
-Project format 10 adds part rotation and StockProfile. Existing axis-aligned stock
+Project format 10 introduced part rotation and StockProfile. Existing axis-aligned stock
 fields retain the work-axis envelope. StockDefinition records physical block sizes
 or cylinder diameter/length plus XYZ orientation. Rust supplies world matrices and
 blank outlines to the viewport. Planning containment and stock simulation use the
@@ -158,3 +158,29 @@ The example vise is original generated geometry, stored as a workspace reference
 with its ViseSpec. Imported references keep their existing placement controls.
 Native display and shared calculations understand these project fields; the new
 modal/ribbon workflow and stock definition editor are browser features.
+
+## Stock playback and drilling
+
+Project format 11 adds standard single-feed drilling and optional peck re-entry
+clearance. Older `drill` operations retain their peck identity; legacy project
+migrations preserve existing geometry-link identifiers. All cycle motion and
+cutter compensation remain in Rust. Circular outside corners use a circumscribed
+tangent polygon bounded by chord tolerance, avoiding the gouge of inscribed chords.
+
+Generated path presentation includes Rust-computed start/end seconds for each
+move. Both the cursor and stock snapshots select the same estimated-time prefix.
+WebSession caches one preflighted PlaybackPreview path, invalidating it on every
+successful edit/import/plan. A generate response includes its bounded uncut stock
+mesh. The browser requests at most four 32-cell stock snapshots per second, with
+one request in flight and only the latest target queued. Epoch and revision checks
+discard stale responses after seeking or editing. These snapshots share stock
+removal and existing budgets, omitting repeated target recognition/collision reports;
+path preflight and full inspection keep those checks. Browser code does not perform
+stock removal. The detailed inspection/export route remains independently checked.
+
+Application confirmations use themed HTML dialogs with cancel/Escape and focus
+restoration. The browser's own unsaved-page departure protection remains controlled
+by the browser. Tool-preview dimension anchors and values come from Rust in the
+assembly coordinate frame; SVG overlays project those points using the display
+camera. Focusing a dimension selects a front view, and the drawing stays visible
+while editing on small screens.

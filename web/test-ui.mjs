@@ -12,4 +12,6 @@ export async function plan(page,options={}){await planning(page,options);await p
 export async function recognize(page){await ribbon(page,'2.5D milling','Recognize');await page.locator('#recognize').click();}
 export async function idle(page){await page.waitForFunction(()=>!document.getElementById('software-settings').disabled,{},{timeout:120000});}
 export async function state(page){await idle(page);return page.evaluate(()=>JSON.parse(localStorage.getItem('oc-project')));}
-export async function importModel(page,file,role='part'){await section(page,'import');await page.locator('#import-role').selectOption(role);page.once('dialog',d=>d.accept());await page.locator('#model').setInputFiles(file);await page.locator('#status').filter({hasText:'Model imported'}).waitFor({timeout:120000});}
+export async function importModel(page,file,role='part'){await section(page,'import');await page.locator('#import-role').selectOption(role);void acceptNextConfirmation(page);await page.locator('#model').setInputFiles(file);await page.locator('#status').filter({hasText:'Model imported'}).waitFor({timeout:120000});}
+
+export function acceptNextConfirmation(page){const accepted=page.locator('#app-confirm [data-confirm=true]').click({timeout:15000});accepted.catch(()=>{});return accepted;}

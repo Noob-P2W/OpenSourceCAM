@@ -38,9 +38,7 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
         )?)),
         Command::Generate => {
             let path = post::checked_path(p)?;
-            Ok(
-                json!({"moves":path.moves.iter().map(|m| json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid,"operation":m.operation})).collect::<Vec<_>>(),"seconds":path.estimated_seconds,"cut":path.cut_length}),
-            )
+            Ok(path_value(&path))
         }
         Command::Export => Ok(json!(post::gcode(p)?)),
         Command::Simulate => simulate_project(p, 1.0, 96),
@@ -48,6 +46,43 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
             let plan = plan_project(p, action, &Default::default())?;
             Ok(json!(plan.project))
         }
+    }
+}
+/// Shared estimated-time timeline for tool display and stock playback.
+pub fn path_value(path: &cam::Toolpath) -> Value {
+    let mut elapsed = 0.;
+    let moves:Vec<_>=path.moves.iter().map(|m|{
+        let start=elapsed;
+        elapsed+=m.from.distance(m.to)/m.feed*60.;
+        json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid,"operation":m.operation,"start_seconds":start,"end_seconds":elapsed})
+    }).collect();
+    json!({"moves":moves,"seconds":path.estimated_seconds,"cut":path.cut_length})
+}
+/// A bounded path cache owned by an editing adapter; discard after every edit.
+/// Geometry, cutter footprints and partial-move removal remain in the shared core.
+pub struct PlaybackPreview {
+    pub path: cam::Toolpath,
+}
+impl PlaybackPreview {
+    pub fn new(project: &Project) -> Result<Self, String> {
+        Ok(Self {
+            path: post::checked_path(project)?,
+        })
+    }
+    pub fn snapshot(
+        &self,
+        project: &Project,
+        progress: f64,
+        resolution: usize,
+    ) -> Result<Value, String> {
+        let sim = stock::preview(
+            project,
+            &self.path,
+            progress,
+            resolution,
+            &AtomicBool::new(false),
+        )?;
+        Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
     }
 }
 /// Defaults for an operation settings draft; committing still validates the job.
@@ -70,7 +105,7 @@ pub fn operation_template(
         ..Operation::default()
     };
     match strategy {
-        Strategy::Drill | Strategy::CircularPocket => {
+        Strategy::Drill | Strategy::DrillOnce | Strategy::CircularPocket => {
             op.x = s.width / 2.;
             op.y = s.height / 2.;
             op.width = s.width.min(s.height) * 0.5;

@@ -66,6 +66,7 @@ pub fn import_model(name: &str, data: &[u8], inches: bool) -> Result<String, JsV
 #[wasm_bindgen]
 pub struct WebSession {
     inner: crate::session::Session,
+    playback: Option<crate::commands::PlaybackPreview>,
 }
 #[wasm_bindgen]
 impl WebSession {
@@ -79,6 +80,7 @@ impl WebSession {
         p.migrate().map_err(|e| JsValue::from_str(&e))?;
         Ok(Self {
             inner: crate::session::Session::new(p),
+            playback: None,
         })
     }
     pub fn history_checkpoint(&self) -> Result<String, JsValue> {
@@ -196,6 +198,7 @@ impl WebSession {
             _ => return Err(JsValue::from_str("Unknown model role")),
         };
         self.inner.apply(edit).map_err(|e| JsValue::from_str(&e))?;
+        self.playback = None;
         self.view()
     }
     pub fn edit(&mut self, data: &str) -> Result<String, JsValue> {
@@ -204,6 +207,7 @@ impl WebSession {
         }
         let edit = serde_json::from_str(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
         self.inner.apply(edit).map_err(|e| JsValue::from_str(&e))?;
+        self.playback = None;
         self.view()
     }
     pub fn plan(&mut self, action: &str, options: &str) -> Result<String, JsValue> {
@@ -217,6 +221,7 @@ impl WebSession {
                 project: Box::new(plan.project),
             })
             .map_err(|e| JsValue::from_str(&e))?;
+        self.playback = None;
         Ok(format!(
             "{{\"view\":{},\"notes\":{}}}",
             self.view()?,
@@ -242,7 +247,7 @@ impl WebSession {
             mesh.vertices.extend(vertices);
             mesh.triangles.push([base, base + 1, base + 2]);
         }
-        serde_json::to_string(&meshes).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&serde_json::json!({"meshes":meshes,"dimensions":crate::tool_preview::dimensions(tool)})).map_err(|e| JsValue::from_str(&e.to_string()))
     }
     pub fn simulate(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
         crate::commands::simulate_project(self.inner.project(), progress, resolution)
@@ -280,10 +285,36 @@ impl WebSession {
             .map_err(|e| JsValue::from_str(&e))?;
         Ok(serde_json::json!({"format_version":1,"units":"mm","library":self.inner.project().tool_library}).to_string())
     }
-    pub fn run(&self, action: &str) -> Result<String, JsValue> {
-        action
-            .parse()
-            .and_then(|c| self.inner.run(c))
+    pub fn stock_preview(&mut self, progress: f64, resolution: usize) -> Result<String, JsValue> {
+        if self.playback.is_none() {
+            self.playback = Some(
+                crate::commands::PlaybackPreview::new(self.inner.project())
+                    .map_err(|e| JsValue::from_str(&e))?,
+            )
+        }
+        self.playback
+            .as_ref()
+            .unwrap()
+            .snapshot(self.inner.project(), progress, resolution)
+            .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn run(&mut self, action: &str) -> Result<String, JsValue> {
+        let action: crate::commands::Command =
+            action.parse().map_err(|e: String| JsValue::from_str(&e))?;
+        let result = if action == crate::commands::Command::Generate {
+            let preview = crate::commands::PlaybackPreview::new(self.inner.project())
+                .map_err(|e| JsValue::from_str(&e))?;
+            let mut value = crate::commands::path_value(&preview.path);
+            value["initial_stock"] = preview
+                .snapshot(self.inner.project(), 0., 32)
+                .map_err(|e| JsValue::from_str(&e))?;
+            self.playback = Some(preview);
+            Ok(value)
+        } else {
+            self.inner.run(action)
+        };
+        result
             .and_then(|v| serde_json::to_string(&v).map_err(|e| e.to_string()))
             .map_err(|e| JsValue::from_str(&e))
     }

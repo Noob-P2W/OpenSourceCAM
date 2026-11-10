@@ -168,7 +168,7 @@ fn setup_is_atomic_undoable_and_legacy_projects_migrate() {
         Project::from_json(legacy.to_string().as_bytes())
             .unwrap()
             .format_version,
-        10
+        opensourcecam::model::FORMAT_VERSION
     );
 }
 #[test]

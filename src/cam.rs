@@ -116,23 +116,50 @@ impl Builder {
     fn cut(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
         self.go(Point3 { x, y, z }, Motion::Cut)
     }
-    fn contour(
+    fn outside_contour(
         &mut self,
-        x0: f64,
-        y0: f64,
-        x1: f64,
-        y1: f64,
+        bounds: [f64; 4],
+        offset: f64,
         z: f64,
         clockwise: bool,
+        tolerance: f64,
     ) -> Result<(), String> {
-        for (x, y) in if clockwise {
-            [(x0, y1), (x1, y1), (x1, y0), (x0, y0)]
-        } else {
-            [(x1, y0), (x1, y1), (x0, y1), (x0, y0)]
-        } {
-            self.cut(x, y, z)?;
+        let [x0, y0, x1, y1] = bounds;
+        let sweep = std::f64::consts::FRAC_PI_2;
+        let angle = (2. * (offset / (offset + tolerance)).acos()).min(std::f64::consts::TAU / 24.);
+        let segments = (sweep / angle).ceil() as usize;
+        if segments > 1024 {
+            return Err("Outside corner exceeds 1,024 segments; increase chord tolerance".into());
         }
-        Ok(())
+        let delta = sweep / segments as f64;
+        let outer = offset / (delta / 2.).cos();
+        let corners = if clockwise {
+            [
+                (x0, y0, -sweep),
+                (x0, y1, std::f64::consts::PI),
+                (x1, y1, sweep),
+                (x1, y0, 0.),
+            ]
+        } else {
+            [
+                (x1, y0, -sweep),
+                (x1, y1, 0.),
+                (x0, y1, sweep),
+                (x0, y0, std::f64::consts::PI),
+            ]
+        };
+        self.cut(x0, y0 - offset, z)?;
+        for (cx, cy, start) in corners {
+            self.cut(cx + offset * start.cos(), cy + offset * start.sin(), z)?;
+            let sign = if clockwise { -1. } else { 1. };
+            for i in 0..segments {
+                let a = start + sign * (i as f64 + 0.5) * delta;
+                self.cut(cx + outer * a.cos(), cy + outer * a.sin(), z)?;
+            }
+            let end = start + sign * sweep;
+            self.cut(cx + offset * end.cos(), cy + offset * end.sin(), z)?;
+        }
+        self.cut(x0, y0 - offset, z)
     }
     fn circle(
         &mut self,
@@ -250,25 +277,25 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
             if op.settings.retract.unwrap_or(clearance) > clearance {
                 return Err("Retract height cannot exceed operation clearance height".into());
             }
-            if op.strategy == Strategy::Drill
+            if op.strategy.is_drilling()
                 && (op.settings.radial_allowance > 0.0
                     || op.settings.axial_allowance > 0.0
                     || op.settings.spring_passes > 0)
             {
                 return Err(
-                    "Stock allowances and contour spring passes do not apply to peck drilling"
-                        .into(),
+                    "Stock allowances and contour spring passes do not apply to drilling".into(),
                 );
             }
-            if ((op.depth - op.settings.axial_allowance) / tool.step_down).ceil()
-                > MAX_LAYERS as f64
+            if op.strategy != Strategy::DrillOnce
+                && ((op.depth - op.settings.axial_allowance) / tool.step_down).ceil()
+                    > MAX_LAYERS as f64
             {
                 return Err("Too many depth passes (maximum 2,000)".into());
             }
             if !op.x.is_finite() || !op.y.is_finite() || op.x < 0.0 || op.y < 0.0 {
                 return Err("X and Y must be finite, non-negative stock coordinates".into());
             }
-            if op.strategy == Strategy::Drill {
+            if op.strategy.is_drilling() {
                 let r = tool.diameter / 2.0;
                 if op.x < r
                     || op.y < r
@@ -343,8 +370,11 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
                         | Strategy::ParallelFinish
                 )
             {
-                let points = if matches!(op.strategy, Strategy::Drill | Strategy::CircularPocket) {
-                    let radius = if op.strategy == Strategy::Drill {
+                let points = if matches!(
+                    op.strategy,
+                    Strategy::Drill | Strategy::DrillOnce | Strategy::CircularPocket
+                ) {
+                    let radius = if op.strategy.is_drilling() {
                         tool.diameter / 2.
                     } else {
                         op.width / 2.
@@ -479,6 +509,76 @@ pub fn generate_with_cancel(
             b.retract()?;
             continue;
         }
+        if op.strategy.is_drilling() {
+            // G81/G83-equivalent expanded motions: XY only at clearance, then
+            // rapid through verified air to R and feed to the drill-tip depth.
+            let retract = op.settings.retract.unwrap_or(b.clearance);
+            b.retract()?;
+            b.go(
+                Point3 {
+                    x: op.x,
+                    y: op.y,
+                    z: b.clearance,
+                },
+                Motion::Rapid,
+            )?;
+            b.go(
+                Point3 {
+                    x: op.x,
+                    y: op.y,
+                    z: retract,
+                },
+                Motion::Rapid,
+            )?;
+            let pecks = if op.strategy == Strategy::DrillOnce {
+                1
+            } else {
+                layers
+            };
+            let gap = op.settings.peck_clearance.unwrap_or(0.254);
+            for peck in 1..=pecks {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Machining cancelled".into());
+                }
+                if peck > 1 {
+                    // Only re-enter this same, already drilled bore. Stop above
+                    // its previous bottom; all entry into new material is feed.
+                    let previous = -((peck - 1) as f64 * tool.step_down).min(depth);
+                    b.go(
+                        Point3 {
+                            x: op.x,
+                            y: op.y,
+                            z: (previous + gap).min(retract),
+                        },
+                        Motion::Rapid,
+                    )?;
+                }
+                let z = if op.strategy == Strategy::DrillOnce {
+                    -depth
+                } else {
+                    -(peck as f64 * tool.step_down).min(depth)
+                };
+                b.go(
+                    Point3 {
+                        x: op.x,
+                        y: op.y,
+                        z,
+                    },
+                    Motion::Plunge,
+                )?;
+                b.go(
+                    Point3 {
+                        x: op.x,
+                        y: op.y,
+                        z: retract,
+                    },
+                    Motion::Rapid,
+                )?;
+            }
+            b.clearance = project.travel_clearance();
+            b.retract()?;
+            continue;
+        }
         for layer in 1..=layers {
             let z = -(layer as f64 * tool.step_down).min(depth);
             if op.strategy == Strategy::Facing {
@@ -530,10 +630,11 @@ pub fn generate_with_cancel(
             }
             if op.strategy == Strategy::StockRough {
                 let final_offset = r + op.settings.radial_allowance;
+                // Rounded contours must start beyond the farthest stock corner,
+                // including its diagonal distance from the retained rectangle.
                 let outer =
-                    op.x.max(op.y)
-                        .max(project.stock.width - op.x - op.width)
-                        .max(project.stock.height - op.y - op.height)
+                    op.x.max(project.stock.width - op.x - op.width)
+                        .hypot(op.y.max(project.stock.height - op.y - op.height))
                         + r
                         + 0.5;
                 if final_offset > outer {
@@ -547,32 +648,27 @@ pub fn generate_with_cancel(
                 if rings > MAX_ROWS {
                     return Err("Outside clearing exceeds 10,000 contours".into());
                 }
-                b.enter(op.x - outer, op.y - outer, z)?;
+                b.enter(op.x, op.y - outer, z)?;
                 for ring in 0..=rings {
                     let offset = outer - (outer - final_offset) * ring as f64 / rings as f64;
-                    let x = op.x - offset;
-                    let y = op.y - offset;
-                    b.cut(x, y, z)?;
-                    b.contour(
-                        x,
-                        y,
-                        op.x + op.width + offset,
-                        op.y + op.height + offset,
+                    b.outside_contour(
+                        [op.x, op.y, op.x + op.width, op.y + op.height],
+                        offset,
                         z,
                         op.settings.direction == crate::operation::Direction::Clockwise,
+                        op.settings.path_tolerance.unwrap_or(0.01),
                     )?;
                 }
                 if layer == layers {
                     let feed = b.feed;
                     b.feed = op.settings.finish_feed.unwrap_or(feed);
                     for _ in 0..op.settings.spring_passes {
-                        b.contour(
-                            op.x - final_offset,
-                            op.y - final_offset,
-                            op.x + op.width + final_offset,
-                            op.y + op.height + final_offset,
+                        b.outside_contour(
+                            [op.x, op.y, op.x + op.width, op.y + op.height],
+                            final_offset,
                             z,
                             op.settings.direction == crate::operation::Direction::Clockwise,
+                            op.settings.path_tolerance.unwrap_or(0.01),
                         )?;
                     }
                     b.feed = feed;
@@ -621,34 +717,32 @@ pub fn generate_with_cancel(
                 b.retract()?;
                 continue;
             }
-            if op.strategy == Strategy::Drill {
-                if layer == 1 {
-                    b.enter(op.x, op.y, z)?;
+            if op.strategy == Strategy::OutsideProfile {
+                let offset = r + op.settings.radial_allowance;
+                b.enter(op.x, op.y - offset, z)?;
+                let feed = b.feed;
+                let passes = if layer == layers {
+                    1 + op.settings.spring_passes
                 } else {
-                    b.go(
-                        Point3 {
-                            x: op.x,
-                            y: op.y,
-                            z,
-                        },
-                        Motion::Plunge,
+                    1
+                };
+                for pass in 0..passes {
+                    if pass > 0 {
+                        b.feed = op.settings.finish_feed.unwrap_or(feed)
+                    }
+                    b.outside_contour(
+                        [op.x, op.y, op.x + op.width, op.y + op.height],
+                        offset,
+                        z,
+                        op.settings.direction == crate::operation::Direction::Clockwise,
+                        op.settings.path_tolerance.unwrap_or(0.01),
                     )?;
                 }
-                b.go(
-                    Point3 {
-                        x: op.x,
-                        y: op.y,
-                        z: op.settings.retract.unwrap_or(b.clearance),
-                    },
-                    Motion::Rapid,
-                )?;
+                b.feed = feed;
+                b.retract()?;
                 continue;
             }
-            let offset = if op.strategy == Strategy::OutsideProfile {
-                -r - op.settings.radial_allowance
-            } else {
-                r + op.settings.radial_allowance
-            };
+            let offset = r + op.settings.radial_allowance;
             let x0 = op.x + offset;
             let y0 = op.y + offset;
             let x1 = op.x + op.width - offset;
@@ -688,7 +782,7 @@ pub fn generate_with_cancel(
                 b.cut(x0, y1, z)?;
                 b.cut(x0, y0, z)?;
             }
-            // Profiles are exact rectangular centerline offsets with square joins.
+            // Internal centerlines are offset inward; cutter radius remains at internal corners.
             let outline = if op.settings.direction == crate::operation::Direction::Clockwise {
                 [(x0, y1), (x1, y1), (x1, y0), (x0, y0)]
             } else {

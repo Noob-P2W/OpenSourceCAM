@@ -33,14 +33,22 @@ fn travel_retracts_before_xy_and_finishes_at_clearance() {
         let p = one(strategy);
         let path = generate(&p).unwrap();
         assert!(!path.moves.is_empty());
+        let mut deepest = 0.0_f64;
         for m in &path.moves {
+            if m.motion == Motion::Plunge {
+                deepest = deepest.min(m.to.z);
+            }
             assert!(m.to.x.is_finite() && m.to.y.is_finite() && m.to.z.is_finite());
             if m.motion == Motion::Rapid {
                 if m.from.x != m.to.x || m.from.y != m.to.y {
                     assert_eq!(m.from.z, p.clearance);
                     assert_eq!(m.to.z, p.clearance);
                 } else {
-                    assert!(m.to.z >= m.from.z);
+                    assert!(
+                        m.to.z >= m.from.z
+                            || (strategy.is_drilling() && m.to.z >= deepest + 0.254 - 1e-8),
+                        "Unsafe downward rapid: {m:?}"
+                    );
                 }
             }
         }
@@ -81,7 +89,11 @@ fn profile_centerline_uses_tool_radius_on_correct_side() {
             .iter()
             .filter(|m| m.motion == Motion::Cut)
             .collect();
-        assert_eq!(cuts.len(), 12);
+        if strategy == Strategy::InsideProfile {
+            assert_eq!(cuts.len(), 12)
+        } else {
+            assert!(cuts.len() > 12)
+        }
         for m in cuts {
             assert!(m.to.x >= op.x + r - 1e-8);
             assert!(m.to.x <= op.x + op.width - r + 1e-8);
@@ -95,7 +107,11 @@ fn profile_centerline_uses_tool_radius_on_correct_side() {
                 .unwrap()
                 .to
                 .x,
-            op.x + r
+            if strategy == Strategy::OutsideProfile {
+                op.x
+            } else {
+                op.x + r
+            }
         );
     }
 }
@@ -138,7 +154,17 @@ fn peck_drill_retracts_between_every_feed() {
             pecks += 1;
             assert_eq!(m.from.x, m.to.x);
             assert_eq!(m.from.y, m.to.y);
-            assert_eq!(m.from.z, p.clearance);
+            let previous = -((pecks - 1) as f64 * p.tool.step_down);
+            assert!(
+                (m.from.z
+                    - if pecks == 1 {
+                        p.clearance
+                    } else {
+                        (previous + 0.254).min(p.clearance)
+                    })
+                .abs()
+                    < 1e-8
+            );
             assert_eq!(path.moves[index + 1].motion, Motion::Rapid);
             assert_eq!(path.moves[index + 1].to.z, p.clearance);
         }

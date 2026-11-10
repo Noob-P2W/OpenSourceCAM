@@ -4,7 +4,7 @@ use crate::process::Process;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const FORMAT_VERSION: u32 = 10;
+pub const FORMAT_VERSION: u32 = 11;
 pub const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -37,6 +37,7 @@ pub enum Strategy {
     OutsideProfile,
     InsideProfile,
     Drill,
+    DrillOnce,
     Facing,
     CircularPocket,
     StockRough,
@@ -45,11 +46,12 @@ pub enum Strategy {
 }
 
 impl Strategy {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Pocket,
         Self::OutsideProfile,
         Self::InsideProfile,
         Self::Drill,
+        Self::DrillOnce,
         Self::Facing,
         Self::CircularPocket,
         Self::StockRough,
@@ -63,12 +65,16 @@ impl Strategy {
             Self::OutsideProfile => "Outside profile",
             Self::InsideProfile => "Inside profile",
             Self::Drill => "Peck drill",
+            Self::DrillOnce => "Drill (continuous feed)",
             Self::Facing => "Stock facing",
             Self::CircularPocket => "Circular pocket / bore",
             Self::StockRough => "Clear stock outside part",
             Self::SurfaceRough => "3D raster roughing",
             Self::ParallelFinish => "3D parallel finishing",
         }
+    }
+    pub fn is_drilling(self) -> bool {
+        matches!(self, Self::Drill | Self::DrillOnce)
     }
     pub fn is_surface(self) -> bool {
         matches!(self, Self::SurfaceRough | Self::ParallelFinish)
@@ -235,7 +241,10 @@ impl Project {
                     tool.kind.label()
                 ));
             }
-            if tool.kind == ToolKind::Drill && op.strategy != Strategy::Drill {
+            if op.strategy.is_drilling() && tool.kind != ToolKind::Drill {
+                return Err("Select a drill tool definition for drilling operations".into());
+            }
+            if tool.kind == ToolKind::Drill && !op.strategy.is_drilling() {
                 return Err("A drill tool can only be used for drilling operations".into());
             }
             if tool.kind == ToolKind::BallEndMill && !op.strategy.is_surface() {
@@ -299,6 +308,18 @@ impl Project {
         if let Some(tool) = self.library_tool(Some(op))? {
             if resolved.spindle_rpm as f64 > tool.dimension("maximum_rpm") {
                 return Err("Operation spindle override exceeds the tool's rated RPM".into());
+            }
+        }
+        // A per-revolution drilling preset must drive axial feed too.
+        // Explicit plunge overrides retain precedence over derived feed.
+        if op.strategy.is_drilling() && op.settings.plunge.is_none() {
+            if let Some(tool) = self.library_tool(Some(op))? {
+                if tool.kind == crate::tool_library::ToolKind::Drill
+                    && tool.preset(op.preset_id)?.feed_mode
+                        != crate::tool_library::FeedMode::PerMinute
+                {
+                    resolved.plunge = resolved.feed;
+                }
             }
         }
         Ok(resolved)
@@ -515,7 +536,7 @@ impl Project {
     pub fn migrate(&mut self) -> Result<(), String> {
         // Older projects were implicitly milling projects.
         if (self.format_version == 1 && self.part.is_none())
-            || (2..=9).contains(&self.format_version)
+            || (2..=10).contains(&self.format_version)
         {
             if self.machine.is_none() {
                 self.machine = crate::machine::MachineSetup::for_process(self.process);

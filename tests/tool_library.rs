@@ -200,6 +200,9 @@ fn two_tools() -> Project {
 #[test]
 fn atc_restores_xy_after_m6_even_when_the_next_tool_uses_the_same_hole() {
     let mut p = two_tools();
+    let mut first_drill = LibraryTool::new(1, 1, ToolKind::Drill);
+    first_drill.post = p.tool_library.tools[0].post.clone();
+    p.tool_library.tools[0] = first_drill;
     p.post.processor = post::PostProcessor::Mach3;
     let changer = &mut p.machine.as_mut().unwrap().tool_changer;
     changer.mode = ChangeMode::MillingAtc;
@@ -256,6 +259,7 @@ fn atc_requires_real_capacity_offsets_and_controller_configuration() {
 fn unsupported_tools_and_missing_references_never_export_as_flat_mills() {
     let mut p = two_tools();
     p.tool_library.tools[1] = LibraryTool::new(2, 2, ToolKind::BallEndMill);
+    p.operations[1].strategy = Strategy::Pocket;
     assert!(cam::generate(&p)
         .unwrap_err()
         .contains("3D roughing or finishing"));
@@ -275,4 +279,38 @@ fn per_tooth_feed_and_spindle_direction_are_used() {
     let code = post::gcode(&p).unwrap();
     assert!(code.contains("M4 S12000"));
     assert!(code.contains("F480.0000"));
+}
+
+#[test]
+fn focused_tool_dimensions_match_supplied_geometry_in_assembly_coordinates() {
+    let mut tool = opensourcecam::tool_library::LibraryTool::new(
+        1,
+        1,
+        opensourcecam::tool_library::ToolKind::FlatEndMill,
+    );
+    for (key, value) in [
+        ("diameter", 4.),
+        ("shaft_diameter", 6.),
+        ("overall_length", 63.),
+        ("stickout", 16.5),
+        ("shoulder_length", 14.),
+        ("flute_length", 14.),
+        ("gauge_length", 79.3396),
+    ] {
+        tool.geometry.insert(key.into(), value);
+    }
+    let dims = opensourcecam::tool_preview::dimensions(&tool);
+    assert_eq!(dims.len(), 7);
+    for d in dims {
+        assert_eq!(d.value_mm, tool.dimension(&d.key));
+        let distance = d
+            .start
+            .iter()
+            .zip(d.end)
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!((distance - d.value_mm).abs() < 1e-9);
+        assert!(d.start.into_iter().chain(d.end).all(f64::is_finite));
+    }
 }

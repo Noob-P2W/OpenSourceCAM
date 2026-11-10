@@ -77,7 +77,13 @@ fn travel_checks_include_radius_offsets_clearance_and_work_origin() {
         ..Default::default()
     };
     project.machine.as_mut().unwrap().enforce_limits = true;
-    assert!(generate(&project).unwrap_err().contains("X travel"));
+    assert!(generate(&project).unwrap_err().contains("travel"));
+    let mut x_only = project.clone();
+    x_only.machine.as_mut().unwrap().work_origin[1] = 10.;
+    assert!(generate(&x_only).unwrap_err().contains("X travel"));
+    let mut y_only = project.clone();
+    y_only.machine.as_mut().unwrap().work_origin[0] = 10.;
+    assert!(generate(&y_only).unwrap_err().contains("Y travel"));
     assert!(gcode(&project).is_err());
     project.machine.as_mut().unwrap().work_origin = [10.0, 10.0, 0.0];
     generate(&project).unwrap();

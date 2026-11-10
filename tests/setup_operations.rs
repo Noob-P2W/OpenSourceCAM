@@ -76,6 +76,13 @@ fn one_way_rows_spring_passes_and_peck_retracts_are_effective() {
         8
     );
     p.operations[0].strategy = Strategy::Drill;
+    p.tool_library.tools = vec![opensourcecam::tool_library::LibraryTool::new(
+        1,
+        1,
+        opensourcecam::tool_library::ToolKind::Drill,
+    )];
+    p.active_tool = Some(1);
+    p.active_preset = Some(1);
     p.operations[0].settings.spring_passes = 0;
     p.operations[0].settings.retract = Some(2.0);
     let drill = cam::generate(&p).unwrap();

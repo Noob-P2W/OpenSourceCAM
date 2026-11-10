@@ -83,6 +83,27 @@ pub fn simulate(
     resolution: usize,
     cancel: &AtomicBool,
 ) -> Result<Simulation, String> {
+    calculate(project, path, progress, resolution, cancel, true)
+}
+/// Display snapshots use an already preflighted path and omit repeated target
+/// recognition/collision reports. Material removal and resource limits are shared.
+pub fn preview(
+    project: &Project,
+    path: &Toolpath,
+    progress: f64,
+    resolution: usize,
+    cancel: &AtomicBool,
+) -> Result<Simulation, String> {
+    calculate(project, path, progress, resolution, cancel, false)
+}
+fn calculate(
+    project: &Project,
+    path: &Toolpath,
+    progress: f64,
+    resolution: usize,
+    cancel: &AtomicBool,
+    verify: bool,
+) -> Result<Simulation, String> {
     if !(16..=192).contains(&resolution)
         || !progress.is_finite()
         || !(0.0..=1.0).contains(&progress)
@@ -183,10 +204,14 @@ pub fn simulate(
             }
         }
     }
-    let target = project
-        .part
-        .as_ref()
-        .and_then(|part| features::recognize_with_cancel(part, cancel).ok());
+    let target = if verify {
+        project
+            .part
+            .as_ref()
+            .and_then(|part| features::recognize_with_cancel(part, cancel).ok())
+    } else {
+        None
+    };
     if cancel.load(Ordering::Relaxed) {
         return Err("Stock preview cancelled".into());
     }
@@ -330,7 +355,11 @@ pub fn simulate(
     if !comparable {
         notes.push("Target comparison requires supported 2.5D geometry fully inside the blank; only stock removal is shown for this target.".into());
     }
-    let fixture_contact = crate::collision::check_with_cancel(project, path, cancel).err();
+    let fixture_contact = if verify {
+        crate::collision::check_with_cancel(project, path, cancel).err()
+    } else {
+        None
+    };
     if cancel.load(Ordering::Relaxed) {
         return Err("Stock preview cancelled".into());
     }
