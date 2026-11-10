@@ -23,6 +23,7 @@ export const websession_run: (a: number, b: number, c: number, d: number) => voi
 export const websession_save_project: (a: number, b: number) => void;
 export const websession_simulate: (a: number, b: number, c: number, d: number) => void;
 export const websession_stock_obj: (a: number, b: number, c: number, d: number) => void;
+export const websession_stock_preview: (a: number, b: number, c: number, d: number) => void;
 export const websession_tool_library: (a: number, b: number) => void;
 export const websession_tool_preview: (a: number, b: number, c: bigint) => void;
 export const websession_view: (a: number, b: number) => void;

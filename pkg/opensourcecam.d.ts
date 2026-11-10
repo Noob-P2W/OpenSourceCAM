@@ -17,6 +17,7 @@ export class WebSession {
     save_project(): string;
     simulate(progress: number, resolution: number): string;
     stock_obj(progress: number, resolution: number): string;
+    stock_preview(progress: number, resolution: number): string;
     tool_library(): string;
     tool_preview(id: bigint): string;
     view(): string;
@@ -70,6 +71,7 @@ export interface InitOutput {
     readonly websession_save_project: (a: number, b: number) => void;
     readonly websession_simulate: (a: number, b: number, c: number, d: number) => void;
     readonly websession_stock_obj: (a: number, b: number, c: number, d: number) => void;
+    readonly websession_stock_preview: (a: number, b: number, c: number, d: number) => void;
     readonly websession_tool_library: (a: number, b: number) => void;
     readonly websession_tool_preview: (a: number, b: number, c: bigint) => void;
     readonly websession_view: (a: number, b: number) => void;

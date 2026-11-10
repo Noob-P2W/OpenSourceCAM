@@ -42,7 +42,7 @@ export class Viewport {
   for(const item of this.buffers)if(item.buffer){this.gl?.deleteBuffer(item.buffer);if(item.wireBuffer)this.gl?.deleteBuffer(item.wireBuffer)}this.buffers=[];this.scene=project;this.simulation=simulation;this.pathSource=null;this.pathFilter=undefined;this.pathBounds=null;this.pathBuffers=[];this.pathPrefixes=[];this.highlightSource=null;this.highlightBuffer=null;
   const stock=project.stock;this.bounds={min:[0,0,-stock.thickness],max:[stock.width,stock.height,0]};
   const include=p=>{for(let i=0;i<3;i++){this.bounds.min[i]=Math.min(this.bounds.min[i],p[i]);this.bounds.max[i]=Math.max(this.bounds.max[i],p[i])}};
-  if(project.part?.visible){const part=project.part,f=part.units==='inches'?25.4:1;const matrix=project._display?.part_transform;const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v.map((x,i)=>x*f+part.offset[i]);for(const v of part.geometry.mesh.vertices)include(transform(v));this.mesh(part.geometry.mesh,transform,[.6,.79,.88])}
+  if(project.part?.visible){const part=project.part,f=part.units==='inches'?25.4:1;const matrix=project._display?.part_transform;const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v.map((x,i)=>x*f+part.offset[i]);for(const v of part.geometry.mesh.vertices)include(transform(v));if(!simulation)this.mesh(part.geometry.mesh,transform,[.6,.79,.88])}
   this.allBounds={min:[...this.bounds.min],max:[...this.bounds.max]};for(const model of workspace){for(const p of model.vertices)for(let i=0;i<3;i++){this.allBounds.min[i]=Math.min(this.allBounds.min[i],p[i]);this.allBounds.max[i]=Math.max(this.allBounds.max[i],p[i])}this.mesh(model,v=>v,model.kind==='machine'?[.5,.55,.61]:[.7,.65,.52])}
   this.triangleCount=this.buffers.reduce((n,b)=>n+b.count/3,0);
   if(simulation?.mesh)this.mesh(simulation.mesh,v=>v,[.45,.7,.4]);
@@ -62,14 +62,17 @@ export class Viewport {
   if(this.scene!==project||this.simulation!==simulation)this.rebuild(project,workspace,simulation);this.updatePath(path,filter);
   if(this.highlightSource!==highlight){if(this.highlightBuffer){if(this.highlightBuffer.buffer)this.gl?.deleteBuffer(this.highlightBuffer.buffer);this.buffers.splice(this.buffers.indexOf(this.highlightBuffer),1)}this.highlightSource=highlight;this.highlightBuffer=highlight?this.lines(highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.6,.1]):null}
   const frame=this.includeReferences?this.allBounds:this.bounds;const bounds={min:frame.min.map((v,i)=>Math.min(v,this.pathBounds?.min[i]??v)),max:frame.max.map((v,i)=>Math.max(v,this.pathBounds?.max[i]??v))};
+  for(const p of this.annotationPoints||[])for(let i=0;i<3;i++){bounds.min[i]=Math.min(bounds.min[i],p[i]);bounds.max[i]=Math.max(bounds.max[i],p[i])}
   const center=bounds.min.map((v,i)=>(v+bounds.max[i])/2),radius=Math.max(.001,Math.hypot(...bounds.max.map((v,i)=>v-bounds.min[i]))/2);
   const cy=Math.cos(this.yaw),sy=Math.sin(this.yaw),ce=Math.cos(this.elevation),se=Math.sin(this.elevation);const right=[-sy,cy,0],up=[-se*cy,-se*sy,ce],depth=[ce*cy,ce*sy,se];const dot=(a,b)=>a.reduce((n,x,i)=>n+x*b[i],0);
-  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const scale=Math.min((w-40)/(2*Math.max(.001,ex)),(h-40)/(2*Math.max(.001,ey)))*this.zoom;
+  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))*this.zoom;
   const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
   // Interpolate display position within the current move; machining paths stay unchanged.
-  const at=path?Math.max(0,Math.min(100,progress))/100*path.moves.length:0,completed=Math.floor(at);
+  const time=path?Math.max(0,Math.min(100,progress))/100*path.seconds:0;
+  let completed=0;
+  if(path){let lo=0,hi=path.moves.length;while(lo<hi){const mid=(lo+hi)>>>1;if(path.moves[mid].end_seconds<=time)lo=mid+1;else hi=mid}completed=lo}
   const move=path?.moves[Math.min(completed,path.moves.length-1)];
-  const fraction=path&&completed===path.moves.length?1:at-completed;
+  const fraction=move?(completed===path.moves.length?1:Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)))):0;
   const cursor=move?move.from.map((v,i)=>v+(move.to[i]-v)*fraction):null;
   const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(item!==this.pathBuffers[1]||this.controls.rapids));
   if(this.gl){
@@ -90,6 +93,6 @@ export class Viewport {
    canvas.dataset.renderer='canvas';
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
   canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
-  return {triangles:this.triangleCount,fallback:!this.gl};
+  return {triangles:this.triangleCount,fallback:!this.gl,projectPoint};
  }
 }

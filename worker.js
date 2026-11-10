@@ -19,6 +19,7 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
     else if(action==='machine-record') value=JSON.parse(session.machine_record());
     else if(action==='plan-model') value=JSON.parse(session.plan(planner,JSON.stringify(options)));
     else if(action==='tool-preview') value=JSON.parse(session.tool_preview(BigInt(tool_id)));
+    else if(action==='stock-preview') value=JSON.parse(session.stock_preview(progress,resolution));
     else if(action==='simulate-current') value=JSON.parse(session.simulate(progress,resolution));
     else if(action==='stock-obj') value=session.stock_obj(progress,resolution);
     else if(action==='machine-profile') value=session.machine_profile();
