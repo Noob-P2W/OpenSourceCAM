@@ -14,6 +14,22 @@ pub enum Edit {
         project: Box<Project>,
     },
     AddOperation,
+    ConfigureVise {
+        id: u64,
+        fixed: usize,
+        moving: usize,
+        max_closure: f64,
+    },
+    ClampVise {
+        id: u64,
+        grip: f64,
+    },
+    OpenVise {
+        id: u64,
+    },
+    AddViseProfile {
+        data: String,
+    },
     PlaceExampleVise {
         id: Option<u64>,
         spec: crate::workholding::ViseSpec,
@@ -344,6 +360,15 @@ impl Session {
                 preset_id: candidate.active_preset,
                 ..Operation::default()
             }),
+            Edit::ConfigureVise {
+                id,
+                fixed,
+                moving,
+                max_closure,
+            } => crate::vise::configure(&mut candidate, id, fixed, moving, max_closure)?,
+            Edit::ClampVise { id, grip } => crate::vise::clamp(&mut candidate, id, grip)?,
+            Edit::OpenVise { id } => crate::vise::open(&mut candidate, id)?,
+            Edit::AddViseProfile { data } => crate::vise::add(&mut candidate, &data)?,
             Edit::PlaceExampleVise { id, spec } => {
                 crate::workholding::place_example(&mut candidate, id, spec)?
             }

@@ -13,7 +13,8 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
   try {
     await ready;
     let value;let transfer=[];
-    if(action==='operation-defaults')value=JSON.parse(session.operation_defaults(data));
+    if(action==='vise-query')value=JSON.parse(session.vise_query(JSON.stringify(data)));
+    else if(action==='operation-defaults')value=JSON.parse(session.operation_defaults(data));
     else if(action==='catalog') value=JSON.parse(core.catalog());
     else if(action==='machine-records') value=JSON.parse(core.machine_records(data));
     else if(action==='operation-draft') value=JSON.parse(session.operation_draft(strategy));

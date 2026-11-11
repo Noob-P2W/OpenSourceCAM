@@ -31,6 +31,8 @@ struct PartRef {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkspaceRef {
+    #[serde(default)]
+    clamp: Option<crate::vise::Profile>,
     vise: Option<crate::workholding::ViseSpec>,
     id: u64,
     name: String,
@@ -103,6 +105,7 @@ impl Pool {
                 .iter()
                 .map(|m| WorkspaceRef {
                     vise: m.vise.clone(),
+                    clamp: m.clamp.clone(),
                     id: m.id,
                     name: m.name.clone(),
                     kind: m.kind,
@@ -155,13 +158,18 @@ impl ProjectRef {
                 .workspace
                 .into_iter()
                 .map(|m| {
+                    let part = m.part.restore(pool)?;
+                    if let Some(profile) = &m.clamp {
+                        profile.validate(&part.geometry.mesh)?;
+                    }
                     Ok(WorkspaceModel {
                         vise: m.vise,
+                        clamp: m.clamp,
                         id: m.id,
                         name: m.name,
                         kind: m.kind,
                         frame: m.frame,
-                        part: m.part.restore(pool)?,
+                        part,
                         rotation: m.rotation,
                     })
                 })

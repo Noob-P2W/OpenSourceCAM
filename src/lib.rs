@@ -28,3 +28,5 @@ pub mod workspace;
 pub mod web;
 
 mod contact;
+
+pub mod vise;

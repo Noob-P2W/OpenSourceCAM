@@ -565,6 +565,72 @@ fn verify(project: &Project, path: &Toolpath, budget: &mut Budget<'_>) -> Result
     }
     Ok(())
 }
+/// Final rectangular-stock interference test for the geometric vise setup wizard.
+pub fn check_stock_in_vise(project: &Project, id: u64) -> Result<(), String> {
+    let cancel = AtomicBool::new(false);
+    let mut budget = Budget {
+        remaining: MAX_WORK,
+        cancel: &cancel,
+    };
+    let model = project
+        .workspace
+        .iter()
+        .find(|m| m.id == id)
+        .ok_or("Vise not found")?;
+    let lo = [1e-5, 1e-5, -project.stock.thickness + 1e-5];
+    let hi = [
+        project.stock.width - 1e-5,
+        project.stock.height - 1e-5,
+        -1e-5,
+    ];
+    let center = std::array::from_fn(|i| (lo[i] + hi[i]) / 2.);
+    let half: Point = std::array::from_fn(|i| (hi[i] - lo[i]) / 2.);
+    let mut tree = Tree {
+        triangles: Vec::new(),
+        nodes: Vec::new(),
+    };
+    for t in &model.part.geometry.mesh.triangles {
+        budget.tick()?;
+        let points = t.map(|i| {
+            model.point(
+                model.part.geometry.mesh.vertices[i as usize],
+                project.machine.as_ref(),
+            )
+        });
+        let p = points.map(|v| sub(v, center));
+        let edges = [sub(p[1], p[0]), sub(p[2], p[1]), sub(p[0], p[2])];
+        let axes = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        let mut tests = axes.to_vec();
+        tests.push(cross(edges[0], edges[1]));
+        for edge in edges {
+            for a in axes {
+                tests.push(cross(edge, a))
+            }
+        }
+        let overlap = tests.iter().all(|a| {
+            let values = p.map(|v| dot(v, *a));
+            let min = values.into_iter().fold(f64::INFINITY, f64::min);
+            let max = values.into_iter().fold(f64::NEG_INFINITY, f64::max);
+            let r = (0..3).map(|i| half[i] * a[i].abs()).sum::<f64>();
+            min <= r && max >= -r
+        });
+        if overlap {
+            return Err("Vise geometry penetrates the stock at this grip depth. Adjust grip, supports or fixture geometry.".into());
+        }
+        tree.triangles.push(Triangle {
+            model: 0,
+            shell: 0,
+            points,
+        });
+    }
+    closed_fixture(&mut tree.triangles, &mut 0, &mut budget)?;
+    tree.build(0, tree.triangles.len(), &mut budget)?;
+    if tree.containing(center, &mut budget)?.is_some() {
+        return Err("Stock is enclosed inside a solid vise body".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

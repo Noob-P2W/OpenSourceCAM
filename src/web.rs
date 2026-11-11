@@ -107,6 +107,8 @@ impl WebSession {
             id: u64,
             name: String,
             kind: crate::workspace::ModelKind,
+            moving_faces: Vec<usize>,
+            jaw_axis: [f64; 3],
             vertices: Vec<[f64; 3]>,
             triangles: Vec<[u32; 3]>,
         }
@@ -121,6 +123,7 @@ impl WebSession {
             stock_outline: Vec<[f64; 3]>,
             stock_definition: crate::blank::StockDefinition,
             setup_issue: Option<String>,
+            clamping_stock: Option<crate::import::Mesh>,
         }
         let preview = self
             .inner
@@ -144,7 +147,31 @@ impl WebSession {
                         vertices.push(m.point(*vertex, self.inner.project().machine.as_ref()));
                     }
                 }
+                let mut moving = vec![false; mesh.vertices.len()];
+                let mut jaw_axis = [0.; 3];
+                if let Some(profile) = &m.clamp {
+                    for index in &profile.moving_vertices {
+                        moving[*index] = true;
+                    }
+                    let points = mesh.triangles[profile.fixed].map(|i| {
+                        m.point(
+                            mesh.vertices[i as usize],
+                            self.inner.project().machine.as_ref(),
+                        )
+                    });
+                    let normal = crate::import::normal(points);
+                    let length = normal.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    jaw_axis = normal.map(|v| v / length);
+                }
                 Preview {
+                    moving_faces: mesh
+                        .triangles
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| moving[t[0] as usize])
+                        .map(|(i, _)| i)
+                        .collect(),
+                    jaw_axis,
                     id: m.id,
                     name: m.name.clone(),
                     kind: m.kind,
@@ -158,6 +185,24 @@ impl WebSession {
             })
             .collect();
         serde_json::to_string(&BrowserView {
+            clamping_stock: if self
+                .inner
+                .project()
+                .workspace
+                .iter()
+                .any(|m| m.clamp.is_some())
+                && matches!(
+                    self.inner.project().stock.profile,
+                    crate::blank::StockProfile::Rectangular
+                ) {
+                let s = &self.inner.project().stock;
+                Some(crate::blank::mesh_from_boxes(&[(
+                    [0., 0., -s.thickness],
+                    [s.width, s.height, 0.],
+                )]))
+            } else {
+                None
+            },
             setup_allowances: self.inner.project().part.as_ref().map_or([0.; 2], |part| {
                 let b = part.bounds();
                 [
@@ -320,6 +365,44 @@ impl WebSession {
             .validate()
             .map_err(|e| JsValue::from_str(&e))?;
         Ok(serde_json::json!({"format_version":1,"units":"mm","library":self.inner.project().tool_library}).to_string())
+    }
+    pub fn vise_query(&self, data: &str) -> Result<String, JsValue> {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+        enum Query {
+            Pick {
+                id: u64,
+                origin: [f64; 3],
+                direction: [f64; 3],
+            },
+            Export {
+                id: u64,
+            },
+            Info {
+                id: u64,
+            },
+        }
+        let result = (|| -> Result<String, String> {
+            match serde_json::from_str(data).map_err(|e| e.to_string())? {
+                Query::Pick {
+                    id,
+                    origin,
+                    direction,
+                } => serde_json::to_string(&crate::vise::pick(
+                    self.inner.project(),
+                    id,
+                    origin,
+                    direction,
+                )?)
+                .map_err(|e| e.to_string()),
+                Query::Export { id } => crate::vise::export(self.inner.project(), id),
+                Query::Info { id } => {
+                    serde_json::to_string(&crate::vise::info(self.inner.project(), id)?)
+                        .map_err(|e| e.to_string())
+                }
+            }
+        })();
+        result.map_err(|e| JsValue::from_str(&e))
     }
     pub fn operation_defaults(&self, data: &str) -> Result<String, JsValue> {
         serde_json::from_str(data)

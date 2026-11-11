@@ -288,3 +288,28 @@ calculation time. [Workflow and implementation limits](MACHINING_WORKFLOW.md).
 First launch opens the process chooser with an empty workspace. Saved projects
 are offered through Continue workspace; the tray demo loads only from File →
 Tray demo. Project properties are opened explicitly from the File menu.
+
+## Imported-vise clamping profiles
+
+Import a vise reference, then open Setup → Workholding → Configure clamping faces.
+Pick the fixed gripping face, then the movable gripping face. Enter the measured
+maximum closing travel and save the configuration. Inspect the highlighted movable
+body before clamping. Only that connected body moves; disconnected inserts must
+be included in prepared jaw geometry.
+
+Set stock gripping depth and choose Clamp stock. The viewport shows raw stock and
+animates geometric jaw closure; Back to vise setup returns to the controls. Open
+jaw restores its configured opening. Closing updates the actual fixture mesh used
+by tool/shaft/holder clearance checks, invalidating previous paths.
+
+This first version accepts opposing flat rectangular faces along work X or Y and
+unrotated rectangular stock. It rejects fused bodies, incompatible faces, stock
+that does not fit, excess travel and final stock interference. It positions the
+vise around the stock, leaving the part coordinates unchanged. Supports/parallels,
+clamping force and internal vise self-clearances remain a manual review. It is not
+a machine motion command or a physical holding-force solver.
+
+Save to vise library stores a reusable profile on this device. Export vise profile
+creates portable JSON; Vise library can import it or add saved profiles to a setup.
+Library profiles export with the jaw open and retain their source geometry and
+work-coordinate placement; they do not configure a machine or controller.

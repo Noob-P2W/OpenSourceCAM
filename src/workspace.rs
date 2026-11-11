@@ -32,6 +32,8 @@ pub enum Frame {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceModel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp: Option<crate::vise::Profile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vise: Option<crate::workholding::ViseSpec>,
     pub id: u64,
     pub name: String,
@@ -45,6 +47,7 @@ impl WorkspaceModel {
     pub fn new(id: u64, kind: ModelKind, part: Part) -> Self {
         Self {
             vise: None,
+            clamp: None,
             id,
             name: part.geometry.source_name.clone(),
             kind,
@@ -112,6 +115,9 @@ impl WorkspaceModel {
     }
     pub fn validate(&self, machine: Option<&MachineSetup>) -> Result<(), String> {
         self.part.validate()?;
+        if let Some(profile) = &self.clamp {
+            profile.validate(&self.part.geometry.mesh)?;
+        }
         self.validate_placement(machine)
     }
 

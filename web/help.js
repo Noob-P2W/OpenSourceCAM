@@ -1,5 +1,6 @@
 // Field help is presentation metadata; machining values come from Rust.
 const help={
+ max_closure:'Maximum measured closing travel from the model’s open position. This is not inferred from the mesh; use the vise’s actual mechanical limit.',
  spring_passes:'Repeat the final contour at the same depth to reduce marks caused by tool deflection. These passes do not cut deeper.',
  step_down:'Maximum vertical depth removed per pass. For peck drilling this is Q, the depth of each peck.',step_over:'Spacing between adjacent passes, expressed as a percentage of cutter diameter. Smaller spacing gives more overlap and usually a finer finish.',step_over_percent:'Spacing between adjacent passes as a percentage of cutter diameter. Smaller values create more passes.',
  radial_allowance:'Material left on side walls for a later finishing operation. Zero targets the model wall.',axial_allowance:'Material left on floors or upper surfaces for finishing. Zero targets the selected depth.',

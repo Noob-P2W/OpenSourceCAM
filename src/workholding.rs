@@ -102,6 +102,7 @@ pub fn place_example(project: &mut Project, id: Option<u64>, spec: ViseSpec) -> 
             .iter_mut()
             .find(|m| m.id == id)
             .ok_or("Vise not found")?;
+        model.clamp = None;
         model.part = part;
         model.rotation = [0.; 3];
         model.vise = Some(spec)

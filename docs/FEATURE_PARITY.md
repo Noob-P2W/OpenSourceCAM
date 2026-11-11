@@ -128,3 +128,22 @@ Fixture display preserves complete reference meshes and indexed vertex sharing.
 It does not decimate by deleting faces. This applies to WebGL and software fixture
 surfaces, within the existing workspace limits. It does not add vise kinematics
 or certify physical clamping, imported fixture dimensions, or collision geometry.
+
+Imported-vise profiles use two picked gripping faces, a measured closing-travel
+limit and a connected movable-body selection. Rust derives exact-coordinate body
+connectivity, opposing rectangular planes and the work X/Y closing direction.
+The initial scope is unrotated rectangular stock and straight jaws with their
+movable body behind the gripping plane. Fused bodies, separate disconnected
+inserts, stepped/curved gripping faces and other orientations require prepared
+geometry; the wizard rejects them rather than segmenting arbitrary solids.
+Clamp places the vise around the stock at the specified jaw grip and materializes
+the closed jaw mesh. SAT stock/fixture surface interference and closed-shell stock
+containment are checked atomically. The same posed mesh feeds existing tool/shaft/
+holder clearance preflight; edits invalidate paths. Jaw interpolation is display
+only. Internal vise self-clearance, supports/parallels and physical clamping forces
+are not simulated. Work coordinates are used; existing machine/work-origin frames
+remain available for static placement and future machine visualization.
+Profiles persist through project saves, undo and worker recovery. Device-local
+vise library records and portable JSON profiles reuse the prepared model and
+configuration. Library export restores the jaw's open geometry; no machine
+connection or calibrated controller binding is created.
