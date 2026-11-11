@@ -24,6 +24,10 @@ pub fn catalog() -> String {
     serde_json::json!({"processes":processes,"tools":tools,"machines":crate::machine_library::builtins(),"posts":crate::post::PostProcessor::ALL.iter().map(|p|serde_json::json!({"id":p,"label":p.label()})).collect::<Vec<_>>(),"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
 }
 #[wasm_bindgen]
+pub fn blank() -> String {
+    serde_json::to_string(&Project::new_for_process(crate::process::Process::Milling)).unwrap()
+}
+#[wasm_bindgen]
 pub fn sample() -> String {
     serde_json::to_string(&Project::default()).unwrap()
 }

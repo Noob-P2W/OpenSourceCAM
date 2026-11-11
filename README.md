@@ -44,8 +44,9 @@ exports or shares them. Browser storage can be cleared: download project backups
 
 ## Try the browser workbench
 
-Open the browser preview, choose the tray demo, and select **Generate** to inspect
-its paths. Project files and G-code can be downloaded from the workbench.
+Open the browser workbench, choose **Milling**, and import your model. Configure
+your setup and operations, then select **Generate paths**. Saved workspaces can be
+continued from the opening screen. Project files and G-code can be downloaded.
 Installation and offline caching require HTTPS and browser support. Actual
 phone/tablet hardware compatibility has not been exhaustively tested.
 

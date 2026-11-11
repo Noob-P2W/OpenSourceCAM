@@ -284,3 +284,7 @@ can be combined with the cutting-tool type filter. Live playback has a **Detail*
 selector up to 512 cells; its Quick setting stays at 32 cells. Detailed inspection
 also offers desktop detail up to 512 cells. Higher settings use more memory and
 calculation time. [Workflow and implementation limits](MACHINING_WORKFLOW.md).
+
+First launch opens the process chooser with an empty workspace. Saved projects
+are offered through Continue workspace; the tray demo loads only from File →
+Tray demo. Project properties are opened explicitly from the File menu.

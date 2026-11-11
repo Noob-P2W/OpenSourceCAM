@@ -38,6 +38,7 @@ def web():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     env = {**os.environ, 'PWA_URL': f'http://127.0.0.1:{server.server_port}'}
     try:
+        run('node', 'web/startup-smoke.mjs', env=env)
         run('node', 'web/smoke.mjs', env=env)
         run('node', 'web/cad-smoke.mjs', env=env)
         run('node', 'web/layout-smoke.mjs', env=env)
