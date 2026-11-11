@@ -35,6 +35,14 @@ jobs:
         run: |
           mkdir -p dist
           set -o pipefail
+          # Avoid intermittent DNS failures on the runner's Azure mirror list.
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i \
+              -e 's#mirror+file:/etc/apt/apt-mirrors.txt#https://archive.ubuntu.com/ubuntu#g' \
+              -e 's#mirror+file:/etc/apt/apt-mirrors-security.txt#https://security.ubuntu.com/ubuntu#g' \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/80-cam-ci-retries > /dev/null
           cd web
           npx playwright install --with-deps chromium 2>&1 | tee ../dist/ci-failure.txt
       - name: Browser quality gate
