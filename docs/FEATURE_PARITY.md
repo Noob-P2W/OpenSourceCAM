@@ -143,7 +143,7 @@ holder clearance preflight; edits invalidate paths. Jaw interpolation is display
 only. Internal vise self-clearance, supports/parallels and physical clamping forces
 are not simulated. Work coordinates are used; existing machine/work-origin frames
 remain available for static placement and future machine visualization.
-Profiles persist through project saves, undo and worker recovery. Device-local
+Profiles persist through project saves, undo and worker recovery. Device-local IndexedDB
 vise library records and portable JSON profiles reuse the prepared model and
 configuration. Library export restores the jaw's open geometry; no machine
 connection or calibrated controller binding is created.

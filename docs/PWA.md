@@ -309,7 +309,7 @@ vise around the stock, leaving the part coordinates unchanged. Supports/parallel
 clamping force and internal vise self-clearances remain a manual review. It is not
 a machine motion command or a physical holding-force solver.
 
-Save to vise library stores a reusable profile on this device. Export vise profile
+Save to vise library stores a reusable profile in IndexedDB on this device. Existing text-storage library entries are migrated without discarding them. Export vise profile
 creates portable JSON; Vise library can import it or add saved profiles to a setup.
 Library profiles export with the jaw open and retain their source geometry and
 work-coordinate placement; they do not configure a machine or controller.
