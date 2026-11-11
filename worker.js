@@ -9,11 +9,12 @@ function importCad(file,id){return new Promise((resolve,reject)=>{
  worker.onmessage=({data})=>{if(data.progress){self.postMessage({id,progress:data.progress});return}if(data.error){finish(Error(data.error));return}try{const source=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);finish(null,JSON.parse(core.cad_project(file.name,source,data.format,JSON.stringify(data.mesh))))}catch(error){finish(error)}};
  worker.postMessage(file);
 })}
-self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, tool_id, index, history, strategy, data}}) => {
+self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, epoch, budget, tool_id, index, history, strategy, data}}) => {
   try {
     await ready;
-    let value;
-    if(action==='catalog') value=JSON.parse(core.catalog());
+    let value;let transfer=[];
+    if(action==='operation-defaults')value=JSON.parse(session.operation_defaults(data));
+    else if(action==='catalog') value=JSON.parse(core.catalog());
     else if(action==='machine-records') value=JSON.parse(core.machine_records(data));
     else if(action==='operation-draft') value=JSON.parse(session.operation_draft(strategy));
     else if(action==='geometry') value=JSON.parse(session.geometry(JSON.stringify(data)));
@@ -21,9 +22,9 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
     else if(action==='plan-model') value=JSON.parse(session.plan(planner,JSON.stringify(options)));
     else if(action==='tool-preview') value=JSON.parse(session.tool_preview(BigInt(tool_id)));
     else if(action==='playback-tool') value=JSON.parse(session.playback_tool(index));
-    else if(action==='stock-preview') value=JSON.parse(session.stock_preview(progress,resolution));
-    else if(action==='simulate-current') value=JSON.parse(session.simulate(progress,resolution));
-    else if(action==='stock-obj') value=session.stock_obj(progress,resolution);
+    else if(action==='stock-preview'){value=JSON.parse(session.stock_frame(progress,resolution,epoch,budget));value.vertices=session.take_stock_vertices();transfer=[value.vertices.buffer]}
+    else if(action==='simulate-current') value=JSON.parse(session.simulate(progress,resolution,budget));
+    else if(action==='stock-obj') value=session.stock_obj(progress,resolution,budget);
     else if(action==='machine-profile') value=session.machine_profile();
     else if(action==='tool-library') value=session.tool_library();
     else if(action==='history-checkpoint') value=session.history_checkpoint();
@@ -41,6 +42,6 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
      }else value=JSON.parse(session.import_file(file.name,new Uint8Array(file.bytes),inches,role||'part'));
     }
     else value=JSON.parse(session ? session.run(action) : core.run(project,action));
-    self.postMessage({id,value});
+    self.postMessage({id,value},transfer);
   } catch(error) { self.postMessage({id,error:String(error)}); }
 };
