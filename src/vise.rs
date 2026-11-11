@@ -325,7 +325,7 @@ pub fn clamp(p: &mut Project, id: u64, grip: f64) -> Result<(), String> {
     let size = [p.stock.width, p.stock.height];
     let closure = (g.center[axis] - f.center[axis]) * sign - size[axis];
     if closure < -1e-6 || closure > model(p, id)?.clamp.as_ref().unwrap().max_closure + 1e-6 {
-        return Err("Stock does not fit the opening or exceeds the configured jaw travel".into());
+        return Err(format!("Jaw opening {:.3} mm, stock {:.3} mm: required closing travel {:.3} mm, allowed {:.3} mm. Review the selected gripping faces and measured travel limit.", (g.center[axis]-f.center[axis])*sign, size[axis], closure, model(p,id)?.clamp.as_ref().unwrap().max_closure));
     }
     let other = 1 - axis;
     let (lo, hi) = bounds(&f);
@@ -397,6 +397,6 @@ pub fn info(p: &Project, id: u64) -> Result<serde_json::Value, String> {
     let (f, g, axis, sign, indices) = details(p, id)?;
     let m = model(p, id)?;
     Ok(
-        serde_json::json!({"opening":(g.center[axis]-f.center[axis])*sign,"original_opening":(g.center[axis]-f.center[axis])*sign+m.clamp.as_ref().unwrap().closed_by,"axis":if axis==0{"X"}else{"Y"},"moving_vertices":indices.len()}),
+        serde_json::json!({"opening":(g.center[axis]-f.center[axis])*sign,"original_opening":(g.center[axis]-f.center[axis])*sign+m.clamp.as_ref().unwrap().closed_by,"axis":if axis==0{"X"}else{"Y"},"moving_vertices":indices.len(),"stock_span":if axis==0 {p.stock.width} else {p.stock.height},"required_closure":(g.center[axis]-f.center[axis])*sign-if axis==0 {p.stock.width} else {p.stock.height},"max_closure":m.clamp.as_ref().unwrap().max_closure}),
     )
 }

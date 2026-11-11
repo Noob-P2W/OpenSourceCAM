@@ -370,6 +370,10 @@ impl WebSession {
         #[derive(serde::Deserialize)]
         #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
         enum Query {
+            Placement {
+                id: u64,
+                body: Option<usize>,
+            },
             Pick {
                 id: u64,
                 origin: [f64; 3],
@@ -384,6 +388,10 @@ impl WebSession {
         }
         let result = (|| -> Result<String, String> {
             match serde_json::from_str(data).map_err(|e| e.to_string())? {
+                Query::Placement { id, body } => serde_json::to_string(
+                    &crate::workspace::placement_info(self.inner.project(), id, body)?,
+                )
+                .map_err(|e| e.to_string()),
                 Query::Pick {
                     id,
                     origin,

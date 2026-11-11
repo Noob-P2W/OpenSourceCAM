@@ -442,3 +442,42 @@ fn touching_assembly_components_are_validated_separately_for_clamping_and_cleara
     )
     .unwrap();
 }
+
+#[test]
+fn apply_clamping_draft_and_close_are_one_atomic_action() {
+    let (p, fixed, moving) = assembly_job();
+    let mut s = Session::new(p);
+    let before = serde_json::to_string(s.project()).unwrap();
+    assert!(s
+        .apply(Edit::ClampViseSetup {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 0.1,
+            bodies: vec![3],
+            grip: 3.
+        })
+        .is_err());
+    assert_eq!(serde_json::to_string(s.project()).unwrap(), before);
+    s.apply(Edit::ClampViseSetup {
+        id: 1,
+        fixed,
+        moving,
+        max_closure: 30.,
+        bodies: vec![3],
+        grip: 3.,
+    })
+    .unwrap();
+    assert_eq!(
+        s.project().workspace[0]
+            .clamp
+            .as_ref()
+            .unwrap()
+            .moving_vertices
+            .len(),
+        16
+    );
+    assert!((s.project().workspace[0].clamp.as_ref().unwrap().closed_by - 0.5).abs() < 1e-7);
+    s.apply(Edit::Undo).unwrap();
+    assert_eq!(serde_json::to_string(s.project()).unwrap(), before);
+}

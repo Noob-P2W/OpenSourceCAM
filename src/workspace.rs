@@ -179,3 +179,171 @@ pub fn validate(models: &[WorkspaceModel], machine: Option<&MachineSetup>) -> Re
     }
     Ok(())
 }
+
+fn editable(project: &mut crate::model::Project, id: u64) -> Result<&mut WorkspaceModel, String> {
+    let m = project
+        .workspace
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or("Reference model not found")?;
+    if m.clamp.as_ref().is_some_and(|c| c.closed_by > 1e-7) {
+        return Err("Open the jaw before changing its placement".into());
+    }
+    Ok(m)
+}
+
+pub fn position(
+    project: &mut crate::model::Project,
+    id: u64,
+    offset: [f64; 3],
+    rotation: [f64; 3],
+    frame: Frame,
+) -> Result<(), String> {
+    let machine = project.machine.clone();
+    let m = editable(project, id)?;
+    if rotation != m.rotation || frame != m.frame {
+        m.clamp = None;
+    }
+    m.part.offset = offset;
+    m.rotation = rotation;
+    m.frame = frame;
+    m.validate(machine.as_ref())
+}
+
+fn component_vertices(m: &WorkspaceModel, body: usize) -> Result<Vec<usize>, String> {
+    let g = &m.part.geometry;
+    let b = g.bodies.get(body).ok_or("CAD component not found")?;
+    let mut used = vec![false; g.mesh.vertices.len()];
+    for t in &g.mesh.triangles[b.first_triangle..b.first_triangle + b.triangle_count] {
+        for i in t {
+            used[*i as usize] = true;
+        }
+    }
+    Ok(used
+        .iter()
+        .enumerate()
+        .filter_map(|(i, used)| used.then_some(i))
+        .collect())
+}
+
+pub fn placement_info(
+    project: &crate::model::Project,
+    id: u64,
+    body: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let m = project
+        .workspace
+        .iter()
+        .find(|m| m.id == id)
+        .ok_or("Reference model not found")?;
+    m.validate(project.machine.as_ref())?;
+    let indices = if let Some(body) = body {
+        component_vertices(m, body)?
+    } else {
+        let mesh = &m.part.geometry.mesh;
+        let mut used = vec![false; mesh.vertices.len()];
+        for triangle in &mesh.triangles {
+            for i in triangle {
+                used[*i as usize] = true;
+            }
+        }
+        used.iter()
+            .enumerate()
+            .filter_map(|(i, used)| used.then_some(i))
+            .collect()
+    };
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for i in indices {
+        let p = m.point(m.part.geometry.mesh.vertices[i], project.machine.as_ref());
+        for a in 0..3 {
+            min[a] = min[a].min(p[a]);
+            max[a] = max[a].max(p[a]);
+        }
+    }
+    let mut center: [f64; 3] = std::array::from_fn(|i| (min[i] + max[i]) / 2.);
+    // A surface centroid transforms rigidly even for asymmetric components;
+    // a freshly computed bounding-box center would shift after rotation.
+    if let Some(body) = body {
+        let g = &m.part.geometry;
+        let b = &g.bodies[body];
+        let mut weighted = [0.; 3];
+        let mut area = 0.;
+        for triangle in &g.mesh.triangles[b.first_triangle..b.first_triangle + b.triangle_count] {
+            let points = triangle.map(|i| g.mesh.vertices[i as usize]);
+            let n = crate::import::normal(points);
+            let weight = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+            area += weight;
+            for i in 0..3 {
+                weighted[i] += points.iter().map(|p| p[i]).sum::<f64>() / 3. * weight;
+            }
+        }
+        center = m.point(weighted.map(|v| v / area), project.machine.as_ref());
+    }
+    Ok(serde_json::json!({"center":center,"min":min,"max":max}))
+}
+
+pub fn center(project: &mut crate::model::Project, id: u64) -> Result<(), String> {
+    let info = placement_info(project, id, None)?;
+    let delta = [
+        project.stock.width / 2. - info["center"][0].as_f64().unwrap(),
+        project.stock.height / 2. - info["center"][1].as_f64().unwrap(),
+    ];
+    let m = editable(project, id)?;
+    m.part.offset[0] += delta[0];
+    m.part.offset[1] += delta[1];
+    Ok(())
+}
+
+/// Position a complete CAD component in work coordinates. Rotations are explicit
+/// increments about its current center; no imported mates or other bodies move.
+pub fn position_component(
+    project: &mut crate::model::Project,
+    id: u64,
+    body: usize,
+    center: [f64; 3],
+    rotate: [f64; 3],
+) -> Result<(), String> {
+    if center
+        .iter()
+        .any(|v| !v.is_finite() || v.abs() > crate::import::MAX_COORDINATE)
+        || rotate.iter().any(|v| !v.is_finite() || v.abs() > 36000.)
+    {
+        return Err(
+            "Component position and rotation must be finite and within supported limits".into(),
+        );
+    }
+    let info = placement_info(project, id, Some(body))?;
+    let original: [f64; 3] = std::array::from_fn(|i| info["center"][i].as_f64().unwrap());
+    let machine = project.machine.clone();
+    let m = editable(project, id)?;
+    let indices = component_vertices(m, body)?;
+    let zero = m.point([0.; 3], machine.as_ref());
+    let basis: [[f64; 3]; 3] = std::array::from_fn(|i| {
+        let mut p = [0.; 3];
+        p[i] = 1.;
+        let q = m.point(p, machine.as_ref());
+        std::array::from_fn(|j| q[j] - zero[j])
+    });
+    let factor = m.part.units.factor();
+    let rotation = crate::blank::rotation(rotate);
+    let updated: Vec<_> = indices
+        .iter()
+        .map(|i| {
+            let world = m.point(m.part.geometry.mesh.vertices[*i], machine.as_ref());
+            let relative =
+                crate::blank::apply(rotation, std::array::from_fn(|a| world[a] - original[a]));
+            let target: [f64; 3] = std::array::from_fn(|a| relative[a] + center[a] - zero[a]);
+            std::array::from_fn(|i| {
+                (0..3).map(|j| basis[i][j] * target[j]).sum::<f64>() / (factor * factor)
+            })
+        })
+        .collect();
+    let geometry = std::sync::Arc::make_mut(&mut m.part.geometry);
+    for (i, p) in indices.into_iter().zip(updated) {
+        geometry.mesh.vertices[i] = p;
+    }
+    m.clamp = None;
+    m.vise = None;
+    m.validate(machine.as_ref())
+}

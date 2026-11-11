@@ -27,7 +27,7 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
-    for script in ('app.js', 'help.js', 'vise.js', 'shell.js', 'dialogs.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+    for script in ('app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
         run('node', '--check', 'web/' + script)
     run('node', 'web/cad-mesh-smoke.mjs')
     run('cargo', 'fmt', '--all', '--', '--check')

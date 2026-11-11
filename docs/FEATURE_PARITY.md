@@ -164,3 +164,29 @@ linear / 0.3 rad angular tessellation settings. The 32 MiB source file limit,
 16-model / 300,000-total-reference-triangle workspace budget and simulation mesh
 budgets remain separate and unchanged. Large supported inputs still need device
 verification; exceeding the new cap fails before changing the workspace.
+
+Reference assemblies now have an expandable component list below Workholding in
+the Project & operations browser. Clicking a component recolours its existing
+render buffer instead of drawing a coplanar duplicate. Clamping controls are
+non-modal; moving-group checkboxes live in the component tree. Selection and
+reference framing retain the complete source geometry. Import and scene selection
+frame the reference itself rather than including a distant stock origin. The
+viewport includes a scene-sized grid and a camera-oriented XYZ indicator.
+
+Shared Session placement transactions support reference XYZ offsets, XYZ rotation,
+work/machine frames and XY centering over stock. Individual CAD components can
+be positioned by their center in work millimetres and rotated by explicit XYZ
+increments about that center. These edits bake into the geometry consumed by
+clearance checks and survive undo/save/recovery; moving a component clears its
+clamping profile, and closed jaws must be opened before repositioning. Changing
+assembly orientation/frame also clears the profile. This is positioning and rigid
+jaw grouping, not a general CAD mate solver or internal vise mechanism simulation.
+Clamping remains limited to the documented parallel-jaw geometry and stock cases.
+The clamp panel and travel errors report opening, stock span, required closure and
+the configured travel allowance; face queries inspect only the selected source
+component instead of grouping all triangles in a detailed vise repeatedly.
+
+Clamp stock applies the current clamping draft and closes in one atomic Session
+action, without requiring a separate Save click. Missing selections and rejected
+travel produce visible errors; an already fitting blank reports zero jaw travel.
+Scene centering ignores unused source vertices, matching the rendered mesh.

@@ -199,6 +199,46 @@ pub fn list(part: &Part) -> Result<Vec<Face>, String> {
     Ok(faces)
 }
 pub fn face(part: &Part, triangle: usize) -> Result<Face, String> {
+    if !part.geometry.bodies.is_empty() {
+        part.validate()?;
+    }
+    // A detailed vise can contain hundreds of thousands of faces in screws and
+    // unrelated bodies. Resolve the selected component only, preserving source IDs.
+    if let Some(body) = part.geometry.body_at(triangle) {
+        let source = &part.geometry;
+        let b = &source.bodies[body];
+        let mut remap = vec![u32::MAX; source.mesh.vertices.len()];
+        let mut vertices = Vec::new();
+        let triangles = source.mesh.triangles
+            [b.first_triangle..b.first_triangle + b.triangle_count]
+            .iter()
+            .map(|t| {
+                t.map(|i| {
+                    let index = &mut remap[i as usize];
+                    if *index == u32::MAX {
+                        *index = vertices.len() as u32;
+                        vertices.push(source.mesh.vertices[i as usize]);
+                    }
+                    *index
+                })
+            })
+            .collect();
+        let mut local = part.clone();
+        local.geometry = std::sync::Arc::new(crate::import::Geometry {
+            bodies: Vec::new(),
+            removed_degenerate_triangles: 0,
+            source_name: source.source_name.clone(),
+            format: source.format,
+            mesh: crate::import::Mesh {
+                vertices,
+                triangles,
+            },
+            cad_source: None,
+        });
+        let mut selected = face(&local, triangle - b.first_triangle)?;
+        selected.id += b.first_triangle;
+        return Ok(selected);
+    }
     let group = groups(part)?
         .into_iter()
         .find(|g| g.triangles.contains(&triangle))

@@ -24,6 +24,14 @@ pub enum Edit {
         id: u64,
         grip: f64,
     },
+    ClampViseSetup {
+        id: u64,
+        fixed: usize,
+        moving: usize,
+        max_closure: f64,
+        bodies: Vec<usize>,
+        grip: f64,
+    },
     ConfigureViseGroup {
         id: u64,
         fixed: usize,
@@ -112,6 +120,21 @@ pub enum Edit {
         model_kind: crate::workspace::ModelKind,
     },
     RemoveWorkspace {
+        id: u64,
+    },
+    PositionWorkspace {
+        id: u64,
+        offset: [f64; 3],
+        rotation: [f64; 3],
+        frame: crate::workspace::Frame,
+    },
+    PositionComponent {
+        id: u64,
+        body: usize,
+        center: [f64; 3],
+        rotate: [f64; 3],
+    },
+    CenterWorkspace {
         id: u64,
     },
     FeatureOperation {
@@ -392,6 +415,24 @@ impl Session {
                 &bodies,
             )?,
             Edit::ClampVise { id, grip } => crate::vise::clamp(&mut candidate, id, grip)?,
+            Edit::ClampViseSetup {
+                id,
+                fixed,
+                moving,
+                max_closure,
+                bodies,
+                grip,
+            } => {
+                crate::vise::configure_group(
+                    &mut candidate,
+                    id,
+                    fixed,
+                    moving,
+                    max_closure,
+                    &bodies,
+                )?;
+                crate::vise::clamp(&mut candidate, id, grip)?;
+            }
             Edit::OpenVise { id } => crate::vise::open(&mut candidate, id)?,
             Edit::AddViseProfile { data } => crate::vise::add(&mut candidate, &data)?,
             Edit::PlaceExampleVise { id, spec } => {
@@ -541,6 +582,19 @@ impl Session {
                     .push(crate::workspace::WorkspaceModel::new(id, model_kind, part));
                 crate::workspace::validate(&candidate.workspace, candidate.machine.as_ref())?;
             }
+            Edit::PositionWorkspace {
+                id,
+                offset,
+                rotation,
+                frame,
+            } => crate::workspace::position(&mut candidate, id, offset, rotation, frame)?,
+            Edit::PositionComponent {
+                id,
+                body,
+                center,
+                rotate,
+            } => crate::workspace::position_component(&mut candidate, id, body, center, rotate)?,
+            Edit::CenterWorkspace { id } => crate::workspace::center(&mut candidate, id)?,
             Edit::RemoveWorkspace { id } => {
                 let index = candidate
                     .workspace
