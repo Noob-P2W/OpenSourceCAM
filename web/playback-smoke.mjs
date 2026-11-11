@@ -1,3 +1,4 @@
+import {visibility} from './test-ui.mjs';
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {ready,generate,editOperation,saveOperation} from './test-ui.mjs';
@@ -30,7 +31,7 @@ try{
   await seek(40.5);await page.locator('#play').evaluate(button=>{button.click();button.click();button.click()});await page.clock.runFor(300);assert.ok(Math.abs(await progress()-40.5-advance(300))<advance(40),'Rapid toggles must leave only one animation loop');
   // Navigation and path visibility are presentation actions, not playback controls.
   const box=await page.locator('#canvas').boundingBox();await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5);await page.mouse.down({button:'right'});await page.mouse.move(box.x+box.width*.5+20,box.y+box.height*.5+12);await page.mouse.up({button:'right'});await page.clock.runFor(150);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'true','Panning must not pause playback');
-  await page.locator('#show-paths').uncheck();await page.clock.runFor(100);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'true');await page.locator('#show-paths').check();
+  await visibility(page,'show-paths',false);await page.clock.runFor(100);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'true');await visibility(page,'show-paths',true);
   await page.locator('#home-button').click();const left=await progress();await page.clock.runFor(500);assert.equal(await progress(),left,'Leaving the workspace stops playback');await page.locator('#resume-workspace').click();
   await page.locator('#play').click();await editOperation(page);await page.getByLabel('depth · mm',{exact:true}).fill('4');await saveOperation(page);assert.equal(await page.locator('#play').isDisabled(),true);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');
   const edited=await progress();await page.clock.runFor(500);assert.equal(await progress(),edited,'Edits invalidate paths and stop their animation');await generate(page);assert.equal(await page.locator('#play').isEnabled(),true);

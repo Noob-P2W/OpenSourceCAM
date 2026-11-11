@@ -10,13 +10,13 @@ This is an implementation inventory, not a release promise or certification.
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
-| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, detail selection, live bounded playback snapshots (32–512 selectable cells) on the same estimated-time timeline as the library tool assembly, and OBJ download |
+| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, 32–512-cell incremental playback with changed-strip transfers, selectable calculation budget, synchronized library tool assembly, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
 | Tool library | 37 kinds and assembly preview | Same catalog, assembly geometry and focused dimension arrows (mm/in); separate tool creation, search and type filtering, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
 | Planning controls | Blank allowances and operation replacement | Same PlanOptions in the worker; notes, XY/top/backing, 2.5D choices and explicit replacement |
-| Detailed operation editor | All implemented settings | Dedicated operation drafts with geometry/tool/pass/feed/height tabs, atomic validation/save, geometry unlinking and keyboard/context actions |
+| Detailed operation editor | All implemented settings | Dedicated operation drafts with geometry/tool/pass/feed/height tabs, labeled managed/inherited reference values, hover/focus/touch help, atomic validation/save, geometry unlinking and keyboard/context actions |
 | NC inspection | Preview and export | Checked code preview and download |
 | Stock fitting and workholding | Supported | Modal Setup: rectangular/round physical stock, XYZ stock/part orientation and offsets, shape-preserving fit, configurable example vise/backing and imported fixture transforms |
 | Feature recognition | Selected stored plane respected | Face list/camera picking, explicit side-face setup, recognition at the selected XY level, linked operation targets, persistent candidate list and on-model highlights; unsupported/open-mesh diagnostics |
@@ -62,7 +62,7 @@ and software rendering. By default the browser draws the library cutter, shaft
 and configured holder at this position, switching with the operation's tool.
 Show tool can be disabled to return to the position marker. Assembly meshes are
 illustrative library geometry, not measured cutter flute surfaces or additional
-collision verification. Playback uses a fixed preview duration and the shared Rust estimated-time timeline.
+collision verification. Playback uses the shared Rust estimated-time timeline and the selected speed multiplier.
 With Simulated stock enabled, bounded worker snapshots (32 cells by default, up to 512 selectable) update during
 playback; rewinding immediately restores the uncut mesh. The detailed inspection
 command retains selectable resolution, target comparison and fixture reporting.
@@ -98,5 +98,10 @@ Browser recognition now lives under the part in Project & operations; the right-
 The detailed survey recognizes bore entry chamfers, rounded transitions, tapered holes/pockets, islands and open pockets/ledges. Taper, island and open-pocket results are inspection candidates, not permission to flatten them with a simple rectangular pocket/drill path. Compatible bores can populate operation geometry before selecting the tool. Legacy stock planning still uses its conservative prismatic recognizer. Recognition remains bounded; arbitrary intersecting/freeform geometry is not classified exhaustively.
 
 Path lines can be hidden globally or per operation without hiding the moving cutter or changing generated paths. Camera navigation does not pause playback. When sampled stock is visible, the tool and displayed clock use the same processed snapshot time, so a delayed high-resolution stock calculation cannot leave the cutter ahead of the removed material. The tool HUD distinguishes cutting diameter from a larger shaft. Sampling error remains bounded by the preview cell size.
+
+Visibility buttons use eye icons with pressed state. Linked geometry fields show
+“Managed automatically” and their reference dimensions inside the box; empty cutting
+overrides show resolved inherited values. Field help supports mouse hover, keyboard
+focus and touch editing. These presentation controls are browser features.
 
 Multi-tool generation/simulation no longer depends on ATC export configuration. Export retains geometry/fixture preflight and additionally checks the configured manual-change position and calibrated H registers, or the existing ATC configuration. Generic/Mach3 support mandatory M0 changes; LinuxCNC uses its configured manual M6 handshake. GRBL remains one tool per NC file. See [manual tool changes](MANUAL_TOOL_CHANGES.md).

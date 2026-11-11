@@ -171,10 +171,14 @@ Generated path presentation includes Rust-computed start/end seconds for each
 move. Both the cursor and stock snapshots select the same estimated-time prefix.
 WebSession caches one preflighted PlaybackPreview path, invalidating it on every
 successful edit/import/plan. A generate response includes its bounded uncut stock
-mesh. The browser requests at most four stock snapshots per second (32 cells by default, with larger selectable previews throttled further), with
-one request in flight and only the latest target queued. Epoch and revision checks
-discard stale responses after seeking or editing. These snapshots share stock
-removal and existing budgets, omitting repeated target recognition/collision reports;
+mesh. The browser requests at most ten stock updates per second (32 cells by default), with
+one request in flight and only the latest target queued. Rust retains the sampled
+heightfield and advances only newly elapsed motion. Tight swept-capsule row bounds
+avoid scanning diagonal bounding rectangles; already cleared cells skip cutter
+contact evaluation. Changed eight-row mesh strips travel as transferable Float32
+buffers. The renderer replaces those strips and retains other GPU buffers. Epoch
+and revision checks reset/discard stale state after seeking or editing. These updates share stock
+removal, omitting repeated target recognition/collision reports;
 path preflight and full inspection keep those checks. Browser code does not perform
 stock removal. The detailed inspection/export route remains independently checked.
 
@@ -220,8 +224,12 @@ the separate parallel path. Facing is limited to the highest target surface.
 
 Detailed stock inspection and explicitly selected live previews support up to 512
 cells per side. High-detail generated meshes have a separate bounded triangle
-budget; input mesh limits and removal-work limits remain unchanged. Live stock
-retains one in-flight request and slows updates as resolution increases. See
+budget; input mesh limits remain unchanged. Browser preferences select 50, 100 or
+200 million expensive removal evaluations per update/inspection. Auto selects
+100 million when the browser reports at least 4 GiB device memory and four logical
+processors, otherwise 50 million. This is a capacity hint, not a free-memory probe.
+A separate traversal cap is four times the selected evaluation budget. Native
+default calculations retain 50 million. See
 [MACHINING_WORKFLOW.md](MACHINING_WORKFLOW.md) for scope and limits.
 
 Surface contact now uses `contact.rs`: a triangle bounding hierarchy, analytic capsule/triangle contact for flat cutters, clipped local patches, conservative ball-cutter contact bounds and cancellable subdivision. `surface.rs` makes adaptive finishing spans; `roughing.rs` retains its separate bounded clearing grid. Browser Setup surveys use `GeometryQuery::Survey`, while contextual plane recognition remains available to legacy planning/native callers. Geometry-only feature drafts resolve selections against Rust recognition and defer cutter-fit validation until tooling can be edited.

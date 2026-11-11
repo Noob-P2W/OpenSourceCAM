@@ -46,16 +46,31 @@ export class Viewport {
  }
  lines(points,color){const data=new Float32Array(points.length*6);points.forEach((p,i)=>data.set(p,i*6));return this.upload(data,color,true)}
  rebuild(project,workspace,simulation){
-  for(const item of this.buffers)if(item.buffer){this.gl?.deleteBuffer(item.buffer);if(item.wireBuffer)this.gl?.deleteBuffer(item.wireBuffer)}this.buffers=[];this.scene=project;this.simulation=simulation;this.pathSource=null;this.pathFilter=undefined;this.pathBounds=null;this.pathBuffers=[];this.pathPrefixes=[];this.highlightSource=null;this.highlightBuffer=null;
+  this.canvas.dataset.sceneBuilds=String(Number(this.canvas.dataset.sceneBuilds||0)+1);
+  for(const item of this.buffers)if(item.buffer){this.gl?.deleteBuffer(item.buffer);if(item.wireBuffer)this.gl?.deleteBuffer(item.wireBuffer)}this.buffers=[];this.scene=project;this.simulation=simulation;this.pathSource=null;this.pathFilter=undefined;this.pathBounds=null;this.pathBuffers=[];this.pathPrefixes=[];this.highlightSource=null;this.highlightBuffer=null;this.stockPieces=new Map();this.stockBuffers=[];
   const stock=project.stock;this.bounds={min:[0,0,-stock.thickness],max:[stock.width,stock.height,0]};
   const include=p=>{for(let i=0;i<3;i++){this.bounds.min[i]=Math.min(this.bounds.min[i],p[i]);this.bounds.max[i]=Math.max(this.bounds.max[i],p[i])}};
   if(project.part?.visible){const part=project.part,f=part.units==='inches'?25.4:1;const matrix=project._display?.part_transform;const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v.map((x,i)=>x*f+part.offset[i]);for(const v of part.geometry.mesh.vertices)include(transform(v));if(!simulation)this.mesh(part.geometry.mesh,transform,[.6,.79,.88])}
   this.allBounds={min:[...this.bounds.min],max:[...this.bounds.max]};for(const model of workspace){for(const p of model.vertices)for(let i=0;i<3;i++){this.allBounds.min[i]=Math.min(this.allBounds.min[i],p[i]);this.allBounds.max[i]=Math.max(this.allBounds.max[i],p[i])}this.mesh(model,v=>v,model.kind==='machine'?[.5,.55,.61]:[.7,.65,.52])}
   this.triangleCount=this.buffers.reduce((n,b)=>n+b.count/3,0);
+  const stockStart=this.buffers.length;
   if(simulation?.mesh)this.mesh(simulation.mesh,v=>v,[.45,.7,.4]);
-  else if(simulation){const [nx,ny]=simulation.summary.resolution,[dx,dy]=simulation.summary.cell_size;const mesh={vertices:[],triangles:[]};for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const z=simulation.heights[y*nx+x],i=mesh.vertices.length;mesh.vertices.push([x*dx,y*dy,z],[(x+1)*dx,y*dy,z],[(x+1)*dx,(y+1)*dy,z],[x*dx,(y+1)*dy,z]);mesh.triangles.push([i,i+1,i+2],[i,i+2,i+3])}this.mesh(mesh,v=>v,[.45,.7,.4])}
+  else if(simulation?.heights){const [nx,ny]=simulation.summary.resolution,[dx,dy]=simulation.summary.cell_size;const mesh={vertices:[],triangles:[]};for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const z=simulation.heights[y*nx+x],i=mesh.vertices.length;mesh.vertices.push([x*dx,y*dy,z],[(x+1)*dx,y*dy,z],[(x+1)*dx,(y+1)*dy,z],[x*dx,(y+1)*dy,z]);mesh.triangles.push([i,i+1,i+2],[i,i+2,i+3])}this.mesh(mesh,v=>v,[.45,.7,.4])}
+  this.stockBuffers=this.buffers.slice(stockStart);
+  if(simulation?.patches)this.updateStockPatches(simulation,true);else{this.stockCpu=null;this.stockFrameSource=null}
   const corners=[];for(const z of [-stock.thickness,0])corners.push([0,0,z],[stock.width,0,z],[stock.width,stock.height,z],[0,stock.height,z]);const segments=[];for(let i=0;i<4;i++)segments.push(corners[i],corners[(i+1)%4],corners[i+4],corners[(i+1)%4+4],corners[i],corners[i+4]);this.stockLines=this.lines(project._display?.stock_outline||segments,this.controls.dark?[.9,.7,.3]:[.65,.42,.1]);
   const axis=Math.max(.001,Math.min(stock.width,stock.height,stock.thickness)*.5);this.axisBuffers=[this.lines([[0,0,0],[axis,0,0]],[.88,.22,.22]),this.lines([[0,0,0],[0,axis,0]],[.2,.65,.3]),this.lines([[0,0,0],[0,0,axis]],[.2,.42,.9])];const grid=[],extent=Math.max(stock.width,stock.height),step=10**Math.floor(Math.log10(extent/8)),cx=stock.width/2,cy=stock.height/2,z=-stock.thickness-.01;for(let i=-10;i<=10;i++){grid.push([cx+i*step,cy-10*step,z],[cx+i*step,cy+10*step,z],[cx-10*step,cy+i*step,z],[cx+10*step,cy+i*step,z])}this.gridLines=this.lines(grid,this.controls.dark?[.16,.21,.26]:[.83,.85,.86]);
+ }
+ updateStockPatches(frame,rebuild=false){
+  const remove=item=>{if(item.buffer)this.gl?.deleteBuffer(item.buffer);if(item.wireBuffer)this.gl?.deleteBuffer(item.wireBuffer);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)};
+  const sameFrame=this.stockFrameSource===frame,reset=!this.stockCpu||this.stockFrameEpoch!==frame.epoch||this.stockFrameResolution!==frame.resolution||(frame.reset&&!sameFrame);
+  if(reset)this.stockCpu=new Map();
+  if(!sameFrame)for(const patch of frame.patches)this.stockCpu.set(patch.strip,frame.vertices.slice(patch.offset,patch.offset+patch.length));
+  this.stockFrameSource=frame;this.stockFrameEpoch=frame.epoch;this.stockFrameResolution=frame.resolution;
+  const all=reset||rebuild||!this.stockPieces.size;if(all){for(const item of this.stockBuffers)remove(item);this.stockBuffers=[];this.stockPieces.clear()}
+  const strips=all?this.stockCpu.keys():frame.patches.map(p=>p.strip);
+  for(const strip of strips){const old=this.stockPieces.get(strip);if(old){remove(old);this.stockBuffers.splice(this.stockBuffers.indexOf(old),1)}const item=this.upload(this.stockCpu.get(strip),[.45,.7,.4]);this.stockPieces.set(strip,item);this.stockBuffers.push(item)}
+  this.canvas.dataset.stockTriangles=String(this.stockBuffers.reduce((n,item)=>n+item.count/3,0));
  }
  updatePath(path,filter){
   const visibility=[...(this.controls.hiddenOperations||[])].sort().join(',');if(this.pathSource===path&&this.pathFilter===filter&&this.pathVisibility===visibility)return;this.pathVisibility=visibility;if(this.toolPath!==path){this.toolEnvelope=null;this.toolPath=path}this.pathSource=path;this.pathFilter=filter;
@@ -66,7 +81,7 @@ export class Viewport {
  draw(project,workspace,path,progress,simulation,highlight,wireframe,showStock,filter=null,toolForOperation=null){
   const canvas=this.canvas,w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||this.lost)return;
   const dpr=Math.min(devicePixelRatio||1,2,Math.sqrt(4000000/(w*h)));if(canvas.width!==Math.round(w*dpr))canvas.width=Math.round(w*dpr);if(canvas.height!==Math.round(h*dpr))canvas.height=Math.round(h*dpr);
-  if(this.scene!==project||this.simulation!==simulation)this.rebuild(project,workspace,simulation);this.updatePath(path,filter);
+  if(this.scene!==project||Boolean(this.simulation)!==Boolean(simulation)||(this.simulation!==simulation&&!simulation?.patches))this.rebuild(project,workspace,simulation);else if(this.simulation!==simulation){this.updateStockPatches(simulation);this.simulation=simulation}this.updatePath(path,filter);
   if(this.highlightSource!==highlight){
    for(const item of this.highlightItems||[]){if(item.buffer)this.gl?.deleteBuffer(item.buffer);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
    this.highlightItems=[];this.highlightSource=highlight;
@@ -91,7 +106,7 @@ export class Viewport {
   let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))*this.zoom;
   this.pickRay=(x,y)=>{const u=(x-w/2-this.pan[0])/scale,v=(h/2+this.pan[1]-y)/scale;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*radius*4),direction:depth.map(c=>-c)}};
   const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
-  const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!this.pathBuffers.includes(item)||this.controls.paths!==false)&&(item!==this.pathBuffers[1]||this.controls.rapids));
+  const visible=this.buffers.filter(item=>(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!this.pathBuffers.includes(item)||this.controls.paths!==false)&&(item!==this.pathBuffers[1]||this.controls.rapids)).sort((a,b)=>(a.lines?2:a.selection?1:0)-(b.lines?2:b.selection?1:0));
   if(this.gl){
    const gl=this.gl;gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(...(this.controls.dark?[.055,.09,.12,1]:[.95,.96,.965,1]));gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.useProgram(this.program);
    const sx=2*scale/w,sy2=2*scale/h,sz=-1/(radius*4);const matrix=new Float32Array([right[0]*sx,up[0]*sy2,depth[0]*sz,0,right[1]*sx,up[1]*sy2,depth[1]*sz,0,right[2]*sx,up[2]*sy2,depth[2]*sz,0,-dot(center,right)*sx+this.pan[0]*2/w,-dot(center,up)*sy2-this.pan[1]*2/h,-dot(center,depth)*sz,1]);gl.uniformMatrix4fv(this.locations.matrix,false,matrix);gl.uniform3fv(this.locations.offset,[0,0,0]);
@@ -104,7 +119,7 @@ export class Viewport {
    canvas.dataset.renderer='webgl';
   }else if(this.ctx){
    const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=this.controls.dark?'#0e171f':'#f2f5f6';ctx.fillRect(0,0,w,h);const faces=[];
-   for(const item of visible){if(item.lines)continue;const stride=Math.max(1,Math.ceil(item.count/3/12000));for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3))));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3})}}
+   for(const item of visible){if(item.lines)continue;const stride=Math.max(1,Math.ceil(item.count/3/Math.max(100,12000/visible.length)));for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3))));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3})}}
    if(tool)for(const item of this.toolBuffers)for(let i=0;i<item.count;i+=3){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+cursor[k])));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3,tool:true})}
    faces.sort((a,b)=>a.z-b.z);for(const face of faces){ctx.beginPath();face.p.forEach((v,i)=>i?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]));ctx.closePath();ctx.fillStyle=`rgb(${face.color.map(v=>Math.round(v*200)).join(',')})`;if(wireframe&&!face.tool)ctx.stroke();else ctx.fill()}
    for(const item of visible.filter(x=>x.lines)){const line=new Path2D();let count=item.count;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${item.color.map(v=>Math.round(v*255)).join(',')})`;ctx.stroke(line)}

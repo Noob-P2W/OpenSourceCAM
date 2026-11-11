@@ -1,9 +1,11 @@
+import {attachHelp,initEyes,installStaticHelp} from './help.js';
 import {BUILD_ID} from './build.js';
 import {Viewport} from './viewport.js';
 import {initShell} from './shell.js';
 import {confirmAction} from './dialogs.js';
 let shell,presentation={};
 const $=id=>document.getElementById(id);
+initEyes();installStaticHelp();
 function setPane(pane){document.body.dataset.pane=pane;shell?.navigate(pane);requestAnimationFrame(()=>draw())}
 document.querySelectorAll('[data-pane-target]').forEach(button=>button.onclick=()=>{setPane(button.dataset.paneTarget);window.scrollTo({top:0,behavior:'instant'})});
 $('preview-toggle').onclick=()=>{const visible=document.body.dataset.preview!=='true';document.body.dataset.preview=String(visible);$('preview-toggle').textContent=visible?'Hide preview':'Show preview';$('preview-toggle').setAttribute('aria-pressed',String(visible));requestAnimationFrame(()=>draw())};
@@ -53,7 +55,7 @@ async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();persist();throw e}}
  lastState=projectJSON();revision++;viewport.controls.hiddenOperations?.clear();path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();persist();historyButtons();draw()
 }
-function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);return input}
+function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);attachHelp(input,key,label);return input}
 function render(){if(!project)return;selected=Math.max(0,Math.min(selected,project.operations.length-1));$('title').textContent=project.name;$('title').title=project.name;renderSetup();renderExtras();refreshEditor();shell?.render();draw()}
 async function adopt(p){project=p;serializedProject=null;selected=0;await changed();render()}
 function download(text,name){const url=URL.createObjectURL(new Blob([text],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)}
@@ -67,7 +69,7 @@ $('add').onclick=()=>task(async()=>{selected=project.operations.length;await ses
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
 $('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;resetPlaybackTools();if(p.moves.length)queuePlaybackTool(p.moves[0].operation);simulation=null;clearStockRequests();$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;if($('show-simulation').checked)requestStockPreview(true);draw();status('Paths generated and checked')});
 $('export').onclick=()=>task(async()=>{const gcode=await call('export');download(gcode,filename('.nc'));status('G-code generated from current project and downloaded')});
-$('simulate').onclick=()=>task(async()=>{shell.close('inspect-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value)});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value)};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`Sampled stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
+$('simulate').onclick=()=>task(async()=>{shell.close('inspect-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value),budget:simulationBudget()});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value),budget:simulationBudget()};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`Sampled stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
 for(const action of ['plan','surface'])$(action).onclick=()=>task(async()=>{
  shell.close('planning-dialog');status('Planning model-linked operations…');
  const options={fit_stock:!$('use-setup-stock').checked,xy_margin:$('plan-margin').valueAsNumber,top_allowance:$('plan-top').valueAsNumber,backing:$('plan-backing').valueAsNumber,replace_operations:$('replace-operations').checked,face:$('plan-face').checked,outside:$('plan-outside').checked,cavities:$('plan-cavities').checked};
@@ -138,13 +140,14 @@ function requestStockPreview(reset=false){
  $('stock-playback-state').textContent=`Stock ${((simulation?.summary.progress||0)*100).toFixed(1)}% · updating`;
  pumpStockPreview();
 }
+function simulationBudget(){const preference=shell.prefs().simulationBudget||'auto';if(preference!=='auto')return Number(preference);return (navigator.deviceMemory||0)>=4&&(navigator.hardwareConcurrency||0)>=4?100000000:50000000}
 function pumpStockPreview(){
  if(stockRequest||!stockWanted)return;
  if(busy){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},100);return}
- const wait=Math.max(0,250-(performance.now()-lastStockRequest));
+ const wait=Math.max(0,100-(performance.now()-lastStockRequest));
  if(wait){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},wait);return}
  const request=stockWanted;stockWanted=null;stockRequest=true;lastStockRequest=performance.now();
- engineCall('stock-preview',{progress:request.progress,resolution:request.resolution}).then(value=>{
+ engineCall('stock-preview',{progress:request.progress,resolution:request.resolution,epoch:request.epoch,budget:simulationBudget()}).then(value=>{
   if(request.epoch!==stockEpoch||request.revision!==revision||request.path!==path||!$('show-simulation').checked)return;
   if(request.progress>Number($('progress').value)/100+1e-9)return;
   simulation={...value,resolution:request.resolution,preview:true};if(request.progress===0&&request.resolution>32)path.preview_initial=simulation;
@@ -181,7 +184,7 @@ $('play').onclick=()=>{
 };
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pausePlayback()});
 $('nc-preview').onclick=()=>task(async()=>{shell.close('inspect-dialog');const text=await call('export');shell.openInspect();$('nc-code').textContent=text.length>100000?text.slice(0,100000)+'\n… Preview truncated. Download G-code for the complete program.':text;status('G-code preview checked against the current project')});
-$('save-stock').onclick=()=>task(async()=>{if(!simulation)throw Error('Run stock simulation first.');const data=await call('stock-obj',{progress:simulation.summary.progress,resolution:simulation.resolution});download(data,filename('-stock.obj'));status('Sampled remaining-stock mesh downloaded')});
+$('save-stock').onclick=()=>task(async()=>{if(!simulation)throw Error('Run stock simulation first.');const data=await call('stock-obj',{progress:simulation.summary.progress,resolution:simulation.resolution,budget:simulationBudget()});download(data,filename('-stock.obj'));status('Sampled remaining-stock mesh downloaded')});
 $('save-machine').onclick=()=>task(async()=>{download(await call('machine-profile'),filename('.cam-machine.json'));status('CNC profile downloaded')});
 let installEvent;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvent=e;$('install').hidden=false});$('install').onclick=async()=>{await installEvent?.prompt();$('install').hidden=true};
 function connection(){$('connection').textContent=navigator.onLine?'Local workspace':'Offline workspace'}window.addEventListener('online',connection);window.addEventListener('offline',connection);connection();

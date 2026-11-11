@@ -1,3 +1,4 @@
+import {visibility} from './test-ui.mjs';
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {ready,section,closeDialogs,state,generate,acceptNextConfirmation} from './test-ui.mjs';
@@ -55,9 +56,10 @@ try{
   await seek(0);assert.match(await page.locator('#playback-tool-state').textContent(),/T1.*Measured 4 mm end mill/);
   assert.ok(Number(await canvas.getAttribute('data-tool-triangles'))>200,'Draw the assembly surface, not a point');
   assert.ok(await visibleToolPixels(page)>100,'The actual tool must occupy visibly more than a cursor dot');
-  await page.locator('#show-simulation').setChecked(true);await page.locator('#stock-playback-state').filter({hasText:'playback preview'}).waitFor();
-  await page.locator('#playback-speed').selectOption('128');await page.locator('#play').click();await page.waitForTimeout(700);
+  await visibility(page,'show-simulation',true);await page.locator('#stock-playback-state').filter({hasText:'playback preview'}).waitFor();
+  const sceneBuilds=await canvas.getAttribute('data-scene-builds');await page.locator('#playback-speed').selectOption('128');await page.locator('#play').click();await page.waitForTimeout(700);
   const synchronized=await canvas.evaluate(canvas=>{const percent=Number(canvas.dataset.stockProgress),time=percent/100*window.generatedPath.seconds,path=window.generatedPath,move=path.moves.find(m=>m.end_seconds>time)||path.moves.at(-1),f=Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)));return {display:Number(canvas.dataset.displayProgress),stock:percent,actual:canvas.dataset.toolTip.split(',').map(Number),expected:move.from.map((v,i)=>v+(move.to[i]-v)*f)}});
+  assert.equal(await canvas.getAttribute('data-scene-builds'),sceneBuilds,'Stock updates must retain model, path and reference GPU buffers');
   assert.ok(Math.abs(synchronized.display-synchronized.stock)<1e-8,'The cutter must never outrun its displayed stock snapshot');for(let i=0;i<3;i++)assert.ok(Math.abs(synchronized.actual[i]-synchronized.expected[i])<1e-6,'Rendered tool tip must match the processed stock time');
   await page.locator('#play').click();await page.locator('#playback-speed').selectOption('1');
   assert.equal(await page.locator('.playback-controls').evaluate(root=>{const host=root.closest('.viewer').getBoundingClientRect();return [...root.children].every(el=>{const rect=el.getBoundingClientRect();return rect.left>=host.left&&rect.right<=host.right+1&&el.scrollWidth<=el.clientWidth+1})}),true,'All playback controls must fit the device width');
@@ -68,7 +70,7 @@ try{
   await page.locator('#selected-path').setChecked(true);await seek(0);await page.locator('#progress').evaluate((input,value)=>{input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}))},await page.evaluate(()=>{const p=window.generatedPath,m=p.moves.find(m=>m.operation===1);return (m.start_seconds+m.end_seconds)/2/p.seconds*100}));
   await page.waitForFunction(()=>document.querySelector('#canvas').dataset.toolTriangles==='0');assert.equal(await page.locator('#playback-tool-state').textContent(),'');await page.locator('#selected-path').setChecked(false);await seek(1);
   if(!software){
-   await canvas.evaluate(canvas=>{window.toolContext=canvas.getContext('webgl').getExtension('WEBGL_lose_context');window.toolContext.loseContext()});await page.locator('#status').filter({hasText:'3D graphics paused'}).waitFor();await canvas.evaluate(()=>window.toolContext.restoreContext());await page.locator('#status').filter({hasText:'3D view restored'}).waitFor();await page.waitForFunction(()=>Number(document.querySelector('#canvas').dataset.toolTriangles)>200);assert.equal(await canvas.getAttribute('data-tool-id'),'2');assert.ok(await visibleToolPixels(page)>100,'Restored graphics must actually draw the tool');
+   const retainedStock=await canvas.getAttribute('data-stock-triangles');await canvas.evaluate(canvas=>{window.toolContext=canvas.getContext('webgl').getExtension('WEBGL_lose_context');window.toolContext.loseContext()});await page.locator('#status').filter({hasText:'3D graphics paused'}).waitFor();await canvas.evaluate(()=>window.toolContext.restoreContext());await page.locator('#status').filter({hasText:'3D view restored'}).waitFor();await page.waitForFunction(()=>Number(document.querySelector('#canvas').dataset.toolTriangles)>200);assert.equal(await canvas.getAttribute('data-tool-id'),'2');assert.equal(await canvas.getAttribute('data-stock-triangles'),retainedStock,'Graphics recovery must restore every retained stock strip');assert.ok(await visibleToolPixels(page)>100,'Restored graphics must actually draw the tool');
   }
   assert.deepEqual(errors,[]);console.log(`PASS: ${width}px ${software?'software':'WebGL'} library assemblies, holder, tip alignment, visible tool pixels, tool changes, stock playback, bounded reuse, filtering and graphics recovery`);await context.close();
  }

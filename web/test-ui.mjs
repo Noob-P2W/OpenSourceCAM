@@ -15,3 +15,5 @@ export async function state(page){await idle(page);return page.evaluate(()=>JSON
 export async function importModel(page,file,role='part'){await section(page,'import');await page.locator('#import-role').selectOption(role);void acceptNextConfirmation(page);await page.locator('#model').setInputFiles(file);await page.locator('#status').filter({hasText:'Model imported'}).waitFor({timeout:120000});}
 
 export function acceptNextConfirmation(page){const accepted=page.locator('#app-confirm [data-confirm=true]').click({timeout:15000});accepted.catch(()=>{});return accepted;}
+
+export async function visibility(page,id,value){const button=page.locator('#'+id);if((await button.getAttribute('aria-pressed')==='true')!==value)await button.click();}

@@ -59,10 +59,17 @@ newly created tool.
 
 Detailed inspection offers up to **512 cells** on the stock's longest side. Live
 playback has its own **Detail** selector; Quick/32 remains the default. Larger live
-snapshots are throttled more heavily, with one calculation in flight. Seeking and
-rewinding discard stale results at every resolution. The detailed simulation is
-bounded to 512² cells, 50 million removal evaluations and 2 million generated
+updates retain previously removed stock and replace only changed mesh strips,
+with at most ten requests per second and one calculation in flight. Seeking and
+rewinding reset stale incremental state at every resolution. The detailed simulation is
+bounded to 512² cells and 2 million generated
 triangles above 192 cells. Lower detail retains the previous 100,000-triangle cap.
-These are explicit display budgets; import and machining validation are unchanged.
+**Settings → Simulation calculation budget** selects Auto, Standard (50 million),
+Extended (100 million) or High (200 million) expensive removal evaluations per
+update or inspection. Auto chooses 100 million if the browser reports at least
+4 GiB memory and four logical processors; browsers without those hints use
+50 million. This does not measure current free memory. A separate bounded traversal
+guard also remains. The choice also applies to remaining-stock OBJ export.
+These are display budgets; import and machining validation are unchanged.
 High settings can take longer and need more memory; cancellation remains available
 for detailed inspection.

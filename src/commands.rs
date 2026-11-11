@@ -60,12 +60,87 @@ pub fn path_value(path: &cam::Toolpath) -> Value {
 /// Geometry, cutter footprints and partial-move removal remain in the shared core.
 pub struct PlaybackPreview {
     pub path: cam::Toolpath,
+    frame: std::cell::RefCell<Option<FrameCache>>,
+}
+struct FrameCache {
+    grid: stock::Grid,
+    resolution: usize,
+    epoch: u32,
+    triangles: Vec<usize>,
+}
+pub struct StockFrame {
+    pub metadata: Value,
+    pub vertices: Vec<f32>,
 }
 impl PlaybackPreview {
     pub fn new(project: &Project) -> Result<Self, String> {
         Ok(Self {
             path: post::checked_geometry_path(project)?,
+            frame: std::cell::RefCell::new(None),
         })
+    }
+    pub fn frame(
+        &self,
+        project: &Project,
+        progress: f64,
+        resolution: usize,
+        epoch: u32,
+        limit: u64,
+    ) -> Result<StockFrame, String> {
+        if ![50_000_000, 100_000_000, 200_000_000].contains(&limit) {
+            return Err("Choose a supported simulation calculation budget".into());
+        }
+        let mut cache = self.frame.borrow_mut().take();
+        let reset = cache.as_ref().is_none_or(|c| {
+            c.epoch != epoch || c.resolution != resolution || progress < c.grid.progress
+        });
+        if reset {
+            cache = Some(FrameCache {
+                grid: stock::Grid::new(project, resolution)?,
+                resolution,
+                epoch,
+                triangles: vec![0; resolution.div_ceil(8)],
+            });
+        }
+        let mut state = cache.unwrap();
+        let cancel = AtomicBool::new(false);
+        state.grid.advance(&self.path, progress, limit, &cancel)?;
+        let grid = &mut state.grid;
+        let mut vertices = Vec::<f32>::new();
+        let mut patches = Vec::new();
+        for strip in 0..grid.ny.div_ceil(8) {
+            let rows = strip * 8..((strip + 1) * 8).min(grid.ny);
+            if !grid.dirty[rows.clone()].iter().any(|v| *v) {
+                continue;
+            }
+            let max = if resolution <= 192 {
+                crate::import::MAX_TRIANGLES
+            } else {
+                2_000_000
+            };
+            let mesh = grid.mesh_rows(rows.clone(), max, &cancel)?;
+            state.triangles[strip] = mesh.triangles.len();
+            if state.triangles.iter().sum::<usize>() > max {
+                return Err("Stock preview surface exceeds its triangle budget".into());
+            }
+            let offset = vertices.len();
+            for t in &mesh.triangles {
+                let p = t.map(|i| mesh.vertices[i as usize]);
+                let raw = crate::import::normal(p);
+                let length = raw.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-20);
+                let n = raw.map(|v| (v / length) as f32);
+                for point in p {
+                    vertices.extend(point.map(|v| v as f32));
+                    vertices.extend(n);
+                }
+            }
+            patches.push(json!({"strip":strip,"offset":offset,"length":vertices.len()-offset}));
+            grid.dirty[rows].fill(false);
+        }
+        let (removed, remaining) = grid.volumes();
+        let metadata = json!({"reset":reset,"epoch":epoch,"resolution":resolution,"patches":patches,"evaluations":grid.evaluations,"visited_cells":grid.visited,"summary":{"resolution":[grid.nx,grid.ny],"cell_size":[grid.dx,grid.dy],"progress":progress,"removed_volume_mm3":removed,"remaining_volume_mm3":remaining}});
+        *self.frame.borrow_mut() = Some(state);
+        Ok(StockFrame { metadata, vertices })
     }
     pub fn snapshot(
         &self,
@@ -258,25 +333,43 @@ pub fn simulate_project(
     progress: f64,
     resolution: usize,
 ) -> Result<Value, String> {
+    simulate_project_budget(project, progress, resolution, 50_000_000)
+}
+pub fn simulate_project_budget(
+    project: &Project,
+    progress: f64,
+    resolution: usize,
+    limit: u64,
+) -> Result<Value, String> {
     let path = post::checked_geometry_path(project)?;
-    let sim = stock::simulate(
+    let sim = stock::simulate_budget(
         project,
         &path,
         progress,
         resolution,
         &AtomicBool::new(false),
+        limit,
     )?;
     Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
 }
 
 pub fn stock_obj(project: &Project, progress: f64, resolution: usize) -> Result<String, String> {
+    stock_obj_budget(project, progress, resolution, 50_000_000)
+}
+pub fn stock_obj_budget(
+    project: &Project,
+    progress: f64,
+    resolution: usize,
+    limit: u64,
+) -> Result<String, String> {
     let path = post::checked_geometry_path(project)?;
-    let simulation = stock::simulate(
+    let simulation = stock::simulate_budget(
         project,
         &path,
         progress,
         resolution,
         &AtomicBool::new(false),
+        limit,
     )?;
     stock::obj_data(&simulation)
 }
@@ -307,11 +400,72 @@ pub fn plan_project(
         _ => Err("Choose a stock or surface planner".into()),
     }
 }
+/// Reference values for unset editor fields; this query never edits the draft.
+pub fn operation_defaults(
+    project: &Project,
+    op: &crate::model::Operation,
+) -> Result<Value, String> {
+    let mut base = op.clone();
+    base.model_link = None;
+    base.settings = Default::default();
+    let record = project.library_tool(Some(op))?;
+    let tool = project.operation_tool(&base).or_else(|_| {
+        record.map_or_else(
+            || Ok(project.tool.clone()),
+            |t| t.cutting_tool(op.preset_id),
+        )
+    })?;
+    let mut current = op.clone();
+    current.model_link = None;
+    current.settings.feed = None;
+    let inherited_feed = project
+        .operation_tool(&current)
+        .map_or(tool.feed, |t| t.feed);
+    current.settings.feed = op.settings.feed;
+    current.settings.plunge = None;
+    let inherited_plunge = project
+        .operation_tool(&current)
+        .map_or(tool.plunge, |t| t.plunge);
+    let clearance = op.settings.clearance.unwrap_or(project.clearance);
+    Ok(
+        json!({"feed":inherited_feed,"plunge":inherited_plunge,"spindle_rpm":tool.spindle_rpm,"step_down":tool.step_down,"step_over_percent":tool.step_over*100.,"finish_feed":op.settings.feed.unwrap_or(inherited_feed),"clearance":project.clearance,"retract":clearance,"start_depth":0.,"surface_step":0.5,"path_tolerance":0.01,"peck_clearance":0.254,"tool_name":tool.name,"preset_name":record.and_then(|r|r.preset(op.preset_id).ok()).map(|p|p.name.clone())}),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     fn sample() -> String {
         serde_json::to_string(&Project::default()).unwrap()
+    }
+    #[test]
+    fn inherited_drilling_references_follow_overrides_without_editing_the_project() {
+        use crate::tool_library::{FeedMode, LibraryTool, ToolKind};
+        let mut p = Project::default();
+        p.ensure_tool_library();
+        let mut drill = LibraryTool::new(1, 1, ToolKind::Drill);
+        drill.presets[0].feed_mode = FeedMode::PerRevolution;
+        drill.presets[0]
+            .values
+            .insert("feed_per_revolution".into(), 0.03);
+        p.tool_library.tools = vec![drill];
+        let op = &mut p.operations[0];
+        op.strategy = crate::model::Strategy::DrillOnce;
+        op.settings.spindle_rpm = Some(2000);
+        op.settings.clearance = Some(8.);
+        let before = serde_json::to_string(&p).unwrap();
+        let refs = operation_defaults(&p, &p.operations[0]).unwrap();
+        assert_eq!(refs["feed"], 60.);
+        assert_eq!(refs["plunge"], 60.);
+        assert_eq!(refs["retract"], 8.);
+        assert_eq!(serde_json::to_string(&p).unwrap(), before);
+        let mut op = p.operations[0].clone();
+        op.settings.feed = Some(70.);
+        op.settings.plunge = Some(30.);
+        let refs = operation_defaults(&p, &op).unwrap();
+        assert_eq!(refs["feed"], 60.);
+        assert_eq!(refs["plunge"], 70.);
+        assert_eq!(refs["finish_feed"], 70.);
     }
     #[test]
     fn malformed_commands_and_projects_are_errors() {

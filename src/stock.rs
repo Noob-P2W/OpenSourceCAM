@@ -83,7 +83,9 @@ pub fn simulate(
     resolution: usize,
     cancel: &AtomicBool,
 ) -> Result<Simulation, String> {
-    calculate(project, path, progress, resolution, cancel, true)
+    calculate(
+        project, path, progress, resolution, cancel, true, 50_000_000,
+    )
 }
 /// Display snapshots use an already preflighted path and omit repeated target
 /// recognition/collision reports. Material removal and resource limits are shared.
@@ -94,7 +96,22 @@ pub fn preview(
     resolution: usize,
     cancel: &AtomicBool,
 ) -> Result<Simulation, String> {
-    calculate(project, path, progress, resolution, cancel, false)
+    calculate(
+        project, path, progress, resolution, cancel, false, 50_000_000,
+    )
+}
+pub fn simulate_budget(
+    project: &Project,
+    path: &Toolpath,
+    progress: f64,
+    resolution: usize,
+    cancel: &AtomicBool,
+    limit: u64,
+) -> Result<Simulation, String> {
+    if ![50_000_000, 100_000_000, 200_000_000].contains(&limit) {
+        return Err("Choose a supported simulation calculation budget".into());
+    }
+    calculate(project, path, progress, resolution, cancel, true, limit)
 }
 fn calculate(
     project: &Project,
@@ -103,6 +120,7 @@ fn calculate(
     resolution: usize,
     cancel: &AtomicBool,
     verify: bool,
+    limit: u64,
 ) -> Result<Simulation, String> {
     if !(16..=512).contains(&resolution)
         || !progress.is_finite()
@@ -111,99 +129,17 @@ fn calculate(
         return Err("Stock preview needs 16–512 cells on its longest side and a progress fraction from 0 to 1".into());
     }
     crate::cam::validate_setup(project)?;
+    let mut grid = Grid::new(project, resolution)?;
+    grid.advance(path, progress, limit, cancel)?;
     let s = &project.stock;
-    let longest = s.width.max(s.height);
-    let nx = (s.width / longest * resolution as f64).ceil().max(1.0) as usize;
-    let ny = (s.height / longest * resolution as f64).ceil().max(1.0) as usize;
-    let dx = s.width / nx as f64;
-    let dy = s.height / ny as f64;
-    let bottom = -s.thickness;
-    let mut floors = vec![bottom; nx * ny];
-    let mut heights = vec![bottom; nx * ny];
-    for y in 0..ny {
-        for x in 0..nx {
-            if let Some([lo, hi]) = s.column((x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy) {
-                floors[y * nx + x] = lo;
-                heights[y * nx + x] = hi;
-            }
-        }
-    }
-    let initial = heights.clone();
-    let mut work = 0u64;
-    let until = path.estimated_seconds * progress;
-    let mut elapsed = 0.0;
-    let mut operation = None;
-    let mut radius = 0.0;
-    let mut point_angle = None;
-    let mut ball = false;
-    for movement in &path.moves {
-        if cancel.load(Ordering::Relaxed) {
-            return Err("Stock preview cancelled".into());
-        }
-        if elapsed >= until {
-            break;
-        }
-        if operation != Some(movement.operation) {
-            let op = project
-                .operations
-                .get(movement.operation)
-                .ok_or("Invalid toolpath operation index")?;
-            let tool = project.operation_tool(op)?;
-            radius = tool.diameter / 2.0;
-            point_angle = None;
-            ball = false;
-            if let Some(record) = project.library_tool(Some(op))? {
-                ball = record.kind == ToolKind::BallEndMill;
-                if record.kind == ToolKind::Drill {
-                    point_angle = Some((record.dimension("point_angle").to_radians() / 2.0).tan());
-                }
-            } else if matches!(
-                project.machine.as_ref().map(|m| &m.tooling),
-                Some(crate::machine::Tooling::Milling {
-                    kind: crate::machine::CutterKind::Drill,
-                    ..
-                })
-            ) {
-                return Err("Stock verification of a drill needs a tool-library definition with its point angle".into());
-            }
-            operation = Some(movement.operation);
-        }
-        let duration = movement.from.distance(movement.to) / movement.feed * 60.0;
-        let fraction = ((until - elapsed) / duration).clamp(0.0, 1.0);
-        elapsed += duration;
-        if movement.motion == Motion::Rapid {
-            continue;
-        }
-        let from = movement.from;
-        let to = Point3 {
-            x: from.x + (movement.to.x - from.x) * fraction,
-            y: from.y + (movement.to.y - from.y) * fraction,
-            z: from.z + (movement.to.z - from.z) * fraction,
-        };
-        let minx = ((from.x.min(to.x) - radius) / dx - 0.5).ceil().max(0.0) as usize;
-        let maxx = ((from.x.max(to.x) + radius) / dx - 0.5)
-            .floor()
-            .min((nx - 1) as f64);
-        let miny = ((from.y.min(to.y) - radius) / dy - 0.5).ceil().max(0.0) as usize;
-        let maxy = ((from.y.max(to.y) + radius) / dy - 0.5)
-            .floor()
-            .min((ny - 1) as f64);
-        if maxx < minx as f64 || maxy < miny as f64 {
-            continue;
-        }
-        work += (maxx as usize + 1 - minx) as u64 * (maxy as usize + 1 - miny) as u64;
-        if work > 50_000_000 {
-            return Err("Stock preview exceeds 50 million cell evaluations; reduce preview resolution or split the job".into());
-        }
-        for y in miny..=maxy as usize {
-            for x in minx..=maxx as usize {
-                let p = [(x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy];
-                if let Some(height) = swept_height(p, from, to, radius, ball, point_angle) {
-                    heights[y * nx + x] = heights[y * nx + x].min(height.max(floors[y * nx + x]));
-                }
-            }
-        }
-    }
+    let nx = grid.nx;
+    let ny = grid.ny;
+    let dx = grid.dx;
+    let dy = grid.dy;
+    let bottom = grid.bottom;
+    let heights = &grid.heights;
+    let floors = &grid.floors;
+    let initial = &grid.initial;
     let target = if verify {
         project
             .part
@@ -256,107 +192,15 @@ fn calculate(
         }
     }
     let area = dx * dy;
-    let mut mesh = Mesh {
-        vertices: Vec::new(),
-        triangles: Vec::new(),
-    };
-    let mut quad = |points: [[f64; 3]; 4]| -> Result<(), String> {
-        if mesh.triangles.len() + 2
-            > if resolution <= 192 {
-                crate::import::MAX_TRIANGLES
-            } else {
-                2_000_000
-            }
-        {
-            return Err(
-                "Stock preview surface exceeds its triangle budget; reduce preview resolution"
-                    .into(),
-            );
-        }
-        let id = mesh.vertices.len() as u32;
-        mesh.vertices.extend(points);
-        mesh.triangles
-            .extend([[id, id + 1, id + 2], [id, id + 2, id + 3]]);
-        Ok(())
-    };
-    // Merge coplanar runs in X so real 2.5D results stay compact.
-    for y in 0..ny {
-        if cancel.load(Ordering::Relaxed) {
-            return Err("Stock preview cancelled".into());
-        }
-        let mut x = 0;
-        while x < nx {
-            let start = x;
-            let h = heights[y * nx + x];
-            let floor = floors[y * nx + x];
-            while x < nx && heights[y * nx + x] == h && floors[y * nx + x] == floor {
-                x += 1;
-            }
-            if h > floor + 1e-9 {
-                let a = start as f64 * dx;
-                let b = x as f64 * dx;
-                let c = y as f64 * dy;
-                quad([[a, c, h], [b, c, h], [b, c + dy, h], [a, c + dy, h]])?;
-                quad([
-                    [a, c + dy, floor],
-                    [b, c + dy, floor],
-                    [b, c, floor],
-                    [a, c, floor],
-                ])?;
-            }
-        }
-        for x in 0..nx {
-            let h = heights[y * nx + x];
-            let floor = floors[y * nx + x];
-            if h <= floor + 1e-9 {
-                continue;
-            }
-            let a = x as f64 * dx;
-            let b = y as f64 * dy;
-            let neighbors = [
-                (
-                    x.checked_sub(1).map(|x| y * nx + x),
-                    [[a, b, h], [a, b + dy, h], [a, b + dy, 0.], [a, b, 0.]],
-                ),
-                (
-                    (x + 1 < nx).then_some(y * nx + x + 1),
-                    [
-                        [a + dx, b + dy, h],
-                        [a + dx, b, h],
-                        [a + dx, b, 0.],
-                        [a + dx, b + dy, 0.],
-                    ],
-                ),
-                (
-                    y.checked_sub(1).map(|y| y * nx + x),
-                    [[a + dx, b, h], [a, b, h], [a, b, 0.], [a + dx, b, 0.]],
-                ),
-                (
-                    (y + 1 < ny).then_some((y + 1) * nx + x),
-                    [
-                        [a, b + dy, h],
-                        [a + dx, b + dy, h],
-                        [a + dx, b + dy, 0.],
-                        [a, b + dy, 0.],
-                    ],
-                ),
-            ];
-            for (neighbor, points) in neighbors {
-                let lo = neighbor.map_or(bottom, |i| floors[i]);
-                let hi = neighbor.map_or(bottom, |i| heights[i]);
-                for (z0, z1) in [(floor, h.min(lo)), (floor.max(hi), h)] {
-                    if z1 > z0 + 1e-9 {
-                        let mut p = points;
-                        p[0][2] = z1;
-                        p[1][2] = z1;
-                        p[2][2] = z0;
-                        p[3][2] = z0;
-                        quad(p)?
-                    }
-                }
-            }
-        }
-    }
+    let mesh = grid.mesh_rows(
+        0..ny,
+        if resolution <= 192 {
+            crate::import::MAX_TRIANGLES
+        } else {
+            2_000_000
+        },
+        cancel,
+    )?;
     let mut notes=vec!["Cell-centre heightfield approximation; small features and exact boundary shapes depend on preview resolution. This is not a full solid-removal certification.".into(),"Machine bodies and spindle kinematics are not collision checked. Fixture checks use conservative cylindrical cutting-tool, shaft and defined-holder envelopes, not exact tool solids.".into()];
     if !comparable {
         notes.push("Target comparison requires supported 2.5D geometry fully inside the blank; only stock removal is shown for this target.".into());
@@ -372,12 +216,12 @@ fn calculate(
     notes.push("Backing is the nominal blank allowance below the part. Local drilling clearance can remove backing without gouging the target part. Separate enclosed fixture shells are checked as a conservative union.".into());
     let remaining = heights
         .iter()
-        .zip(&floors)
+        .zip(floors)
         .map(|(h, f)| (h - f).max(0.) * area)
         .sum();
     let removed = initial
         .iter()
-        .zip(&heights)
+        .zip(heights)
         .map(|(a, h)| (a - h).max(0.) * area)
         .sum();
     let summary = Summary {
@@ -408,7 +252,7 @@ fn calculate(
             mesh,
             cad_source: None,
         }),
-        heights,
+        heights: grid.heights,
     })
 }
 
@@ -499,9 +343,424 @@ pub fn export_obj(simulation: &Simulation, file: &Path) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+#[derive(Clone, Copy)]
+struct Footprint {
+    radius: f64,
+    ball: bool,
+    cone: Option<f64>,
+}
+pub(crate) struct Grid {
+    pub nx: usize,
+    pub ny: usize,
+    pub dx: f64,
+    pub dy: f64,
+    pub bottom: f64,
+    pub heights: Vec<f64>,
+    floors: Vec<f64>,
+    initial: Vec<f64>,
+    tools: Vec<Footprint>,
+    pub progress: f64,
+    time: f64,
+    index: usize,
+    elapsed: f64,
+    pub evaluations: u64,
+    pub visited: u64,
+    pub dirty: Vec<bool>,
+}
+impl Grid {
+    pub fn new(project: &Project, resolution: usize) -> Result<Self, String> {
+        if !(16..=512).contains(&resolution) {
+            return Err("Stock preview needs 16–512 cells on its longest side".into());
+        }
+        let s = &project.stock;
+        let longest = s.width.max(s.height);
+        let nx = (s.width / longest * resolution as f64).ceil().max(1.) as usize;
+        let ny = (s.height / longest * resolution as f64).ceil().max(1.) as usize;
+        let dx = s.width / nx as f64;
+        let dy = s.height / ny as f64;
+        let bottom = -s.thickness;
+        let mut floors = vec![bottom; nx * ny];
+        let mut heights = floors.clone();
+        for y in 0..ny {
+            for x in 0..nx {
+                if let Some([lo, hi]) = s.column((x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy) {
+                    floors[y * nx + x] = lo;
+                    heights[y * nx + x] = hi;
+                }
+            }
+        }
+        let mut tools = Vec::new();
+        for op in &project.operations {
+            if !op.enabled {
+                tools.push(Footprint {
+                    radius: 0.,
+                    ball: false,
+                    cone: None,
+                });
+                continue;
+            }
+            let tool = project.operation_tool(op)?;
+            let record = project.library_tool(Some(op))?;
+            if record.is_none()
+                && matches!(
+                    project.machine.as_ref().map(|m| &m.tooling),
+                    Some(crate::machine::Tooling::Milling {
+                        kind: crate::machine::CutterKind::Drill,
+                        ..
+                    })
+                )
+            {
+                return Err("Stock verification of a drill needs a tool-library definition with its point angle".into());
+            }
+            tools.push(Footprint {
+                radius: tool.diameter / 2.,
+                ball: record.is_some_and(|r| r.kind == ToolKind::BallEndMill),
+                cone: record
+                    .filter(|r| r.kind == ToolKind::Drill)
+                    .map(|r| (r.dimension("point_angle").to_radians() / 2.).tan()),
+            });
+        }
+        Ok(Self {
+            nx,
+            ny,
+            dx,
+            dy,
+            bottom,
+            initial: heights.clone(),
+            heights,
+            floors,
+            tools,
+            progress: 0.,
+            time: 0.,
+            index: 0,
+            elapsed: 0.,
+            evaluations: 0,
+            visited: 0,
+            dirty: vec![true; ny],
+        })
+    }
+    pub fn advance(
+        &mut self,
+        path: &Toolpath,
+        progress: f64,
+        limit: u64,
+        cancel: &AtomicBool,
+    ) -> Result<(), String> {
+        if !progress.is_finite() || !(0. ..=1.).contains(&progress) || progress < self.progress {
+            return Err("Invalid forward stock progress".into());
+        }
+        self.evaluations = 0;
+        self.visited = 0;
+        let until = path.estimated_seconds * progress;
+        while self.index < path.moves.len() && self.elapsed < until {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Stock preview cancelled".into());
+            }
+            let m = &path.moves[self.index];
+            let duration = m.from.distance(m.to) / m.feed * 60.;
+            let end = self.elapsed + duration;
+            if m.motion != Motion::Rapid && duration > 0. {
+                let a = ((self.time - self.elapsed) / duration).clamp(0., 1.);
+                let b = ((until - self.elapsed) / duration).clamp(0., 1.);
+                if b > a {
+                    let interpolate = |t: f64| Point3 {
+                        x: m.from.x + (m.to.x - m.from.x) * t,
+                        y: m.from.y + (m.to.y - m.from.y) * t,
+                        z: m.from.z + (m.to.z - m.from.z) * t,
+                    };
+                    let tool = *self
+                        .tools
+                        .get(m.operation)
+                        .ok_or("Invalid toolpath operation index")?;
+                    self.cut(interpolate(a), interpolate(b), tool, limit, cancel)?;
+                }
+            }
+            if end > until {
+                break;
+            }
+            self.index += 1;
+            self.elapsed = end;
+        }
+        self.time = until;
+        self.progress = progress;
+        Ok(())
+    }
+    fn cut(
+        &mut self,
+        a: Point3,
+        b: Point3,
+        tool: Footprint,
+        limit: u64,
+        cancel: &AtomicBool,
+    ) -> Result<(), String> {
+        let r = tool.radius;
+        let y0 = (((a.y.min(b.y) - r) / self.dy - 0.5).ceil().max(0.) as usize).min(self.ny);
+        let y1 = (((a.y.max(b.y) + r) / self.dy - 0.5).floor()).min((self.ny - 1) as f64);
+        if y1 < y0 as f64 {
+            return Ok(());
+        }
+        for y in y0..=y1 as usize {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Stock preview cancelled".into());
+            }
+            let cy = (y as f64 + 0.5) * self.dy;
+            let Some([lo, hi]) = capsule_row(a, b, r, cy) else {
+                continue;
+            };
+            let x0 = (((lo / self.dx - 0.5).ceil().max(0.)) as usize).min(self.nx);
+            let x1 = (hi / self.dx - 0.5).floor().min((self.nx - 1) as f64);
+            if x1 < x0 as f64 {
+                continue;
+            }
+            for x in x0..=x1 as usize {
+                self.visited += 1;
+                if self.visited > limit * 4 {
+                    return Err("Stock preview exhausted its traversal budget; use a higher calculation budget or smaller update".into());
+                }
+                let id = y * self.nx + x;
+                if self.heights[id] <= a.z.min(b.z).max(self.floors[id]) {
+                    continue;
+                }
+                self.evaluations += 1;
+                if self.evaluations > limit {
+                    return Err("Stock preview exhausted the selected calculation budget; increase Simulation calculation budget in Settings or reduce detail".into());
+                }
+                if let Some(h) = swept_height(
+                    [(x as f64 + 0.5) * self.dx, cy],
+                    a,
+                    b,
+                    r,
+                    tool.ball,
+                    tool.cone,
+                ) {
+                    let height = self.heights[id].min(h.max(self.floors[id]));
+                    if height < self.heights[id] {
+                        self.heights[id] = height;
+                        for row in y.saturating_sub(1)..=(y + 1).min(self.ny - 1) {
+                            self.dirty[row] = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn mesh_rows(
+        &self,
+        rows: std::ops::Range<usize>,
+        limit: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Mesh, String> {
+        let nx = self.nx;
+        let ny = self.ny;
+        let dx = self.dx;
+        let dy = self.dy;
+        let bottom = self.bottom;
+        let heights = &self.heights;
+        let floors = &self.floors;
+        let mut mesh = Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+        };
+        let mut quad = |points: [[f64; 3]; 4]| -> Result<(), String> {
+            if mesh.triangles.len() + 2 > limit {
+                return Err(
+                    "Stock preview surface exceeds its triangle budget; reduce preview resolution"
+                        .into(),
+                );
+            }
+            let id = mesh.vertices.len() as u32;
+            mesh.vertices.extend(points);
+            mesh.triangles
+                .extend([[id, id + 1, id + 2], [id, id + 2, id + 3]]);
+            Ok(())
+        };
+        // Merge coplanar runs in X so real 2.5D results stay compact.
+        for y in rows {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Stock preview cancelled".into());
+            }
+            let mut x = 0;
+            while x < nx {
+                let start = x;
+                let h = heights[y * nx + x];
+                let floor = floors[y * nx + x];
+                while x < nx && heights[y * nx + x] == h && floors[y * nx + x] == floor {
+                    x += 1;
+                }
+                if h > floor + 1e-9 {
+                    let a = start as f64 * dx;
+                    let b = x as f64 * dx;
+                    let c = y as f64 * dy;
+                    quad([[a, c, h], [b, c, h], [b, c + dy, h], [a, c + dy, h]])?;
+                }
+            }
+            let mut start = 0;
+            while start < nx {
+                if heights[y * nx + start] <= floors[y * nx + start] + 1e-9 {
+                    start += 1;
+                    continue;
+                }
+                let floor = floors[y * nx + start];
+                let mut end = start + 1;
+                while end < nx
+                    && floors[y * nx + end] == floor
+                    && heights[y * nx + end] > floor + 1e-9
+                {
+                    end += 1;
+                }
+                let a = start as f64 * dx;
+                let b = end as f64 * dx;
+                let c = y as f64 * dy;
+                quad([
+                    [a, c + dy, floor],
+                    [b, c + dy, floor],
+                    [b, c, floor],
+                    [a, c, floor],
+                ])?;
+                start = end;
+            }
+            for x in 0..nx {
+                let h = heights[y * nx + x];
+                let floor = floors[y * nx + x];
+                if h <= floor + 1e-9 {
+                    continue;
+                }
+                let a = x as f64 * dx;
+                let b = y as f64 * dy;
+                let neighbors = [
+                    (
+                        x.checked_sub(1).map(|x| y * nx + x),
+                        [[a, b, h], [a, b + dy, h], [a, b + dy, 0.], [a, b, 0.]],
+                    ),
+                    (
+                        (x + 1 < nx).then_some(y * nx + x + 1),
+                        [
+                            [a + dx, b + dy, h],
+                            [a + dx, b, h],
+                            [a + dx, b, 0.],
+                            [a + dx, b + dy, 0.],
+                        ],
+                    ),
+                    (
+                        y.checked_sub(1).map(|y| y * nx + x),
+                        [[a + dx, b, h], [a, b, h], [a, b, 0.], [a + dx, b, 0.]],
+                    ),
+                    (
+                        (y + 1 < ny).then_some((y + 1) * nx + x),
+                        [
+                            [a, b + dy, h],
+                            [a + dx, b + dy, h],
+                            [a + dx, b + dy, 0.],
+                            [a, b + dy, 0.],
+                        ],
+                    ),
+                ];
+                for (neighbor, points) in neighbors {
+                    let lo = neighbor.map_or(bottom, |i| floors[i]);
+                    let hi = neighbor.map_or(bottom, |i| heights[i]);
+                    for (z0, z1) in [(floor, h.min(lo)), (floor.max(hi), h)] {
+                        if z1 > z0 + 1e-9 {
+                            let mut p = points;
+                            p[0][2] = z1;
+                            p[1][2] = z1;
+                            p[2][2] = z0;
+                            p[3][2] = z0;
+                            quad(p)?
+                        }
+                    }
+                }
+            }
+        }
+        Ok(mesh)
+    }
+    pub fn volumes(&self) -> (f64, f64) {
+        let area = self.dx * self.dy;
+        (
+            self.initial
+                .iter()
+                .zip(&self.heights)
+                .map(|(a, h)| (a - h).max(0.) * area)
+                .sum(),
+            self.heights
+                .iter()
+                .zip(&self.floors)
+                .map(|(h, f)| (h - f).max(0.) * area)
+                .sum(),
+        )
+    }
+}
+/// Horizontal section of the swept XY capsule. Exact sweep checks still decide removal.
+fn capsule_row(a: Point3, b: Point3, r: f64, y: f64) -> Option<[f64; 2]> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for p in [a, b] {
+        let dy = y - p.y;
+        if dy.abs() <= r + 1e-10 {
+            let x = (r * r - dy * dy).max(0.).sqrt();
+            lo = lo.min(p.x - x);
+            hi = hi.max(p.x + x);
+        }
+    }
+    let length = (b.x - a.x).hypot(b.y - a.y);
+    if length > 1e-12 {
+        let ox = -(b.y - a.y) / length * r;
+        let oy = (b.x - a.x) / length * r;
+        let p = [
+            [a.x + ox, a.y + oy],
+            [b.x + ox, b.y + oy],
+            [b.x - ox, b.y - oy],
+            [a.x - ox, a.y - oy],
+        ];
+        for i in 0..4 {
+            let a = p[i];
+            let b = p[(i + 1) % 4];
+            if (a[1] - y).abs() < 1e-10 {
+                lo = lo.min(a[0]);
+                hi = hi.max(a[0]);
+            }
+            if (a[1] > y) != (b[1] > y) {
+                let x = a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]);
+                lo = lo.min(x);
+                hi = hi.max(x);
+            }
+        }
+    }
+    (lo <= hi).then_some([lo - 1e-9, hi + 1e-9])
+}
+
 #[cfg(test)]
 mod sweep_tests {
     use super::*;
+    #[test]
+    fn capsule_rows_contain_the_exact_cutter_footprint() {
+        for angle in 0..36 {
+            let angle = angle as f64 * std::f64::consts::TAU / 36.;
+            let a = Point3 {
+                x: -2.1,
+                y: 0.3,
+                z: -5.,
+            };
+            let b = Point3 {
+                x: a.x + angle.cos() * 6.,
+                y: a.y + angle.sin() * 6.,
+                z: -2.,
+            };
+            for r in [0.1, 1., 3.8] {
+                for y in -24..=28 {
+                    let y = y as f64 * 0.4;
+                    for x in -32..=24 {
+                        let x = x as f64 * 0.4;
+                        if swept_height([x, y], a, b, r, false, None).is_some() {
+                            let row = capsule_row(a, b, r, y)
+                                .expect("Exact cutter contact needs a row bound");
+                            assert!(x >= row[0] - 1e-8 && x <= row[1] + 1e-8);
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn sloping_cutter_sweeps_match_dense_reference() {
         for (ball, cone) in [(false, None), (true, None), (false, Some(1.2))] {

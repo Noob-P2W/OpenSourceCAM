@@ -67,6 +67,7 @@ pub fn import_model(name: &str, data: &[u8], inches: bool) -> Result<String, JsV
 pub struct WebSession {
     inner: crate::session::Session,
     playback: Option<crate::commands::PlaybackPreview>,
+    frame_vertices: Vec<f32>,
 }
 #[wasm_bindgen]
 impl WebSession {
@@ -81,6 +82,7 @@ impl WebSession {
         Ok(Self {
             inner: crate::session::Session::new(p),
             playback: None,
+            frame_vertices: Vec::new(),
         })
     }
     pub fn history_checkpoint(&self) -> Result<String, JsValue> {
@@ -254,10 +256,20 @@ impl WebSession {
             .and_then(|tool| serde_json::to_string(&tool).map_err(|e| e.to_string()))
             .map_err(|e| JsValue::from_str(&e))
     }
-    pub fn simulate(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
-        crate::commands::simulate_project(self.inner.project(), progress, resolution)
-            .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
-            .map_err(|e| JsValue::from_str(&e))
+    pub fn simulate(
+        &self,
+        progress: f64,
+        resolution: usize,
+        budget: u32,
+    ) -> Result<String, JsValue> {
+        crate::commands::simulate_project_budget(
+            self.inner.project(),
+            progress,
+            resolution,
+            u64::from(budget),
+        )
+        .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+        .map_err(|e| JsValue::from_str(&e))
     }
     pub fn operation_draft(&self, strategy: &str) -> Result<String, JsValue> {
         let strategy = serde_json::from_str(&format!("\"{strategy}\""))
@@ -280,9 +292,19 @@ impl WebSession {
             .and_then(|r| serde_json::to_string(&r).map_err(|e| e.to_string()))
             .map_err(|e| JsValue::from_str(&e))
     }
-    pub fn stock_obj(&self, progress: f64, resolution: usize) -> Result<String, JsValue> {
-        crate::commands::stock_obj(self.inner.project(), progress, resolution)
-            .map_err(|e| JsValue::from_str(&e))
+    pub fn stock_obj(
+        &self,
+        progress: f64,
+        resolution: usize,
+        budget: u32,
+    ) -> Result<String, JsValue> {
+        crate::commands::stock_obj_budget(
+            self.inner.project(),
+            progress,
+            resolution,
+            u64::from(budget),
+        )
+        .map_err(|e| JsValue::from_str(&e))
     }
     pub fn machine_profile(&self) -> Result<String, JsValue> {
         crate::machine::SetupProfile::from_project(self.inner.project())
@@ -296,6 +318,44 @@ impl WebSession {
             .validate()
             .map_err(|e| JsValue::from_str(&e))?;
         Ok(serde_json::json!({"format_version":1,"units":"mm","library":self.inner.project().tool_library}).to_string())
+    }
+    pub fn operation_defaults(&self, data: &str) -> Result<String, JsValue> {
+        serde_json::from_str(data)
+            .map_err(|e| e.to_string())
+            .and_then(|op| crate::commands::operation_defaults(self.inner.project(), &op))
+            .and_then(|v| serde_json::to_string(&v).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn stock_frame(
+        &mut self,
+        progress: f64,
+        resolution: usize,
+        epoch: u32,
+        limit: u32,
+    ) -> Result<String, JsValue> {
+        if self.playback.is_none() {
+            self.playback = Some(
+                crate::commands::PlaybackPreview::new(self.inner.project())
+                    .map_err(|e| JsValue::from_str(&e))?,
+            );
+        }
+        let frame = self
+            .playback
+            .as_ref()
+            .unwrap()
+            .frame(
+                self.inner.project(),
+                progress,
+                resolution,
+                epoch,
+                u64::from(limit),
+            )
+            .map_err(|e| JsValue::from_str(&e))?;
+        self.frame_vertices = frame.vertices;
+        serde_json::to_string(&frame.metadata).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    pub fn take_stock_vertices(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.frame_vertices)
     }
     pub fn stock_preview(&mut self, progress: f64, resolution: usize) -> Result<String, JsValue> {
         if self.playback.is_none() {
