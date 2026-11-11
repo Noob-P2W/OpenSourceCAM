@@ -1,8 +1,32 @@
-name: Build and test
-on: [push, pull_request, workflow_dispatch]
+name: Shared engine checks and optional native build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_native:
+        description: Build legacy native packages (native development is paused)
+        type: boolean
+        default: false
+permissions:
+  contents: read
 
 jobs:
+  core:
+    name: Shared Rust engine
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - run: cargo test --locked --no-default-features
   desktop:
+    name: Optional native package
+    if: github.event_name == 'workflow_dispatch' && inputs.build_native
     strategy:
       matrix:
         include:

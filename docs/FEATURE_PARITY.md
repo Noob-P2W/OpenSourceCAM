@@ -1,5 +1,10 @@
 # Native / browser feature coverage
 
+Native desktop development and automatic package builds are paused. The browser
+PWA and shop-hosting packages are the active development targets. Existing native
+source and instructions are retained; their presence does not imply current
+native release validation. See [browser development](PWA.md).
+
 This is an implementation inventory, not a release promise or certification.
 “Shared” means the same underlying Rust logic; device verification is separate.
 

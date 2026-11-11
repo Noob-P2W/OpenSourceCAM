@@ -1,5 +1,10 @@
 # OpenSourceCAM
 
+Native desktop development and automatic package builds are paused. The browser
+PWA and shop-hosting packages are the active development targets. Existing native
+source and instructions are retained; their presence does not imply current
+native release validation. See [browser development](PWA.md).
+
 A lightweight native CAM workbench written in Rust, released under the MIT license.
 Targets Windows and Linux with the same codebase. Uses egui/eframe and OpenGL;
 no browser runtime, web server, account, or cloud service is required.

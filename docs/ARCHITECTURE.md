@@ -45,8 +45,11 @@ After installing the prerequisites documented in PWA.md / NATIVE_GUIDE.md:
 Browser tests require `npm ci` in web and Playwright Chromium (set CHROMIUM_PATH
 when it is not /usr/bin/chromium). Windows native checks need Python available as
 python3. The web build script uses Bash. Neither gate installs OS/browser packages.
-The native CI additionally builds releases and tests bundled CAD import. Core gate
-success does not imply those CAD tests ran.
+Routine CI focuses on the browser gate plus headless Rust formatting, Clippy and
+tests with `--no-default-features`. Native desktop development and automatic
+release packaging are paused. The optional native job only runs on manual
+workflow dispatch with `build_native` enabled; it retains release and bundled CAD
+checks. Routine core/browser success does not imply native package validation.
 
 Successful main web builds update gh-pages and explicitly request a Pages build.
 GitHub must be configured to serve gh-pages / root. Local tests do not establish

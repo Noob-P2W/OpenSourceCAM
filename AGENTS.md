@@ -13,7 +13,11 @@ Use the existing checkout; preserve user edits and fetch current main before pub
 - Never claim a disabled, planned or desktop-only feature works in the browser.
   Update the parity document when availability changes.
 - For behavior fixes add a regression test that exercises the failure. Keep changes scoped.
-- Run python3 scripts/check.py native or web as appropriate; run all for shared Rust changes.
+- Browser PWA and shop hosting are the active development targets. Native desktop
+  development and automatic packaging are paused; retain native source and manual build tools.
+- Run python3 scripts/check.py web for browser/shared engine changes. For shared Rust
+  changes also run Clippy/tests with --no-default-features, as routine CI does.
+  Use native/all checks when explicitly changing native code or resuming native work.
   Report skipped/unavailable tests separately from passes. CAD bundle tests need the runtime.
 - No credentials, personal identity, private machining files or local machine paths in commits.
   Preserve dependency attribution/license files. Check commit identity before publishing.

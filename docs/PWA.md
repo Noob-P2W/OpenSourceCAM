@@ -3,7 +3,9 @@
 The PWA runs the existing Rust planner, validation, stock simulation, model parsers,
 and postprocessors in WebAssembly inside a worker. Files are not uploaded to a
 server. A responsive HTML interface supports phone, tablet and desktop layouts.
-This is an initial browser workbench, not full parity with the native UI.
+The browser is the primary development target. Native desktop development and
+automatic native packaging are paused; existing native source remains available.
+The shop-hosting ZIP and static-site package continue to be built and tested.
 
 ## Build and run
 

@@ -13,16 +13,18 @@ Author
 # OpenSourceCAM
 
 An open-source CAM workbench for milling experiments, written in Rust.
-Available as a native Windows/Linux application and an early browser workbench.
+The browser workbench (PWA) is the primary development target for phones, tablets
+and PCs. It can also be hosted on a shop server. Native Windows/Linux development
+and automatic native release packaging are paused; their source remains available.
 
 **Development prototype · MIT licensed · Not validated for production machining**
 
-[Browser preview](https://noob-p2w.github.io/OpenSourceCAM/) · [Browser & shop hosting](docs/PWA.md) · [Native build & usage](docs/NATIVE_GUIDE.md) · [Known scope](docs/ROADMAP.md)
+[Browser preview](https://noob-p2w.github.io/OpenSourceCAM/) · [Browser & shop hosting](docs/PWA.md) · [Legacy native source & build](docs/NATIVE_GUIDE.md) · [Known scope](docs/ROADMAP.md)
 
 The browser preview is served through GitHub Pages when enabled. It contains the
 current browser interface, not every feature of the native application.
 
-![Native milling workbench](docs/workbench-workflow.png)
+[Earlier native workbench screenshot](docs/workbench-workflow.png) (native development paused).
 
 ## What exists today
 
@@ -32,7 +34,7 @@ current browser interface, not every feature of the native application.
 | Inspection | Toolpath preview, approximate machining time, sampled material-removal simulation |
 | Output | Metric G-code with Generic, GRBL, Mach3 and LinuxCNC posts, subject to each post's supported configuration |
 | Projects | Local versioned JSON project files with embedded geometry |
-| Native app | Detailed machine/tool editors, STL/OBJ import and bundled STEP/IGES import |
+| Native app (paused) | Existing source and build instructions retained; no routine native package builds |
 | Browser app | Desktop/tablet ribbon and operation tree, phone layout, dedicated setup/operation windows, machine/tool tables, oriented rectangular/round stock, example vise, STEP/IGES/STL/OBJ import, playback, sampled simulation and G-code download |
 
 The browser runs the shared Rust CAM engine locally through WebAssembly. There
@@ -70,7 +72,7 @@ installer. See [hosting instructions](docs/PWA.md) for HTTPS and build details.
 
 ## Develop and verify
 
-Native setup and the complete existing validation commands are in the
+Start with the browser workflow. Legacy native build instructions remain in the
 [native guide](docs/NATIVE_GUIDE.md). For the browser:
 
 ```sh
@@ -96,5 +98,11 @@ parts, or machine credentials in public issues or attachments.
 
 See [architecture](docs/ARCHITECTURE.md) and the
 [native/browser feature inventory](docs/FEATURE_PARITY.md). After prerequisite
-setup, `python3 scripts/check.py all` runs the native and browser quality gates.
-CI calls these same checks; packaged CAD runtime tests remain separate.
+setup, `python3 scripts/check.py web` runs the browser quality gate, including
+Rust engine tests, WASM packaging and browser checks. CI also runs headless Rust
+formatting, Clippy and tests with `--no-default-features`.
+
+Native packaging runs only when explicitly requested through the **Shared engine
+checks and optional native build** workflow with **build_native** enabled.
+`python3 scripts/check.py native` and `all` remain available for native work;
+packaged native CAD tests are not part of routine browser validation.
