@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 out = ROOT / 'dist'
 site = out / 'pwa'
 site.mkdir(parents=True, exist_ok=True)
-files = ['index.html', 'style.css', 'app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
+files = ['index.html', 'style.css', 'app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'three-view.js', 'worker.js', 'sw.js', 'manifest.webmanifest',
          'cad-worker.js', 'icon.svg', 'icon-192.png', 'icon-512.png']
 if not (ROOT / 'web/pkg/opensourcecam_bg.wasm').is_file():
     raise SystemExit('Run scripts/build-web.sh first.')
@@ -23,6 +23,10 @@ for name in ['occt-import-js.js', 'occt-import-js.wasm', 'license.occt-import-js
     shutil.copy2(cad_source / name, site / 'cad' / name)
 shutil.copy2(ROOT / 'web/CAD-NOTICES.txt', site / 'cad/NOTICES.txt')
 shutil.copy2(ROOT / 'licenses/third-party/OCCT-exception.txt', site / 'cad/license.occt-exception.txt')
+(site / 'vendor').mkdir(exist_ok=True)
+three = ROOT / 'web/node_modules/three'
+shutil.copy2(three / 'build/three.module.min.js', site / 'vendor/three.module.js')
+shutil.copy2(three / 'LICENSE', site / 'vendor/three-LICENSE.txt')
 # Content-derived versions change whenever a deployed asset changes.
 digest = hashlib.sha256()
 for path in sorted(site.rglob('*')):

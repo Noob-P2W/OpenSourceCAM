@@ -2,7 +2,7 @@ import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {ready,section,closeDialogs,state} from './test-ui.mjs';
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});
-async function clickPoint(page,p){await page.waitForTimeout(100);const point=await page.locator('#canvas').evaluate((canvas,p)=>{const gl=canvas.getContext('webgl'),program=gl.getParameter(gl.CURRENT_PROGRAM),m=gl.getUniform(program,gl.getUniformLocation(program,'matrix')),x=m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12],y=m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13],r=canvas.getBoundingClientRect();return{x:r.left+(x+1)*r.width/2,y:r.top+(1-y)*r.height/2}},p);await page.mouse.click(point.x,point.y)}
+async function clickPoint(page,p){await page.waitForTimeout(100);const point=await page.locator('#canvas').evaluate((canvas,p)=>{const [x,y]=canvas.camViewport.projectWorld(p),r=canvas.getBoundingClientRect();return{x:r.left+x,y:r.top+y}},p);await page.mouse.click(point.x,point.y)}
 async function orbit(page,dx){const r=await page.locator('#canvas').boundingBox();await page.mouse.move(r.x+r.width/2,r.y+r.height/2);await page.mouse.down();await page.mouse.move(r.x+r.width/2+dx,r.y+r.height/2);await page.mouse.up()}
 let legacyProfile;
 try{for(const width of [390,768,1440]){

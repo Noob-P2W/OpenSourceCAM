@@ -67,11 +67,34 @@ pub fn import_model(name: &str, data: &[u8], inches: bool) -> Result<String, JsV
     .map_err(|e| JsValue::from_str(&e))
 }
 
+#[derive(serde::Serialize)]
+struct ReferencePreview {
+    id: u64,
+    name: String,
+    kind: crate::workspace::ModelKind,
+    moving_faces: Vec<usize>,
+    jaw_axis: [f64; 3],
+    vertices: Vec<[f64; 3]>,
+    triangles: Vec<[u32; 3]>,
+    geometry_key: String,
+    groups_key: String,
+    transform: [[f64; 4]; 4],
+}
+type PreviewCache = Vec<(
+    crate::workspace::WorkspaceModel,
+    [f64; 3],
+    std::sync::Arc<ReferencePreview>,
+)>;
+type GeometryKeys = Vec<(std::sync::Arc<import::Geometry>, String)>;
+
 #[wasm_bindgen]
 pub struct WebSession {
     inner: crate::session::Session,
     playback: Option<crate::commands::PlaybackPreview>,
     frame_vertices: Vec<f32>,
+    previews: std::cell::RefCell<PreviewCache>,
+    geometry_keys: std::cell::RefCell<GeometryKeys>,
+    part_key: std::cell::RefCell<Option<(import::Part, String)>>,
 }
 #[wasm_bindgen]
 impl WebSession {
@@ -87,6 +110,9 @@ impl WebSession {
             inner: crate::session::Session::new(p),
             playback: None,
             frame_vertices: Vec::new(),
+            previews: std::cell::RefCell::new(Vec::new()),
+            geometry_keys: std::cell::RefCell::new(Vec::new()),
+            part_key: std::cell::RefCell::new(None),
         })
     }
     pub fn history_checkpoint(&self) -> Result<String, JsValue> {
@@ -103,35 +129,43 @@ impl WebSession {
     }
     pub fn view(&self) -> Result<String, JsValue> {
         #[derive(serde::Serialize)]
-        struct Preview {
-            id: u64,
-            name: String,
-            kind: crate::workspace::ModelKind,
-            moving_faces: Vec<usize>,
-            jaw_axis: [f64; 3],
-            vertices: Vec<[f64; 3]>,
-            triangles: Vec<[u32; 3]>,
-        }
-        #[derive(serde::Serialize)]
         struct BrowserView<'a> {
             part_fingerprint: Option<String>,
+            part_geometry_key: Option<String>,
             setup_allowances: [f64; 2],
             #[serde(flatten)]
             view: crate::session::View<'a>,
-            workspace_preview: Vec<Preview>,
+            workspace_preview: Vec<std::sync::Arc<ReferencePreview>>,
             part_transform: Option<[[f64; 4]; 4]>,
             stock_outline: Vec<[f64; 3]>,
             stock_definition: crate::blank::StockDefinition,
             setup_issue: Option<String>,
             clamping_stock: Option<crate::import::Mesh>,
         }
-        let preview = self
+        // Keep only current geometries: cached keys never retain old history meshes.
+        self.geometry_keys.borrow_mut().retain(|(g, _)| {
+            self.inner
+                .project()
+                .part
+                .iter()
+                .chain(self.inner.project().workspace.iter().map(|m| &m.part))
+                .any(|p| std::sync::Arc::ptr_eq(g, &p.geometry))
+        });
+        let old = self.previews.borrow();
+        let preview: Vec<std::sync::Arc<ReferencePreview>> = self
             .inner
             .project()
             .workspace
             .iter()
             .filter(|m| m.part.visible)
             .map(|m| {
+                let offset = m.offset(self.inner.project().machine.as_ref());
+                if let Some((_, _, cached)) = old
+                    .iter()
+                    .find(|(model, origin, _)| model == m && *origin == offset)
+                {
+                    return cached.clone();
+                }
                 let mesh = &m.part.geometry.mesh;
                 let mut used = vec![false; mesh.vertices.len()];
                 for face in &mesh.triangles {
@@ -163,7 +197,27 @@ impl WebSession {
                     let length = normal.iter().map(|v| v * v).sum::<f64>().sqrt();
                     jaw_axis = normal.map(|v| v / length);
                 }
-                Preview {
+                use std::hash::{Hash, Hasher};
+                let mut group_hash = std::collections::hash_map::DefaultHasher::new();
+                m.clamp
+                    .as_ref()
+                    .map(|c| &c.moving_vertices)
+                    .hash(&mut group_hash);
+                let zero = m.point([0.; 3], self.inner.project().machine.as_ref());
+                let transform = std::array::from_fn(|i| {
+                    if i == 3 {
+                        [zero[0], zero[1], zero[2], 1.]
+                    } else {
+                        let mut p = [0.; 3];
+                        p[i] = 1.;
+                        let q = m.point(p, self.inner.project().machine.as_ref());
+                        [q[0] - zero[0], q[1] - zero[1], q[2] - zero[2], 0.]
+                    }
+                });
+                std::sync::Arc::new(ReferencePreview {
+                    geometry_key: self.geometry_key(&m.part),
+                    groups_key: format!("{:016x}", group_hash.finish()),
+                    transform,
                     moving_faces: mesh
                         .triangles
                         .iter()
@@ -181,7 +235,23 @@ impl WebSession {
                         .iter()
                         .map(|face| face.map(|i| remap[i as usize]))
                         .collect(),
-                }
+                })
+            })
+            .collect();
+        drop(old);
+        *self.previews.borrow_mut() = self
+            .inner
+            .project()
+            .workspace
+            .iter()
+            .filter(|m| m.part.visible)
+            .zip(preview.iter())
+            .map(|(m, p)| {
+                (
+                    m.clone(),
+                    m.offset(self.inner.project().machine.as_ref()),
+                    p.clone(),
+                )
             })
             .collect();
         serde_json::to_string(&BrowserView {
@@ -210,12 +280,13 @@ impl WebSession {
                     (self.inner.project().stock.thickness + b.min[2]).max(0.),
                 ]
             }),
-            part_fingerprint: self
+            part_fingerprint: self.cached_part_key(),
+            part_geometry_key: self
                 .inner
                 .project()
                 .part
                 .as_ref()
-                .map(crate::machining::model_fingerprint),
+                .map(|p| self.geometry_key(p)),
             view: self.inner.view(),
             workspace_preview: preview,
             part_transform: self.inner.project().part.as_ref().map(|p| p.matrix()),
@@ -229,6 +300,40 @@ impl WebSession {
                 .and_then(|p| crate::blank::contains_part(&self.inner.project().stock, p).err()),
         })
         .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+    fn geometry_key(&self, part: &import::Part) -> String {
+        let mut keys = self.geometry_keys.borrow_mut();
+        if let Some((_, key)) = keys
+            .iter()
+            .find(|(g, _)| std::sync::Arc::ptr_eq(g, &part.geometry))
+        {
+            return key.clone();
+        }
+        let neutral = import::Part {
+            geometry: part.geometry.clone(),
+            rotation: [0.; 3],
+            offset: [0.; 3],
+            units: import::Units::Millimetres,
+            visible: true,
+        };
+        let key = crate::machining::model_fingerprint(&neutral);
+        keys.push((part.geometry.clone(), key.clone()));
+        key
+    }
+    fn cached_part_key(&self) -> Option<String> {
+        let mut cache = self.part_key.borrow_mut();
+        let Some(part) = self.inner.project().part.as_ref() else {
+            *cache = None;
+            return None;
+        };
+        if let Some((old, key)) = cache.as_ref() {
+            if old == part {
+                return Some(key.clone());
+            }
+        }
+        let key = crate::machining::model_fingerprint(part);
+        *cache = Some((part.clone(), key.clone()));
+        Some(key)
     }
     pub fn save_project(&self) -> Result<String, JsValue> {
         crate::cam::validate_setup(self.inner.project()).map_err(|e| JsValue::from_str(&e))?;
@@ -540,4 +645,42 @@ pub fn cad_project(
         bodies.as_deref().unwrap_or("[]"),
     )
     .map_err(|e| JsValue::from_str(&e))
+}
+
+#[cfg(test)]
+mod preview_cache_tests {
+    use super::*;
+    #[test]
+    fn cached_reference_survives_metadata_edits_but_not_placement_changes() {
+        let mut project = Project::default();
+        crate::workholding::place_example(
+            &mut project,
+            None,
+            crate::workholding::ViseSpec::default(),
+        )
+        .unwrap();
+        let mut session = WebSession::new(&serde_json::to_string(&project).unwrap()).unwrap();
+        session.view().unwrap();
+        let original = session.previews.borrow()[0].2.clone();
+        session.edit(r#"{"kind":"add_operation"}"#).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &original,
+            &session.previews.borrow()[0].2
+        ));
+        session.edit(r#"{"kind":"position_workspace","id":1,"offset":[10,20,30],"rotation":[0,0,90],"frame":"work"}"#).unwrap();
+        let moved = session.previews.borrow()[0].2.clone();
+        assert!(!std::sync::Arc::ptr_eq(&original, &moved));
+        assert_eq!(
+            moved.geometry_key, original.geometry_key,
+            "placement must reuse the raw GPU mesh"
+        );
+        assert_ne!(moved.transform, original.transform);
+        let p = session.inner.project();
+        let model = &p.workspace[0];
+        for i in 0..3 {
+            assert!(
+                (moved.transform[3][i] - model.point([0.; 3], p.machine.as_ref())[i]).abs() < 1e-8
+            )
+        }
+    }
 }

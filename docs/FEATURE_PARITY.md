@@ -190,3 +190,33 @@ Clamp stock applies the current clamping draft and closes in one atomic Session
 action, without requiring a separate Save click. Missing selections and rejected
 travel produce visible errors; an already fitting blank reports zero jaw travel.
 Scene centering ignores unused source vertices, matching the rendered mesh.
+
+## Three.js viewer and performance
+
+The WebGL path now uses packaged Three.js BufferGeometry, an orthographic camera,
+per-component scene objects and cached indexed meshes. The pinned r162 dependency
+preserves WebGL 1 support as well as WebGL 2; its MIT license is included under
+`vendor/three-LICENSE.txt`. Both the module and license are cached offline. The
+software fallback, touch gestures, face selection, tool dimension preview, stock
+playback, fixture selection, clipping-free reference framing and graphics recovery
+remain covered by browser tests. Scene projection is exposed through the viewport
+projection method rather than tests depending on custom shader uniforms.
+
+Raw geometry keys and transforms come from Rust. Rigid positioning updates object
+matrices, while exact-shape caching can share repeated component buffers. GPU
+positions are relative to a local mesh origin for precision at distant placements.
+Cache lookups verify geometry data before deduplicating hash buckets; cached unused
+meshes have a 64 MiB budget and geometry/material resources are disposed explicitly.
+Display normals remain flat across triangle boundaries without duplicating every
+vertex; devices lacking the relevant WebGL extensions use expanded geometry.
+No CAM geometry, tolerance, import limit or export check is reduced for rendering.
+
+The Rust browser adapter caches current reference previews and geometry keys by
+shared Geometry ownership plus placement, and caches the active part fingerprint.
+Caches retain current models only, and machine-frame previews invalidate when the
+work origin changes. Face picking transforms shared vertices once per query.
+Stock playback reuses Rust-provided interleaved position/normal arrays, updates
+only dirty strips and retains model/tool buffers; line geometry drops unused normal
+fields on the WebGL path. The axis widget and drawing surface resize only when
+the relevant view state changes. These are scoped optimizations, not a claim that
+every CAM algorithm has been replaced or that arbitrary assemblies are certified.

@@ -27,7 +27,7 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
-    for script in ('app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+    for script in ('app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'three-view.js', 'worker.js', 'cad-worker.js', 'sw.js'):
         run('node', '--check', 'web/' + script)
     run('node', 'web/cad-mesh-smoke.mjs')
     run('cargo', 'fmt', '--all', '--', '--check')
@@ -40,6 +40,7 @@ def web():
     env = {**os.environ, 'PWA_URL': f'http://127.0.0.1:{server.server_port}'}
     try:
         run('node', 'web/startup-smoke.mjs', env=env)
+        run('node', 'web/renderer-smoke.mjs', env=env)
         run('node', 'web/smoke.mjs', env=env)
         run('node', 'web/cad-smoke.mjs', env=env)
         run('node', 'web/mesh-repair-smoke.mjs', env=env)

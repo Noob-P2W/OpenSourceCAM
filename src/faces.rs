@@ -296,8 +296,15 @@ pub(crate) fn ray_hit(
     let sub = |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|i| a[i] - b[i]);
     let mut nearest = f64::INFINITY;
     let mut selected = None;
+    let vertices: Vec<_> = part
+        .geometry
+        .mesh
+        .vertices
+        .iter()
+        .map(|v| part.point(*v))
+        .collect();
     for (id, t) in part.geometry.mesh.triangles.iter().enumerate() {
-        let [a, b, c] = t.map(|i| part.point(part.geometry.mesh.vertices[i as usize]));
+        let [a, b, c] = t.map(|i| vertices[i as usize]);
         let (u, v) = (sub(b, a), sub(c, a));
         let p = cross(direction, v);
         let det = dot(u, p);
