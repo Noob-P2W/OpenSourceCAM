@@ -26,6 +26,7 @@ export class WebSession {
     tool_library(): string;
     tool_preview(id: bigint): string;
     view(): string;
+    vise_query(data: string): string;
 }
 
 export function blank(): string;
@@ -88,6 +89,7 @@ export interface InitOutput {
     readonly websession_tool_library: (a: number, b: number) => void;
     readonly websession_tool_preview: (a: number, b: number, c: bigint) => void;
     readonly websession_view: (a: number, b: number) => void;
+    readonly websession_vise_query: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
     readonly __wbindgen_export: (a: number, b: number, c: number) => void;
     readonly __wbindgen_export2: (a: number, b: number) => number;

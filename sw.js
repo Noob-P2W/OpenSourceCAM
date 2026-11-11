@@ -1,5 +1,5 @@
-const CACHE='opensourcecam-ad9a6805c2f5';
-const ASSETS=['./cad-worker.js','./cad/occt-import-js.js','./cad/occt-import-js.wasm','./cad/license.occt-import-js.txt','./cad/license.occt.txt','./cad/NOTICES.txt','./cad/license.occt-exception.txt','./','./index.html','./style.css','./app.js','./help.js','./shell.js','./dialogs.js','./assets/commands.svg','./viewport.js','./build.js','./worker.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png','./pkg/opensourcecam.js','./pkg/opensourcecam_bg.wasm'];
+const CACHE='opensourcecam-b671e92c6675';
+const ASSETS=['./cad-worker.js','./cad/occt-import-js.js','./cad/occt-import-js.wasm','./cad/license.occt-import-js.txt','./cad/license.occt.txt','./cad/NOTICES.txt','./cad/license.occt-exception.txt','./','./index.html','./style.css','./app.js','./help.js','./vise.js','./shell.js','./dialogs.js','./assets/commands.svg','./viewport.js','./build.js','./worker.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png','./pkg/opensourcecam.js','./pkg/opensourcecam_bg.wasm'];
 self.addEventListener('install',event=>event.waitUntil((async()=>{
  const cache=await caches.open(CACHE);
  await Promise.all(ASSETS.map(async path=>{
