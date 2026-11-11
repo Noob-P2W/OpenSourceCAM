@@ -31,23 +31,23 @@ jobs:
           node-version: '22'
       - run: npm ci
         working-directory: web
-      - name: Install browser test dependencies
+      - name: Select installed browser for tests
         run: |
           mkdir -p dist
-          set -o pipefail
-          # Avoid intermittent DNS failures on the runner's Azure mirror list.
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i \
-              -e 's#mirror+file:/etc/apt/apt-mirrors.txt#https://archive.ubuntu.com/ubuntu#g' \
-              -e 's#mirror+file:/etc/apt/apt-mirrors-security.txt#https://security.ubuntu.com/ubuntu#g' \
-              /etc/apt/sources.list.d/ubuntu.sources
-          fi
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/80-cam-ci-retries > /dev/null
-          cd web
-          npx playwright install --with-deps chromium 2>&1 | tee ../dist/ci-failure.txt
+          set -euo pipefail
+          # The hosted Ubuntu image includes Chrome and its system libraries.
+          # Avoid apt/browser downloads that previously failed on runner DNS.
+          {
+            browser_path="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+            if [ -z "$browser_path" ]; then
+              echo 'No installed Chrome/Chromium found on this runner. Browser tests are required.'
+              exit 1
+            fi
+            "$browser_path" --version
+            printf 'CHROMIUM_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
+          } 2>&1 | tee dist/ci-failure.txt
       - name: Browser quality gate
-        run: |
-          CHROMIUM_PATH="$(node --input-type=module -e "import {chromium} from './web/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")" python3 scripts/check.py web
+        run: python3 scripts/check.py web
       - uses: actions/checkout@v4
         if: failure() && github.ref == 'refs/heads/main'
         with:

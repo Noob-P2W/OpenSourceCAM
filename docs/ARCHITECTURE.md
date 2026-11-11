@@ -43,7 +43,10 @@ After installing the prerequisites documented in PWA.md / NATIVE_GUIDE.md:
 - `python3 scripts/check.py all`: both gates, stopping on failed commands.
 
 Browser tests require `npm ci` in web and Playwright Chromium (set CHROMIUM_PATH
-when it is not /usr/bin/chromium). Windows native checks need Python available as
+when it is not /usr/bin/chromium). The hosted Ubuntu web job selects its installed
+Chrome/Chromium and records the version, avoiding per-run apt/font and browser
+downloads; missing browsers still fail the job, and the complete browser gate runs.
+Windows native checks need Python available as
 python3. The web build script uses Bash. Neither gate installs OS/browser packages.
 Routine CI focuses on the browser gate plus headless Rust formatting, Clippy and
 tests with `--no-default-features`. Native desktop development and automatic
