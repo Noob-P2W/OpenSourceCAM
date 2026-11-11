@@ -20,7 +20,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_edit(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -38,7 +38,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -50,7 +50,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_geometry(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -68,7 +68,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -95,7 +95,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -110,11 +110,11 @@ export class WebSession {
         let deferred5_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+            const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_export2);
             const len1 = WASM_VECTOR_LEN;
-            const ptr2 = passStringToWasm0(role, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr2 = passStringToWasm0(role, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len2 = WASM_VECTOR_LEN;
             wasm.websession_import_file(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, inches, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -132,7 +132,7 @@ export class WebSession {
             return getStringFromWasm0(ptr4, len4);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred5_0, deferred5_1, 1);
+            wasm.__wbindgen_export(deferred5_0, deferred5_1, 1);
         }
     }
     /**
@@ -159,7 +159,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -186,7 +186,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -195,7 +195,7 @@ export class WebSession {
     constructor(data) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_new(retptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -220,7 +220,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_operation_defaults(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -238,7 +238,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -250,7 +250,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(strategy, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(strategy, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_operation_draft(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -268,7 +268,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -281,9 +281,9 @@ export class WebSession {
         let deferred4_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(action, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(action, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(options, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr1 = passStringToWasm0(options, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len1 = WASM_VECTOR_LEN;
             wasm.websession_plan(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -301,7 +301,7 @@ export class WebSession {
             return getStringFromWasm0(ptr3, len3);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred4_0, deferred4_1, 1);
+            wasm.__wbindgen_export(deferred4_0, deferred4_1, 1);
         }
     }
     /**
@@ -329,7 +329,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -341,7 +341,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_restore_history(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -359,7 +359,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -371,7 +371,7 @@ export class WebSession {
         let deferred3_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(action, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const ptr0 = passStringToWasm0(action, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
             const len0 = WASM_VECTOR_LEN;
             wasm.websession_run(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -389,7 +389,7 @@ export class WebSession {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+            wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -416,7 +416,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -446,7 +446,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -477,7 +477,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -507,7 +507,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -536,7 +536,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -549,7 +549,7 @@ export class WebSession {
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var v1 = getArrayF32FromWasm0(r0, r1).slice();
-            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
             return v1;
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
@@ -579,7 +579,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -607,7 +607,7 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -634,11 +634,31 @@ export class WebSession {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
         }
     }
 }
 if (Symbol.dispose) WebSession.prototype[Symbol.dispose] = WebSession.prototype.free;
+
+/**
+ * @returns {string}
+ */
+export function blank() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.blank(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        deferred1_0 = r0;
+        deferred1_1 = r1;
+        return getStringFromWasm0(r0, r1);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
+    }
+}
 
 /**
  * Validate a browser-kernel result through the same Part and Project boundaries as native import.
@@ -653,13 +673,13 @@ export function cad_project(name, source, format, mesh) {
     let deferred6_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(source, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr1 = passStringToWasm0(source, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(format, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr2 = passStringToWasm0(format, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(mesh, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr3 = passStringToWasm0(mesh, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len3 = WASM_VECTOR_LEN;
         wasm.cad_project(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -677,7 +697,7 @@ export function cad_project(name, source, format, mesh) {
         return getStringFromWasm0(ptr5, len5);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred6_0, deferred6_1, 1);
+        wasm.__wbindgen_export(deferred6_0, deferred6_1, 1);
     }
 }
 
@@ -698,7 +718,7 @@ export function catalog() {
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
     }
 }
 
@@ -713,9 +733,9 @@ export function import_model(name, data, inches) {
     let deferred4_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
         wasm.import_model(retptr, ptr0, len0, ptr1, len1, inches);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -733,7 +753,7 @@ export function import_model(name, data, inches) {
         return getStringFromWasm0(ptr3, len3);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred4_0, deferred4_1, 1);
+        wasm.__wbindgen_export(deferred4_0, deferred4_1, 1);
     }
 }
 
@@ -746,7 +766,7 @@ export function machine_records(data) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
         wasm.machine_records(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -764,7 +784,7 @@ export function machine_records(data) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -777,7 +797,7 @@ export function normalize(data) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
         wasm.normalize(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -795,7 +815,7 @@ export function normalize(data) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -815,7 +835,7 @@ export function operation() {
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
     }
 }
 
@@ -829,9 +849,9 @@ export function run(data, action) {
     let deferred4_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(data, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(action, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr1 = passStringToWasm0(action, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
         wasm.run(retptr, ptr0, len0, ptr1, len1);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -849,7 +869,7 @@ export function run(data, action) {
         return getStringFromWasm0(ptr3, len3);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred4_0, deferred4_1, 1);
+        wasm.__wbindgen_export(deferred4_0, deferred4_1, 1);
     }
 }
 
@@ -869,7 +889,7 @@ export function sample() {
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
     }
 }
 function __wbg_get_imports() {

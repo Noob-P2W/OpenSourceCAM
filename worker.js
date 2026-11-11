@@ -32,7 +32,7 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
     else if(action==='session-start'){const next=new core.WebSession(project);session?.free();session=next;value=JSON.parse(session.view())}
     else if(action==='draft'){const draft=new core.WebSession(project);try{value=JSON.parse(draft.view()).project}finally{draft.free()}}
     else if(action==='session-edit') value=JSON.parse(session.edit(JSON.stringify(edit)));
-    else if(action==='sample'||action==='operation') value=JSON.parse(core[action]());
+    else if(action==='blank'||action==='sample'||action==='operation') value=JSON.parse(core[action]());
     else if(action==='save') value=session.save_project();
     else if(action==='normalize') value=JSON.parse(core.normalize(project));
     else if(action==='import'){
