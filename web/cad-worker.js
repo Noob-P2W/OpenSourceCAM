@@ -10,14 +10,15 @@ self.onmessage = async ({data:{name,bytes}}) => {
   const params={linearUnit:'millimeter',linearDeflectionType:'absolute_value',linearDeflection:0.1,angularDeflection:0.3};
   const result=format==='step'?kernel.ReadStepFile(new Uint8Array(bytes),params):kernel.ReadIgesFile(new Uint8Array(bytes),params);
   if(!result.success||!result.meshes?.length)throw Error('CAD kernel could not read any surfaces from this file');
-  const vertices=[],triangles=[];
+  const vertices=[],triangles=[],shared=new Map();
+  const maxTriangles=250000,maxVertices=750000;
   for(const mesh of result.meshes){
    const positions=mesh.attributes?.position?.array,indices=mesh.index?.array;
    if(!positions||!indices||positions.length%3||indices.length%3)throw Error('CAD kernel returned invalid mesh data');
-   if(vertices.length+positions.length/3>300000||triangles.length+indices.length/3>100000)throw Error('CAD mesh exceeds 100,000 triangles / 300,000 vertices. Simplify the model before import.');
-   const base=vertices.length;
-   for(let i=0;i<positions.length;i+=3)vertices.push(positions.slice(i,i+3));
-   for(let i=0;i<indices.length;i+=3){const tri=indices.slice(i,i+3);if(tri.some(n=>!Number.isInteger(n)||n<0||n>=positions.length/3))throw Error('CAD mesh has invalid indices');triangles.push(tri.map(n=>n+base))}
+   if(triangles.length+indices.length/3>maxTriangles)throw Error(`CAD tessellation has more than ${maxTriangles.toLocaleString('en-US')} triangles at 0.1 mm surface tolerance. No faces were dropped. Split the assembly or use a less detailed source model.`);
+   const remap=new Uint32Array(positions.length/3);
+   for(let i=0;i<positions.length;i+=3){const point=positions.slice(i,i+3);if(point.some(v=>!Number.isFinite(v)||Math.abs(v)>1000000))throw Error('CAD mesh contains invalid coordinates');const key=point.map(v=>v===0?0:v).join(',');let index=shared.get(key);if(index===undefined){if(vertices.length>=maxVertices)throw Error('CAD mesh exceeds 750,000 unique vertices');index=vertices.length;vertices.push(point);shared.set(key,index)}remap[i/3]=index;}
+   for(let i=0;i<indices.length;i+=3){const tri=indices.slice(i,i+3);if(tri.some(n=>!Number.isInteger(n)||n<0||n>=positions.length/3))throw Error('CAD mesh has invalid indices');triangles.push(tri.map(n=>remap[n]))}
   }
   self.postMessage({mesh:{vertices,triangles},format});
  }catch(error){self.postMessage({error:`CAD import failed: ${error.message||error}`})}

@@ -29,7 +29,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
         let count = u32::from_le_bytes(data[80..84].try_into().unwrap()) as usize;
         if 84_u64 + count as u64 * 50 == data.len() as u64 {
             if count == 0 || count > MAX_TRIANGLES {
-                return Err("STL must contain 1–100,000 triangles".into());
+                return Err("STL must contain 1–250,000 triangles".into());
             }
             let mut vertices = Vec::with_capacity(count * 3);
             let mut triangles = Vec::with_capacity(count);
@@ -87,7 +87,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
             }
             let base = vertices.len() as u32;
             if triangles.len() >= MAX_TRIANGLES {
-                return Err("STL exceeds 100,000 triangles".into());
+                return Err("STL exceeds 250,000 triangles".into());
             }
             for _ in 0..3 {
                 let mut words = lines
@@ -144,7 +144,7 @@ pub fn obj(data: &[u8]) -> Result<Mesh, String> {
         match words.next() {
             Some("v") => {
                 if vertices.len() >= MAX_VERTICES {
-                    return Err("OBJ exceeds 300,000 vertices".into());
+                    return Err("OBJ exceeds 750,000 vertices".into());
                 }
                 let vertex = [
                     parse_number(words.next())?,
@@ -190,7 +190,7 @@ pub fn obj(data: &[u8]) -> Result<Mesh, String> {
                     return Err("OBJ face needs at least three vertices".into());
                 }
                 if triangles.len() + face.len() - 2 > MAX_TRIANGLES {
-                    return Err("OBJ exceeds 100,000 triangles".into());
+                    return Err("OBJ exceeds 250,000 triangles".into());
                 }
                 check_convex_planar(&face, &vertices)?;
                 for index in 1..face.len() - 1 {

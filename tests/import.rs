@@ -306,7 +306,7 @@ fn repair_rejects_unusable_or_invalid_meshes_before_discarding_faces() {
     assert!(mesh
         .repair_degenerate_triangles()
         .unwrap_err()
-        .contains("100,000"));
+        .contains("250,000"));
 }
 
 #[test]
@@ -328,4 +328,16 @@ fn cleanup_drops_orphan_vertices_so_camera_fit_cannot_include_bad_face_outliers(
     assert_eq!(mesh.triangles, vec![[0, 1, 2]]);
     assert_eq!(mesh.repair_degenerate_triangles().unwrap(), 0);
     mesh.validate().unwrap();
+}
+
+#[test]
+fn imports_above_the_previous_triangle_cap_remain_bounded() {
+    let mesh = import::Mesh {
+        vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+        triangles: vec![[0, 1, 2]; 150_000],
+    };
+    mesh.validate().unwrap();
+    let mut over = mesh;
+    over.triangles.resize(MAX_TRIANGLES + 1, [0, 1, 2]);
+    assert!(over.validate().is_err());
 }

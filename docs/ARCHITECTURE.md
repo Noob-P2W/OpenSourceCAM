@@ -273,3 +273,11 @@ Profiles persist through project saves, undo and worker recovery. Device-local I
 vise library records and portable JSON profiles reuse the prepared model and
 configuration. Library export restores the jaw's open geometry; no machine
 connection or calibrated controller binding is created.
+
+Model imports accept at most 250,000 triangles / 750,000 imported vertices. CAD
+flattening shares exactly equal vertex coordinates across tessellated surfaces;
+it does not weld nearby points, discard faces, or relax the existing 0.1 mm
+linear / 0.3 rad angular tessellation settings. The 32 MiB source file limit,
+16-model / 300,000-total-reference-triangle workspace budget and simulation mesh
+budgets remain separate and unchanged. Large supported inputs still need device
+verification; exceeding the new cap fails before changing the workspace.

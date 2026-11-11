@@ -195,7 +195,7 @@ fn calculate(
     let mesh = grid.mesh_rows(
         0..ny,
         if resolution <= 192 {
-            crate::import::MAX_TRIANGLES
+            100_000
         } else {
             2_000_000
         },

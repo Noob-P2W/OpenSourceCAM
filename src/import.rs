@@ -12,7 +12,7 @@ use std::{
 };
 
 pub const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
-pub const MAX_TRIANGLES: usize = 100_000;
+pub const MAX_TRIANGLES: usize = 250_000;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 pub const MAX_COORDINATE: f64 = 1_000_000.0;
 
@@ -136,7 +136,7 @@ impl Mesh {
             || self.vertices.len() > MAX_VERTICES
         {
             return Err(
-                "Mesh must contain 1–100,000 triangles and at most 300,000 vertices".into(),
+                "Mesh must contain 1–250,000 triangles and at most 750,000 vertices".into(),
             );
         }
         if self

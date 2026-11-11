@@ -214,7 +214,7 @@ cargo run --no-default-features -- --export-post mach3 examples/tray.cam.json tr
 The CLI and desktop share the same model, planner and postprocessor. An invalid
 project exits with a nonzero status and cannot be exported. Input projects have
 a 128 MiB limit including embedded geometry. Model imports are limited to 32 MiB,
-100,000 triangles and 300,000 vertices. CAD workers have a 120-second timeout and
+250,000 triangles and 750,000 vertices. CAD workers have a 120-second timeout and
 can be cancelled. Generation is bounded to 200,000 moves, 2,000 depth passes and
 10,000 pocket rows. Schema version 8 rejects unknown fields and unsupported versions;
 versions 1–4 migrate with generic machine definitions. Migrated milling reach checks

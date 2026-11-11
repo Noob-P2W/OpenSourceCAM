@@ -70,7 +70,7 @@ def convert(request):
                 raise ValueError("CAD coordinates exceed the supported range")
             count += 1
             if count > request["max_triangles"]:
-                raise ValueError("CAD tessellation exceeds 100,000 triangles")
+                raise ValueError(f"CAD tessellation exceeds {request['max_triangles']:,} triangles")
             facets.extend(struct.pack("<12fH", 0.0, 0.0, 0.0, *coords, 0))
         explorer.Next()
     if count == 0:
