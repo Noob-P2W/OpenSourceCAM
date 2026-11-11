@@ -141,7 +141,7 @@ export function initShell(api){
  $('add').onclick=()=>{setBrowser(false);category='2d';ribbon();api.status('Choose an operation from the 2.5D, 3D or drilling ribbon.')};
  function navigate(pane){closeAll();if(pane==='import')open('import-dialog');else if(pane==='setup')openSetup('stock');else{closeAll();setBrowser(true)}}
  document.querySelector('[data-go-pane=operations]').onclick=()=>api.task(async()=>{await applyStock(false);navigate('operations')});
- function afterImport(role){close('import-dialog');if(prefs.autoFrame)api.viewport.fit(role==='part'?undefined:'all');if(role==='part')setBrowser(false)}
+ function afterImport(role){close('import-dialog');if(prefs.autoFrame)api.viewport.fit(role==='part'?undefined:{model:api.project().workspace.at(-1).id});if(role==='part')setBrowser(false)}
  function homeIcons(){document.querySelectorAll('.process-card').forEach(card=>{const span=document.createElement('span');span.className='process-image';span.innerHTML=icon(card.dataset.process,'illustration');card.prepend(span)})}
  applyPreferences();paintIcons();
  return {showFeatures,hideBrowser:()=>setBrowser(false),restoreLibraries,render,navigate,openOperation,newOperation,resumeOperation,openPlanning,openTools,openMachines,importMachine,afterImport,openVise,close,closeAll,homeIcons,applyPreferences,prefs:()=>prefs,openInspect,open};
