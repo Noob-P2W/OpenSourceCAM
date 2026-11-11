@@ -410,12 +410,15 @@ pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result
             "iges" => import::SourceFormat::Iges,
             _ => return Err("Unsupported CAD format".into()),
         };
+        let mut mesh: import::Mesh = serde_json::from_str(mesh).map_err(|e| e.to_string())?;
+        let removed_degenerate_triangles = mesh.repair_degenerate_triangles()?;
         let part = import::Part {
             rotation: [0.; 3],
             geometry: std::sync::Arc::new(import::Geometry {
+                removed_degenerate_triangles,
                 source_name: name.into(),
                 format,
-                mesh: serde_json::from_str(mesh).map_err(|e| e.to_string())?,
+                mesh,
                 cad_source: Some(source.into()),
             }),
             units: import::Units::Millimetres,

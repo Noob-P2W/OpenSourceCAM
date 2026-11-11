@@ -80,6 +80,56 @@ pub struct Mesh {
 
 impl Mesh {
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_import_input()?;
+        if self
+            .triangles
+            .iter()
+            .any(|triangle| area_squared(triangle.map(|i| self.vertices[i as usize])) <= 0.0)
+        {
+            return Err("Mesh contains a degenerate triangle".into());
+        }
+        Ok(())
+    }
+
+    /// Only new model imports may discard zero-area facets. Project validation stays strict.
+    pub fn repair_degenerate_triangles(&mut self) -> Result<usize, String> {
+        self.validate_import_input()?;
+        let before = self.triangles.len();
+        self.triangles
+            .retain(|triangle| area_squared(triangle.map(|i| self.vertices[i as usize])) > 0.0);
+        let removed = before - self.triangles.len();
+        if self.triangles.is_empty() {
+            return Err(
+                "Model contains no usable triangles after removing degenerate faces".into(),
+            );
+        }
+        if removed > 0 {
+            let mut used = vec![false; self.vertices.len()];
+            for triangle in &self.triangles {
+                for index in triangle {
+                    used[*index as usize] = true;
+                }
+            }
+            let mut remap = vec![0; self.vertices.len()];
+            let mut vertices = Vec::new();
+            for (index, point) in self.vertices.iter().enumerate() {
+                if used[index] {
+                    remap[index] = vertices.len() as u32;
+                    vertices.push(*point);
+                }
+            }
+            for triangle in &mut self.triangles {
+                for index in triangle {
+                    *index = remap[*index as usize];
+                }
+            }
+            self.vertices = vertices;
+        }
+        self.validate()?;
+        Ok(removed)
+    }
+
+    pub(crate) fn validate_import_input(&self) -> Result<(), String> {
         if self.triangles.is_empty()
             || self.triangles.len() > MAX_TRIANGLES
             || self.vertices.is_empty()
@@ -102,9 +152,6 @@ impl Mesh {
         for triangle in &self.triangles {
             if triangle.iter().any(|i| *i as usize >= self.vertices.len()) {
                 return Err("Mesh face references an invalid vertex".into());
-            }
-            if area_squared(triangle.map(|i| self.vertices[i as usize])) <= 0.0 {
-                return Err("Mesh contains a degenerate triangle".into());
             }
         }
         Ok(())
@@ -166,9 +213,16 @@ impl Bounds {
     }
 }
 
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Geometry {
+    /// Zero-area facets removed during model import, before any geometry links exist.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub removed_degenerate_triangles: usize,
     pub source_name: String,
     pub format: SourceFormat,
     pub mesh: Mesh,
@@ -346,7 +400,7 @@ pub fn import_bytes(
     if format.is_cad() {
         return Err("STEP/IGES import is not available in the browser yet. Use STL/OBJ or a desktop-saved project.".into());
     }
-    let (mesh, cad_source) = match format {
+    let (mut mesh, cad_source) = match format {
         SourceFormat::Stl => (mesh::stl(data)?, None),
         SourceFormat::Obj => (mesh::obj(data)?, None),
         SourceFormat::Step | SourceFormat::Iges => {
@@ -363,9 +417,11 @@ pub fn import_bytes(
             (mesh, Some(source))
         }
     };
+    let removed_degenerate_triangles = mesh.repair_degenerate_triangles()?;
     let part = Part {
         rotation: [0.; 3],
         geometry: Arc::new(Geometry {
+            removed_degenerate_triangles,
             source_name: path
                 .file_name()
                 .unwrap_or_default()

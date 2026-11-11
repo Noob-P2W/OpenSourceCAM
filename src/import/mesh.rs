@@ -47,7 +47,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
                 vertices,
                 triangles,
             };
-            mesh.validate()?;
+            mesh.validate_import_input()?;
             return Ok(compact_stl(mesh));
         }
     }
@@ -119,7 +119,7 @@ pub fn stl(data: &[u8]) -> Result<Mesh, String> {
         vertices,
         triangles,
     };
-    mesh.validate()?;
+    mesh.validate_import_input()?;
     Ok(compact_stl(mesh))
 }
 
@@ -210,7 +210,7 @@ pub fn obj(data: &[u8]) -> Result<Mesh, String> {
         vertices,
         triangles,
     };
-    mesh.validate()?;
+    mesh.validate_import_input()?;
     Ok(mesh)
 }
 

@@ -74,8 +74,8 @@ no independent fixture coordinate calculation is used in JavaScript.
 
 ## Large-model memory and rendering
 
-STL import interns exactly equal vertex coordinates; it retains every triangle and
-its winding, with no geometric decimation. Import commits directly inside the
+STL import interns exactly equal vertex coordinates; it retains every nondegenerate triangle and
+its winding, with no geometric decimation. Zero-area import cleanup is reported below. Import commits directly inside the
 worker's Rust session rather than sending a project to the page and back again.
 Calculation commands borrow the session project instead of serializing/reparsing it.
 Undo snapshots clone Project metadata and share immutable Geometry through Arc;
@@ -245,3 +245,11 @@ Browser stock simulation requires current generated, nonempty toolpaths. Editing
 invalidates them and disables stock simulation until generation succeeds. Inspection
 and playback share one resolution control; updates have no fixed timer/FPS cap,
 with one worker request in flight and only the latest target queued.
+
+New STL/OBJ model imports and CAD tessellations automatically discard zero-area
+triangles and orphan vertices, preserving valid face coordinates and winding without a welding
+tolerance. Removed counts are retained in geometry metadata and shown in the
+browser import status and Setup. Input limits, coordinate/index checks and strict
+project validation remain. All-degenerate meshes fail without replacing the
+workspace. Cleanup does not fill holes or certify manifold/closed geometry;
+existing saved projects are not automatically rewritten because face links may exist.

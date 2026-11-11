@@ -227,3 +227,105 @@ fn bundled_kernel_imports_step_iges_and_file_units() {
         .unwrap_err()
         .contains("units"));
 }
+
+#[test]
+fn model_import_removes_only_zero_area_triangles_and_records_the_count() {
+    let obj=b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0.000001 0 0\nv 0 0.000001 0\nf 1 2 3\nf 1 1 1\nf 1 2 4\nf 1 4 5\n";
+    let part = import::import_bytes(
+        std::path::Path::new("repair.obj"),
+        Units::Millimetres,
+        obj,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(part.geometry.removed_degenerate_triangles, 2);
+    assert_eq!(part.geometry.mesh.triangles, vec![[0, 1, 2], [0, 3, 4]]);
+    part.validate().unwrap();
+    let roundtrip: import::Part =
+        serde_json::from_str(&serde_json::to_string(&part).unwrap()).unwrap();
+    assert_eq!(part, roundtrip);
+    let mut broken = (*part.geometry).clone();
+    broken.mesh.triangles.push([0, 0, 0]);
+    assert!(
+        broken.mesh.validate().unwrap_err().contains("degenerate"),
+        "Existing project validation must remain strict"
+    );
+}
+
+#[test]
+fn ascii_and_binary_stl_cleanup_preserve_valid_facets() {
+    let text=ASCII.replace("endsolid sample", "facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 0 0 0\nvertex 0 0 0\nendloop\nendfacet\nendsolid sample");
+    let part = import::import_bytes(
+        std::path::Path::new("repair.stl"),
+        Units::Millimetres,
+        text.as_bytes(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(part.geometry.removed_degenerate_triangles, 1);
+    assert_eq!(part.geometry.mesh.triangles.len(), 1);
+    let mut binary = vec![0u8; 184];
+    binary[80..84].copy_from_slice(&2u32.to_le_bytes());
+    for (i, value) in [0f32, 0., 0., 1., 0., 0., 0., 1., 0.]
+        .into_iter()
+        .enumerate()
+    {
+        binary[96 + i * 4..100 + i * 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let other = import::import_bytes(
+        std::path::Path::new("binary.stl"),
+        Units::Millimetres,
+        &binary,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(other.geometry.removed_degenerate_triangles, 1);
+    assert_eq!(other.geometry.mesh, part.geometry.mesh);
+}
+
+#[test]
+fn repair_rejects_unusable_or_invalid_meshes_before_discarding_faces() {
+    let mut mesh = import::Mesh {
+        vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+        triangles: vec![[0, 0, 0]],
+    };
+    assert!(mesh
+        .repair_degenerate_triangles()
+        .unwrap_err()
+        .contains("no usable"));
+    mesh.triangles = vec![[0, 1, 99]];
+    assert!(mesh
+        .repair_degenerate_triangles()
+        .unwrap_err()
+        .contains("invalid vertex"));
+    mesh.triangles = vec![[0, 1, 2]];
+    mesh.vertices.push([f64::NAN, 0., 0.]);
+    assert!(mesh.repair_degenerate_triangles().is_err());
+    mesh.vertices.pop();
+    mesh.triangles = vec![[0, 0, 0]; MAX_TRIANGLES + 1];
+    assert!(mesh
+        .repair_degenerate_triangles()
+        .unwrap_err()
+        .contains("100,000"));
+}
+
+#[test]
+fn cleanup_drops_orphan_vertices_so_camera_fit_cannot_include_bad_face_outliers() {
+    let mut mesh = import::Mesh {
+        vertices: vec![
+            [99999., 99999., 99999.],
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [0., 1., 0.],
+        ],
+        triangles: vec![[0, 0, 0], [1, 2, 3]],
+    };
+    assert_eq!(mesh.repair_degenerate_triangles().unwrap(), 1);
+    assert_eq!(
+        mesh.vertices,
+        vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]]
+    );
+    assert_eq!(mesh.triangles, vec![[0, 1, 2]]);
+    assert_eq!(mesh.repair_degenerate_triangles().unwrap(), 0);
+    mesh.validate().unwrap();
+}

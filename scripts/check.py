@@ -41,6 +41,7 @@ def web():
         run('node', 'web/startup-smoke.mjs', env=env)
         run('node', 'web/smoke.mjs', env=env)
         run('node', 'web/cad-smoke.mjs', env=env)
+        run('node', 'web/mesh-repair-smoke.mjs', env=env)
         run('node', 'web/layout-smoke.mjs', env=env)
         run('node', 'web/workflow-smoke.mjs', env=env)
         run('node', 'web/geometry-smoke.mjs', env=env)

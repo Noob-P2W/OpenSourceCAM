@@ -115,3 +115,11 @@ Browser stock simulation requires current generated, nonempty toolpaths. Editing
 invalidates them and disables stock simulation until generation succeeds. Inspection
 and playback share one resolution control; updates have no fixed timer/FPS cap,
 with one worker request in flight and only the latest target queued.
+
+New STL/OBJ model imports and CAD tessellations automatically discard zero-area
+triangles and orphan vertices, preserving valid face coordinates and winding without a welding
+tolerance. Removed counts are retained in geometry metadata and shown in the
+browser import status and Setup. Input limits, coordinate/index checks and strict
+project validation remain. All-degenerate meshes fail without replacing the
+workspace. Cleanup does not fill holes or certify manifold/closed geometry;
+existing saved projects are not automatically rewritten because face links may exist.

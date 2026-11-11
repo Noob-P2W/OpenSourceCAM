@@ -247,6 +247,7 @@ fn calculate(
     Ok(Simulation {
         summary,
         geometry: Arc::new(Geometry {
+            removed_degenerate_triangles: 0,
             source_name: "Simulated remaining stock".into(),
             format: SourceFormat::Stl,
             mesh,
