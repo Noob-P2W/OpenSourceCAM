@@ -1,0 +1,11 @@
+[
+  {"name":"bug","color":"d73a4a","description":"Something is not working correctly"},
+  {"name":"enhancement","color":"a2eeef","description":"Suggestion, new feature or improvement"},
+  {"name":"question","color":"d876e3","description":"Question or request for help"},
+  {"name":"needs triage","color":"fbca04","description":"Awaiting initial review and classification"},
+  {"name":"needs information","color":"fef2c0","description":"More details or a reproducible example are needed"},
+  {"name":"in progress","color":"0052cc","description":"Work is actively underway"},
+  {"name":"fixed","color":"0e8a16","description":"A fix has been implemented; link the fixing commit or pull request"},
+  {"name":"wontfix","color":"ffffff","description":"Reviewed and intentionally not planned; explain the reason when closing"},
+  {"name":"duplicate","color":"cfd3d7","description":"Already tracked by another issue; link the original"}
+]

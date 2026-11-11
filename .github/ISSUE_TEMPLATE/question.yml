@@ -1,0 +1,16 @@
+name: Question / help
+description: Ask how a setting, operation, or workflow works.
+labels: [question, needs triage]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: Include what you have already tried, if relevant.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App build, device and browser
+      description: Optional, but useful for questions about the interface.

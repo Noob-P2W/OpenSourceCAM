@@ -1,0 +1,23 @@
+name: Suggestion / feature request
+description: Suggest a feature, workflow improvement, or usability change.
+labels: [enhancement, needs triage]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: Describe the machining task or problem you want to solve.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What would help?
+      description: Describe your suggestion. Sketches or examples are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+      description: Optional. Tell us how you handle this today.

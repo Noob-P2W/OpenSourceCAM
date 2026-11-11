@@ -1,0 +1,33 @@
+name: Bug report / fix needed
+description: Report a crash, incorrect result, or something that does not work.
+labels: [bug, needs triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What went wrong?
+      description: Describe the problem and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: List the actions that led to the problem. Include operation, tool and stock settings when relevant.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version / build ID
+      description: Copy the build ID shown in the app, if available.
+  - type: input
+    id: device
+    attributes:
+      label: Device, operating system and browser
+      placeholder: For example, Android tablet with Brave, or Windows PC with Chrome
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots, error text or example project
+      description: Optional. Attach a small example you are comfortable sharing publicly.
