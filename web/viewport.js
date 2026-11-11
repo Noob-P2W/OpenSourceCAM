@@ -51,7 +51,7 @@ export class Viewport {
   const stock=project.stock;this.bounds={min:[0,0,-stock.thickness],max:[stock.width,stock.height,0]};
   const include=p=>{for(let i=0;i<3;i++){this.bounds.min[i]=Math.min(this.bounds.min[i],p[i]);this.bounds.max[i]=Math.max(this.bounds.max[i],p[i])}};
   if(project.part?.visible){const part=project.part,f=part.units==='inches'?25.4:1;const matrix=project._display?.part_transform;const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v.map((x,i)=>x*f+part.offset[i]);for(const v of part.geometry.mesh.vertices)include(transform(v));if(!simulation)this.mesh(part.geometry.mesh,transform,[.6,.79,.88])}
-  this.allBounds={min:[...this.bounds.min],max:[...this.bounds.max]};for(const model of workspace){for(const p of model.vertices)for(let i=0;i<3;i++){this.allBounds.min[i]=Math.min(this.allBounds.min[i],p[i]);this.allBounds.max[i]=Math.max(this.allBounds.max[i],p[i])}this.mesh(model,v=>v,model.kind==='machine'?[.5,.55,.61]:[.7,.65,.52])}
+  this.allBounds={min:[...this.bounds.min],max:[...this.bounds.max]};for(const model of workspace){for(const p of model.vertices)for(let i=0;i<3;i++){this.allBounds.min[i]=Math.min(this.allBounds.min[i],p[i]);this.allBounds.max[i]=Math.max(this.allBounds.max[i],p[i])}this.mesh(model,v=>v,model.kind==='machine'?[.5,.55,.61]:[.7,.65,.52]).reference=true}
   this.triangleCount=this.buffers.reduce((n,b)=>n+b.count/3,0);
   const stockStart=this.buffers.length;
   if(simulation?.mesh)this.mesh(simulation.mesh,v=>v,[.45,.7,.4]);
@@ -119,14 +119,16 @@ export class Viewport {
    canvas.dataset.renderer='webgl';
   }else if(this.ctx){
    const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=this.controls.dark?'#0e171f':'#f2f5f6';ctx.fillRect(0,0,w,h);const faces=[];
-   for(const item of visible){if(item.lines)continue;const stride=Math.max(1,Math.ceil(item.count/3/Math.max(100,12000/visible.length)));for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3))));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3})}}
+   const drawLine=item=>{const line=new Path2D();let count=item.count;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${item.color.map(v=>Math.round(v*255)).join(',')})`;ctx.stroke(line)};
+   if(visible.includes(this.gridLines))drawLine(this.gridLines);
+   for(const item of visible){if(item.lines)continue;const stride=item.reference?1:Math.max(1,Math.ceil(item.count/3/Math.max(100,12000/visible.length)));for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3))));faces.push({p,color:item.color,reference:item.reference,z:p.reduce((n,v)=>n+v[2],0)/3})}}
    if(tool)for(const item of this.toolBuffers)for(let i=0;i<item.count;i+=3){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+cursor[k])));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3,tool:true})}
-   faces.sort((a,b)=>a.z-b.z);for(const face of faces){ctx.beginPath();face.p.forEach((v,i)=>i?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]));ctx.closePath();ctx.fillStyle=`rgb(${face.color.map(v=>Math.round(v*200)).join(',')})`;if(wireframe&&!face.tool)ctx.stroke();else ctx.fill()}
-   for(const item of visible.filter(x=>x.lines)){const line=new Path2D();let count=item.count;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${item.color.map(v=>Math.round(v*255)).join(',')})`;ctx.stroke(line)}
+   faces.sort((a,b)=>a.z-b.z);for(const face of faces){ctx.beginPath();face.p.forEach((v,i)=>i?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]));ctx.closePath();ctx.fillStyle=`rgb(${face.color.map(v=>Math.round(v*200)).join(',')})`;if(wireframe&&!face.tool)ctx.stroke();else{ctx.fill();if(face.reference){ctx.strokeStyle=ctx.fillStyle;ctx.lineJoin='round';ctx.lineWidth=1;ctx.stroke();ctx.lineJoin='miter'}}}
+   for(const item of visible.filter(x=>x.lines&&x!==this.gridLines))drawLine(item);
    if(showCursor&&!tool){const p=projectPoint(cursor);ctx.fillStyle='#e65100';ctx.beginPath();ctx.arc(p[0],p[1],4,0,Math.PI*2);ctx.fill()}
    canvas.dataset.renderer='canvas';
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
-  canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
+  canvas.dataset.referenceTriangles=String(this.buffers.filter(b=>b.reference).reduce((n,b)=>n+b.count/3,0));canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
   canvas.dataset.toolTriangles=String((this.toolBuffers||[]).reduce((n,item)=>n+item.count/3,0));canvas.dataset.toolId=tool?String(tool.library_id??'legacy'):'';canvas.dataset.toolTip=showCursor?cursor.join(','):'';canvas.dataset.toolOperation=showCursor?String(move.operation):'';
   return {triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
  }

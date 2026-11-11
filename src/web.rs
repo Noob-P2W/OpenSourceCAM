@@ -122,15 +122,6 @@ impl WebSession {
             stock_definition: crate::blank::StockDefinition,
             setup_issue: Option<String>,
         }
-        let visible = self
-            .inner
-            .project()
-            .workspace
-            .iter()
-            .filter(|m| m.part.visible)
-            .count()
-            .max(1);
-        let budget = (12000 / visible).max(1);
         let preview = self
             .inner
             .project()
@@ -138,25 +129,32 @@ impl WebSession {
             .iter()
             .filter(|m| m.part.visible)
             .map(|m| {
-                let stride = m.part.geometry.mesh.triangles.len().div_ceil(budget).max(1);
-                let mut p = Preview {
+                let mesh = &m.part.geometry.mesh;
+                let mut used = vec![false; mesh.vertices.len()];
+                for face in &mesh.triangles {
+                    for index in face {
+                        used[*index as usize] = true;
+                    }
+                }
+                let mut remap = vec![0; mesh.vertices.len()];
+                let mut vertices = Vec::new();
+                for (index, vertex) in mesh.vertices.iter().enumerate() {
+                    if used[index] {
+                        remap[index] = vertices.len() as u32;
+                        vertices.push(m.point(*vertex, self.inner.project().machine.as_ref()));
+                    }
+                }
+                Preview {
                     id: m.id,
                     name: m.name.clone(),
                     kind: m.kind,
-                    vertices: Vec::new(),
-                    triangles: Vec::new(),
-                };
-                for t in m.part.geometry.mesh.triangles.iter().step_by(stride) {
-                    let base = p.vertices.len() as u32;
-                    for i in t {
-                        p.vertices.push(m.point(
-                            m.part.geometry.mesh.vertices[*i as usize],
-                            self.inner.project().machine.as_ref(),
-                        ))
-                    }
-                    p.triangles.push([base, base + 1, base + 2]);
+                    vertices,
+                    triangles: mesh
+                        .triangles
+                        .iter()
+                        .map(|face| face.map(|i| remap[i as usize]))
+                        .collect(),
                 }
-                p
             })
             .collect();
         serde_json::to_string(&BrowserView {

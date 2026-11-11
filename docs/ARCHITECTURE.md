@@ -88,8 +88,9 @@ The page caches compact project JSON per committed revision; the advanced editor
 is populated lazily for large projects. Canvas redraws are coalesced, geometry
 paths cached/batched, backing buffers bounded to 4 million pixels and DPR 2, and
 main workpiece solids rendered at full resolution in WebGL. Wireframe/software
-fallback previews sample large meshes; reference model previews retain the
-12,000-triangle worker budget. The camera fits the complete stock/part volume,
+fallback previews sample large meshes; reference model previews preserve every face and shared vertex within the existing
+16-model / 300,000-reference-triangle workspace limits. Software fallback also
+retains complete fixture surfaces; its workpiece/stock display remains sampled. The camera fits the complete stock/part volume,
 including negative Z; orbit, zoom and pan are display state only.
 This limit is presentation-only and is disclosed in the preview; full geometry
 remains available to validation, planning, simulation and project downloads.

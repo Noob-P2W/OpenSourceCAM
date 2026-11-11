@@ -123,3 +123,8 @@ browser import status and Setup. Input limits, coordinate/index checks and stric
 project validation remain. All-degenerate meshes fail without replacing the
 workspace. Cleanup does not fill holes or certify manifold/closed geometry;
 existing saved projects are not automatically rewritten because face links may exist.
+
+Fixture display preserves complete reference meshes and indexed vertex sharing.
+It does not decimate by deleting faces. This applies to WebGL and software fixture
+surfaces, within the existing workspace limits. It does not add vise kinematics
+or certify physical clamping, imported fixture dimensions, or collision geometry.
