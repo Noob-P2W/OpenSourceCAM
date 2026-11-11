@@ -34,7 +34,7 @@ export function blank(): string;
 /**
  * Validate a browser-kernel result through the same Part and Project boundaries as native import.
  */
-export function cad_project(name: string, source: string, format: string, mesh: string): string;
+export function cad_project(name: string, source: string, format: string, mesh: string, bodies?: string | null): string;
 
 /**
  * Menu and editor metadata comes from the same definitions as the desktop UI.
@@ -59,7 +59,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_websession_free: (a: number, b: number) => void;
     readonly blank: (a: number) => void;
-    readonly cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly cad_project: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly catalog: (a: number) => void;
     readonly import_model: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly machine_records: (a: number, b: number, c: number) => void;

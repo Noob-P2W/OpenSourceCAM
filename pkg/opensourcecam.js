@@ -696,11 +696,12 @@ export function blank() {
  * @param {string} source
  * @param {string} format
  * @param {string} mesh
+ * @param {string | null} [bodies]
  * @returns {string}
  */
-export function cad_project(name, source, format, mesh) {
-    let deferred6_0;
-    let deferred6_1;
+export function cad_project(name, source, format, mesh, bodies) {
+    let deferred7_0;
+    let deferred7_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
@@ -711,23 +712,25 @@ export function cad_project(name, source, format, mesh) {
         const len2 = WASM_VECTOR_LEN;
         const ptr3 = passStringToWasm0(mesh, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len3 = WASM_VECTOR_LEN;
-        wasm.cad_project(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        var ptr4 = isLikeNone(bodies) ? 0 : passStringToWasm0(bodies, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        var len4 = WASM_VECTOR_LEN;
+        wasm.cad_project(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
         var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
-        var ptr5 = r0;
-        var len5 = r1;
+        var ptr6 = r0;
+        var len6 = r1;
         if (r3) {
-            ptr5 = 0; len5 = 0;
+            ptr6 = 0; len6 = 0;
             throw takeObject(r2);
         }
-        deferred6_0 = ptr5;
-        deferred6_1 = len5;
-        return getStringFromWasm0(ptr5, len5);
+        deferred7_0 = ptr6;
+        deferred7_1 = len6;
+        return getStringFromWasm0(ptr6, len6);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred6_0, deferred6_1, 1);
+        wasm.__wbindgen_export(deferred7_0, deferred7_1, 1);
     }
 }
 
@@ -998,6 +1001,10 @@ let heap = new Array(1024).fill(undefined);
 heap.push(undefined, null, true, false);
 
 let heap_next = heap.length;
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
 
 function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;

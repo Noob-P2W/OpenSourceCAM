@@ -6,7 +6,7 @@ function importCad(file,id){return new Promise((resolve,reject)=>{
  const timer=setTimeout(()=>{worker.terminate();reject(Error('CAD import exceeded 120 seconds. Try a simpler model.'))},120000);
  function finish(error,value){clearTimeout(timer);worker.terminate();error?reject(error):resolve(value)}
  worker.onerror=()=>finish(Error('CAD worker failed. This model may exceed available device memory.'));
- worker.onmessage=({data})=>{if(data.progress){self.postMessage({id,progress:data.progress});return}if(data.error){finish(Error(data.error));return}try{const source=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);finish(null,JSON.parse(core.cad_project(file.name,source,data.format,JSON.stringify(data.mesh))))}catch(error){finish(error)}};
+ worker.onmessage=({data})=>{if(data.progress){self.postMessage({id,progress:data.progress});return}if(data.error){finish(Error(data.error));return}try{const source=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);finish(null,JSON.parse(core.cad_project(file.name,source,data.format,JSON.stringify(data.mesh),JSON.stringify(data.bodies||[]))))}catch(error){finish(error)}};
  worker.postMessage(file);
 })}
 self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, epoch, budget, tool_id, index, history, strategy, data}}) => {

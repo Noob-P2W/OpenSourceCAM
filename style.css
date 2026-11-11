@@ -56,3 +56,5 @@ span.project-title{cursor:default;display:flex;align-items:center}div.tree-root{
 
 /* Explicit viewport centering, including confirmations with a static-position inset. */
 .work-dialog{position:fixed;inset:0;margin:auto}
+
+.vise-components{overflow-x:auto;margin:12px 0}.vise-components table{width:100%;table-layout:fixed}.vise-components th:first-child{width:42%}.vise-components th:last-child{width:20%}.vise-components td{overflow-wrap:anywhere;vertical-align:middle}.vise-components label{display:flex;align-items:center;gap:6px;font-size:12px}.vise-components input[type=checkbox]{flex:none;width:18px;min-height:18px}.vise-components button{padding:6px;min-width:40px}
