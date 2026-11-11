@@ -18,8 +18,7 @@ const help={
 Object.assign(help,{
  view:'Camera projection only. Changing the view does not rotate the workpiece or machining plane.',
  'playback-speed':'Playback multiplier. 1× follows estimated feed and rapid time, excluding controller acceleration and tool-change delays.',
- 'playback-detail':'Sampling resolution along the longest stock side. Higher values resolve smaller cuts but use more memory and calculations.',
- 'simulation-detail':'Resolution for a detailed stock inspection. This affects the preview, not the exported toolpath.',
+ 'simulation-detail':'Shared sampling resolution for stock inspection and playback. This affects the preview, not the exported toolpath.',
  progress:'Seek through the estimated machining timeline. Seeking pauses playback; rewinding resets removal from uncut stock.',
  'show-stock':'Show or hide the blank outline. This does not change the stock definition or export.',
  'show-paths':'Show or hide path lines while keeping the tool and stock playback visible. Exported paths are unchanged.',

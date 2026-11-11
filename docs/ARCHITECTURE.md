@@ -171,7 +171,7 @@ Generated path presentation includes Rust-computed start/end seconds for each
 move. Both the cursor and stock snapshots select the same estimated-time prefix.
 WebSession caches one preflighted PlaybackPreview path, invalidating it on every
 successful edit/import/plan. A generate response includes its bounded uncut stock
-mesh. The browser requests at most ten stock updates per second (32 cells by default), with
+mesh. The browser requests stock updates paced by animation frames (64 cells by default), with
 one request in flight and only the latest target queued. Rust retains the sampled
 heightfield and advances only newly elapsed motion. Tight swept-capsule row bounds
 avoid scanning diagonal bounding rectangles; already cleared cells skip cutter
@@ -237,3 +237,8 @@ Surface contact now uses `contact.rs`: a triangle bounding hierarchy, analytic c
 Detailed feature surveys augment conservative prismatic planning with connected wall-profile chains and recessed floor regions. `Feature.detail.triangles` refers to the original mesh ordering for exact surface highlighting; profile/island metadata supports inspection without enabling unsupported simple machining. Browser markers and the part tree share a single selection and pending operation draft.
 
 `post::checked_geometry_path` is the shared planning/simulation preflight; `checked_path` adds export post/tool-change validation. Manual-change approach/return routes receive travel and fixture checks in addition to the cutting path. Export emits calibrated compensation and controller-specific operator stops; controller-managed M6 motion remains the controller's responsibility.
+
+Browser stock simulation requires current generated, nonempty toolpaths. Editing
+invalidates them and disables stock simulation until generation succeeds. Inspection
+and playback share one resolution control; updates have no fixed timer/FPS cap,
+with one worker request in flight and only the latest target queued.

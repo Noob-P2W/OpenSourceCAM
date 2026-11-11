@@ -57,10 +57,10 @@ assigned when adding tools to an existing job. The table combines text search
 with an exact cutting-tool type filter. New empty jobs can still activate their
 newly created tool.
 
-Detailed inspection offers up to **512 cells** on the stock's longest side. Live
-playback has its own **Detail** selector; Quick/32 remains the default. Larger live
+Detailed inspection offers up to **512 cells** on the stock's longest side. Inspection and playback share the **Stock simulation resolution** selector;
+Standard/64 is the default. Live
 updates retain previously removed stock and replace only changed mesh strips,
-with at most ten requests per second and one calculation in flight. Seeking and
+with animation-frame pacing and one calculation in flight. Seeking and
 rewinding reset stale incremental state at every resolution. The detailed simulation is
 bounded to 512² cells and 2 million generated
 triangles above 192 cells. Lower detail retains the previous 100,000-triangle cap.
@@ -73,3 +73,8 @@ guard also remains. The choice also applies to remaining-stock OBJ export.
 These are display budgets; import and machining validation are unchanged.
 High settings can take longer and need more memory; cancellation remains available
 for detailed inspection.
+
+Browser stock simulation requires current generated, nonempty toolpaths. Editing
+invalidates them and disables stock simulation until generation succeeds. Inspection
+and playback share one resolution control; updates have no fixed timer/FPS cap,
+with one worker request in flight and only the latest target queued.

@@ -7,9 +7,9 @@ try{
  for(const [width,height,software] of [[390,844,false],[768,1024,false],[1440,900,false],[390,844,true]]){
   const context=await browser.newContext({viewport:{width,height},hasTouch:true});
   if(software)await context.addInitScript(()=>{const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'?null:get.call(this,type,...args)}});
-  const page=await context.newPage(),errors=[];await page.addInitScript(()=>{const Original=Worker;window.Worker=class extends Original{constructor(...args){super(...args);this.addEventListener('message',({data})=>{if(data.value?.moves)window.testGeneratedPath=data.value})}}});page.on('pageerror',e=>errors.push(e.message));
+  const page=await context.newPage(),errors=[];await page.addInitScript(()=>{const Original=Worker;window.Worker=class extends Original{constructor(...args){super(...args);this.addEventListener('message',({data})=>{if(data.value?.moves)window.testGeneratedPath=data.value})}postMessage(message,transfer){if(window.fastStock&&message.action==='stock-preview'){window.stockTicks=(window.stockTicks||0)+1;queueMicrotask(()=>this.onmessage({data:{id:message.id,value:{reset:true,epoch:message.epoch,resolution:message.resolution,patches:[],vertices:new Float32Array(),summary:{resolution:[message.resolution,message.resolution],cell_size:[1,1],progress:message.progress}}}}));return}super.postMessage(message,transfer)}}});page.on('pageerror',e=>errors.push(e.message));
   await page.goto(process.env.PWA_URL||'http://127.0.0.1:8096');await ready(page);
-  assert.equal(await page.locator('#play').isDisabled(),true,'Playback needs generated paths');
+  assert.equal(await page.locator('#play').isDisabled(),true,'Playback needs generated paths');assert.equal(await page.locator('#simulate').isDisabled(),true);assert.equal(await page.locator('#show-simulation').isDisabled(),true);assert.equal(await page.locator('#playback-detail').count(),0);
   await generate(page);await page.locator('.playback-dock > summary').click();
   await page.clock.install({time:new Date('2026-11-10T12:00:00Z')});
   await page.clock.pauseAt(new Date('2026-11-10T12:00:01Z'));
@@ -33,8 +33,10 @@ try{
   const box=await page.locator('#canvas').boundingBox();await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5);await page.mouse.down({button:'right'});await page.mouse.move(box.x+box.width*.5+20,box.y+box.height*.5+12);await page.mouse.up({button:'right'});await page.clock.runFor(150);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'true','Panning must not pause playback');
   await visibility(page,'show-paths',false);await page.clock.runFor(100);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'true');await visibility(page,'show-paths',true);
   await page.locator('#home-button').click();const left=await progress();await page.clock.runFor(500);assert.equal(await progress(),left,'Leaving the workspace stops playback');await page.locator('#resume-workspace').click();
-  await page.locator('#play').click();await editOperation(page);await page.getByLabel('depth · mm',{exact:true}).fill('4');await saveOperation(page);assert.equal(await page.locator('#play').isDisabled(),true);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');
-  const edited=await progress();await page.clock.runFor(500);assert.equal(await progress(),edited,'Edits invalidate paths and stop their animation');await generate(page);assert.equal(await page.locator('#play').isEnabled(),true);
+  await page.locator('#play').click();await editOperation(page);await page.getByLabel('depth · mm',{exact:true}).fill('4');await saveOperation(page);assert.equal(await page.locator('#play').isDisabled(),true);assert.equal(await page.locator('#show-simulation').isDisabled(),true);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');
+  const edited=await progress();await page.clock.runFor(500);assert.equal(await progress(),edited,'Edits invalidate paths and stop their animation');await generate(page);assert.equal(await page.locator('#play').isEnabled(),true);assert.equal(await page.locator('#show-simulation').isEnabled(),true);
+  // A cheap engine must be allowed to deliver faster than the former 10 FPS cap.
+  await page.evaluate(()=>{window.fastStock=true;window.stockTicks=0});await visibility(page,'show-simulation',true);await seek(10);await page.locator('#play').click();await page.clock.runFor(1000);assert.ok(await page.evaluate(()=>window.stockTicks)>15,'Fast stock updates must follow animation frames rather than a fixed 100 ms timer');await page.locator('#play').click();
   assert.deepEqual(errors,[]);console.log(`PASS: ${width}px ${software?'software':'WebGL'} playback, visible motion, pause/resume, scrub, completion/replay, single animation loop and invalidation`);await context.close();
  }
 }finally{await browser.close()}

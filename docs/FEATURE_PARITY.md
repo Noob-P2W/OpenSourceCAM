@@ -63,7 +63,7 @@ and configured holder at this position, switching with the operation's tool.
 Show tool can be disabled to return to the position marker. Assembly meshes are
 illustrative library geometry, not measured cutter flute surfaces or additional
 collision verification. Playback uses the shared Rust estimated-time timeline and the selected speed multiplier.
-With Simulated stock enabled, bounded worker snapshots (32 cells by default, up to 512 selectable) update during
+With Simulated stock enabled, bounded worker snapshots (64 cells by default, up to 512 selectable) update during
 playback; rewinding immediately restores the uncut mesh. The detailed inspection
 command retains selectable resolution, target comparison and fixture reporting.
 The browser regression runs playback at normal frame intervals, checks visible
@@ -105,3 +105,8 @@ overrides show resolved inherited values. Field help supports mouse hover, keybo
 focus and touch editing. These presentation controls are browser features.
 
 Multi-tool generation/simulation no longer depends on ATC export configuration. Export retains geometry/fixture preflight and additionally checks the configured manual-change position and calibrated H registers, or the existing ATC configuration. Generic/Mach3 support mandatory M0 changes; LinuxCNC uses its configured manual M6 handshake. GRBL remains one tool per NC file. See [manual tool changes](MANUAL_TOOL_CHANGES.md).
+
+Browser stock simulation requires current generated, nonempty toolpaths. Editing
+invalidates them and disables stock simulation until generation succeeds. Inspection
+and playback share one resolution control; updates have no fixed timer/FPS cap,
+with one worker request in flight and only the latest target queued.
