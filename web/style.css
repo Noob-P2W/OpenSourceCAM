@@ -53,3 +53,6 @@ input[data-managed=true],input[data-inherited=true]{color:#a23a34;border-color:#
 .field-state-box{position:relative;width:100%}.field-state-box[data-managed=true] input,.field-state-box[data-inherited=true] input{height:56px;padding-top:23px}.field-state-label{position:absolute;top:5px;left:10px;font-size:10px;line-height:14px;color:#a23a34;font-weight:600;pointer-events:none}body[data-theme=dark] .field-state-label{color:#ffb9ad}select[data-inherited=true]{color:#a23a34;border-color:#bb625b}body[data-theme=dark] select[data-inherited=true]{color:#ffb9ad}
 
 span.project-title{cursor:default;display:flex;align-items:center}div.tree-root{cursor:default;display:flex;align-items:center;gap:8px}
+
+/* Explicit viewport centering, including confirmations with a static-position inset. */
+.work-dialog{position:fixed;inset:0;margin:auto}
