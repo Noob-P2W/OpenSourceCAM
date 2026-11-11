@@ -256,12 +256,21 @@ workspace. Cleanup does not fill holes or certify manifold/closed geometry;
 existing saved projects are not automatically rewritten because face links may exist.
 
 Imported-vise profiles use two picked gripping faces, a measured closing-travel
-limit and a connected movable-body selection. Rust derives exact-coordinate body
-connectivity, opposing rectangular planes and the work X/Y closing direction.
-The initial scope is unrotated rectangular stock and straight jaws with their
-movable body behind the gripping plane. Fused bodies, separate disconnected
-inserts, stepped/curved gripping faces and other orientations require prepared
-geometry; the wizard rejects them rather than segmenting arbitrary solids.
+limit and a movable rigid group. Browser STEP/IGES imports retain each source
+solid/shell mesh as a named component, including its assembly path when supplied
+by the kernel. Vertex sharing and planar-face grouping stay within those component
+boundaries, so touching parts are not fused. The setup lists the components and
+highlights each one; the movable gripping component is mandatory and additional
+inserts/fasteners can be attached to its rigid group. Other components keep their
+imported relative positions. The group has one work X/Y translation with a travel
+limit; imported CAD mates and general assembly constraint solving are not supported.
+STL/OBJ, older saved imports and the paused native CAD adapter have no source
+component identities and retain the exact-connectivity fallback; touching mesh
+shells may be indistinguishable. Reimport a browser STEP assembly to obtain its
+component metadata. The supported contact remains unrotated rectangular stock,
+opposing rectangular planes, and straight jaws with their moving geometry behind
+the gripping plane. Fused solids, stepped/curved contacts and other orientations
+still require prepared geometry.
 Clamp places the vise around the stock at the specified jaw grip and materializes
 the closed jaw mesh. SAT stock/fixture surface interference and closed-shell stock
 containment are checked atomically. The same posed mesh feeds existing tool/shaft/
@@ -275,7 +284,7 @@ configuration. Library export restores the jaw's open geometry; no machine
 connection or calibrated controller binding is created.
 
 Model imports accept at most 250,000 triangles / 750,000 imported vertices. CAD
-flattening shares exactly equal vertex coordinates across tessellated surfaces;
+tessellation shares exactly equal vertex coordinates within each source component;
 it does not weld nearby points, discard faces, or relax the existing 0.1 mm
 linear / 0.3 rad angular tessellation settings. The 32 MiB source file limit,
 16-model / 300,000-total-reference-triangle workspace budget and simulation mesh

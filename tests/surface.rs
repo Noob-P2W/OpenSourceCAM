@@ -38,6 +38,7 @@ fn wedge() -> Project {
     let part = Part {
         rotation: [0.; 3],
         geometry: Arc::new(Geometry {
+            bodies: Vec::new(),
             removed_degenerate_triangles: 0,
             source_name: "ramp.obj".into(),
             format: SourceFormat::Obj,

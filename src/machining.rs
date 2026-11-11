@@ -57,6 +57,15 @@ pub fn model_fingerprint(part: &Part) -> String {
     if let Some(source) = &part.geometry.cad_source {
         hash.bytes(source.as_bytes());
     }
+    if !part.geometry.bodies.is_empty() {
+        hash.bytes(b"CAD components");
+        for body in &part.geometry.bodies {
+            hash.bytes(&(body.name.len() as u64).to_le_bytes());
+            hash.bytes(body.name.as_bytes());
+            hash.bytes(&(body.first_triangle as u64).to_le_bytes());
+            hash.bytes(&(body.triangle_count as u64).to_le_bytes());
+        }
+    }
     hash.finish()
 }
 pub fn geometry_fingerprint(op: &Operation) -> String {

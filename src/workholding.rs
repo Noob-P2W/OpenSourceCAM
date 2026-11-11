@@ -85,6 +85,7 @@ pub fn place_example(project: &mut Project, id: Option<u64>, spec: ViseSpec) -> 
     let part = Part {
         rotation: [0.; 3],
         geometry: Arc::new(Geometry {
+            bodies: Vec::new(),
             removed_degenerate_triangles: 0,
             source_name: "OpenSourceCAM example vise".into(),
             format: SourceFormat::Stl,

@@ -1,7 +1,7 @@
 //! Reusable imported parallel-jaw geometry profiles, in work coordinates.
 use crate::{
     faces,
-    import::{Mesh, Part, Units},
+    import::{Geometry, Mesh, Part, Units},
     model::Project,
     workspace::{Frame, ModelKind, WorkspaceModel},
 };
@@ -18,6 +18,35 @@ pub struct Profile {
     pub grip: f64,
 }
 impl Profile {
+    pub fn validate_geometry(&self, geometry: &Geometry) -> Result<(), String> {
+        self.validate(&geometry.mesh)?;
+        if geometry.bodies.is_empty() {
+            return Ok(());
+        }
+        let mut selected = vec![false; geometry.mesh.vertices.len()];
+        for i in &self.moving_vertices {
+            selected[*i] = true;
+        }
+        for body in &geometry.bodies {
+            let mut moving = false;
+            let mut fixed = false;
+            for triangle in &geometry.mesh.triangles
+                [body.first_triangle..body.first_triangle + body.triangle_count]
+            {
+                for v in triangle {
+                    if selected[*v as usize] {
+                        moving = true;
+                    } else {
+                        fixed = true;
+                    }
+                }
+            }
+            if moving && fixed {
+                return Err("A CAD component must move as a whole rigid body".into());
+            }
+        }
+        Ok(())
+    }
     pub fn validate(&self, m: &Mesh) -> Result<(), String> {
         if !self.grip.is_finite() || !(0.1..=1000.).contains(&self.grip) {
             return Err("Invalid saved gripping depth".into());
@@ -125,6 +154,47 @@ fn component(m: &Mesh, f: usize, g: usize) -> Result<Vec<usize>, String> {
         .filter(|i| root(&mut a, *i) == r)
         .collect())
 }
+fn assembly_group(
+    geometry: &Geometry,
+    fixed: usize,
+    moving: usize,
+    bodies: &[usize],
+) -> Result<Vec<usize>, String> {
+    if geometry.bodies.is_empty() {
+        if !bodies.is_empty() {
+            return Err("This model has no imported CAD component identities".into());
+        }
+        return component(&geometry.mesh, fixed, moving);
+    }
+    let fixed_body = geometry
+        .body_at(fixed)
+        .ok_or("Fixed face has no CAD component")?;
+    let moving_body = geometry
+        .body_at(moving)
+        .ok_or("Movable face has no CAD component")?;
+    if fixed_body == moving_body {
+        return Err(
+            "Both gripping faces belong to the same CAD body. Select separate jaw bodies.".into(),
+        );
+    }
+    let mut selected = vec![false; geometry.bodies.len()];
+    selected[moving_body] = true;
+    for id in bodies {
+        *selected
+            .get_mut(*id)
+            .ok_or("Selected CAD component does not exist")? = true;
+    }
+    if selected[fixed_body] {
+        return Err("The fixed gripping component cannot move with the jaw".into());
+    }
+    let owners = geometry.body_owners()?;
+    Ok(owners
+        .iter()
+        .enumerate()
+        .filter_map(|(i, owner)| selected.get(*owner).copied().unwrap_or(false).then_some(i))
+        .collect())
+}
+
 fn bounds(f: &faces::Face) -> ([f64; 3], [f64; 3]) {
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
@@ -178,6 +248,17 @@ pub fn configure(
     moving: usize,
     max_closure: f64,
 ) -> Result<(), String> {
+    configure_group(p, id, fixed, moving, max_closure, &[])
+}
+
+pub fn configure_group(
+    p: &mut Project,
+    id: u64,
+    fixed: usize,
+    moving: usize,
+    max_closure: f64,
+    bodies: &[usize],
+) -> Result<(), String> {
     if model(p, id)?
         .clamp
         .as_ref()
@@ -189,7 +270,7 @@ pub fn configure(
     if fixed >= mesh.triangles.len() || moving >= mesh.triangles.len() || fixed == moving {
         return Err("Pick two distinct valid gripping faces".into());
     }
-    let moving_vertices = component(mesh, fixed, moving)?;
+    let moving_vertices = assembly_group(&model(p, id)?.part.geometry, fixed, moving, bodies)?;
     p.workspace.iter_mut().find(|m| m.id == id).unwrap().clamp = Some(Profile {
         fixed,
         moving,

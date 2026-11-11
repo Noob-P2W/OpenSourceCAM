@@ -341,3 +341,60 @@ fn imports_above_the_previous_triangle_cap_remain_bounded() {
     over.triangles.resize(MAX_TRIANGLES + 1, [0, 1, 2]);
     assert!(over.validate().is_err());
 }
+
+#[test]
+fn cad_component_ranges_survive_degenerate_cleanup_and_reject_cross_body_welding() {
+    use import::{Body, Geometry, SourceFormat};
+    let mut geometry = Geometry {
+        bodies: vec![
+            Body {
+                name: "Empty component".into(),
+                first_triangle: 0,
+                triangle_count: 1,
+            },
+            Body {
+                name: "Jaw".into(),
+                first_triangle: 1,
+                triangle_count: 2,
+            },
+            Body {
+                name: "Insert".into(),
+                first_triangle: 3,
+                triangle_count: 1,
+            },
+        ],
+        mesh: import::Mesh {
+            vertices: vec![
+                [9., 9., 9.],
+                [0., 0., 0.],
+                [1., 0., 0.],
+                [0., 1., 0.],
+                [0., 0., 0.],
+                [1., 0., 0.],
+                [0., 1., 0.],
+            ],
+            triangles: vec![[0, 0, 0], [1, 2, 3], [1, 1, 1], [4, 5, 6]],
+        },
+        removed_degenerate_triangles: 0,
+        source_name: "assembly.step".into(),
+        format: SourceFormat::Step,
+        cad_source: None,
+    };
+    geometry.repair_import().unwrap();
+    assert_eq!(geometry.removed_degenerate_triangles, 2);
+    assert_eq!(geometry.bodies.len(), 2);
+    assert_eq!(geometry.bodies[0].name, "Jaw");
+    assert_eq!(geometry.bodies[0].first_triangle, 0);
+    assert_eq!(geometry.bodies[0].triangle_count, 1);
+    assert_eq!(geometry.bodies[1].first_triangle, 1);
+    assert_eq!(geometry.body_at(1), Some(1));
+    assert_eq!(geometry.body_owners().unwrap(), vec![0, 0, 0, 1, 1, 1]);
+    geometry.mesh.triangles[1][0] = 0;
+    assert!(geometry
+        .body_owners()
+        .unwrap_err()
+        .contains("must not share"));
+    geometry.mesh.triangles[1][0] = 3;
+    geometry.bodies[1].first_triangle = usize::MAX;
+    assert!(geometry.body_owners().is_err());
+}

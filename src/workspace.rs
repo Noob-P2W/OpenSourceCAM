@@ -116,7 +116,7 @@ impl WorkspaceModel {
     pub fn validate(&self, machine: Option<&MachineSetup>) -> Result<(), String> {
         self.part.validate()?;
         if let Some(profile) = &self.clamp {
-            profile.validate(&self.part.geometry.mesh)?;
+            profile.validate_geometry(&self.part.geometry)?;
         }
         self.validate_placement(machine)
     }

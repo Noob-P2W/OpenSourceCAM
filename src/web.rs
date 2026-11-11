@@ -479,10 +479,22 @@ impl WebSession {
 
 /// Validate a browser-kernel result through the same Part and Project boundaries as native import.
 #[wasm_bindgen]
-pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result<String, JsValue> {
-    fn build(name: &str, source: &str, format: &str, mesh: &str) -> Result<String, String> {
+pub fn cad_project(
+    name: &str,
+    source: &str,
+    format: &str,
+    mesh: &str,
+    bodies: Option<String>,
+) -> Result<String, JsValue> {
+    fn build(
+        name: &str,
+        source: &str,
+        format: &str,
+        mesh: &str,
+        bodies: &str,
+    ) -> Result<String, String> {
         if source.len() as u64 > import::MAX_IMPORT_BYTES
-            || mesh.len() as u64 > crate::model::MAX_PROJECT_BYTES
+            || mesh.len() as u64 + bodies.len() as u64 > crate::model::MAX_PROJECT_BYTES
         {
             return Err("CAD input exceeds import limits".into());
         }
@@ -491,17 +503,20 @@ pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result
             "iges" => import::SourceFormat::Iges,
             _ => return Err("Unsupported CAD format".into()),
         };
-        let mut mesh: import::Mesh = serde_json::from_str(mesh).map_err(|e| e.to_string())?;
-        let removed_degenerate_triangles = mesh.repair_degenerate_triangles()?;
+        let mesh: import::Mesh = serde_json::from_str(mesh).map_err(|e| e.to_string())?;
+        let bodies: Vec<import::Body> = serde_json::from_str(bodies).map_err(|e| e.to_string())?;
+        let mut geometry = import::Geometry {
+            bodies,
+            removed_degenerate_triangles: 0,
+            source_name: name.into(),
+            format,
+            mesh,
+            cad_source: Some(source.into()),
+        };
+        geometry.repair_import()?;
         let part = import::Part {
             rotation: [0.; 3],
-            geometry: std::sync::Arc::new(import::Geometry {
-                removed_degenerate_triangles,
-                source_name: name.into(),
-                format,
-                mesh,
-                cad_source: Some(source.into()),
-            }),
+            geometry: std::sync::Arc::new(geometry),
             units: import::Units::Millimetres,
             offset: [0.0; 3],
             visible: true,
@@ -509,5 +524,12 @@ pub fn cad_project(name: &str, source: &str, format: &str, mesh: &str) -> Result
         let project = Project::from_part(part)?;
         serde_json::to_string(&project).map_err(|e| e.to_string())
     }
-    build(name, source, format, mesh).map_err(|e| JsValue::from_str(&e))
+    build(
+        name,
+        source,
+        format,
+        mesh,
+        bodies.as_deref().unwrap_or("[]"),
+    )
+    .map_err(|e| JsValue::from_str(&e))
 }

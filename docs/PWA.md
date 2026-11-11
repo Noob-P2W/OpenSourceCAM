@@ -79,7 +79,8 @@ adds machining for interior/undercut surfaces or enables planned process engines
 ## Current limits
 
 STEP/IGES import runs locally through bundled OpenCascade WASM. It retains source
-text and flattens assemblies to a tessellated mesh (0.1 mm linear / 0.3 radian
+text and tessellates assemblies while retaining named component boundaries
+(0.1 mm linear / 0.3 radian
 angular deflection). The kernel adds about 7.5 MiB to the offline download.
 Inputs are limited to 32 MiB, output to 250,000 triangles / 750,000 vertices; an
 import is stopped after 120 seconds. Very large CAD can still exceed mobile memory. CAD source plus mesh can exceed

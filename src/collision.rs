@@ -267,6 +267,30 @@ fn root(parents: &mut [usize], mut id: usize) -> usize {
     }
     id
 }
+fn closed_model(
+    triangles: &mut [Triangle],
+    geometry: &crate::import::Geometry,
+    shells: &mut usize,
+    budget: &mut Budget<'_>,
+) -> Result<(), String> {
+    if geometry.bodies.is_empty() {
+        return closed_fixture(triangles, shells, budget);
+    }
+    // Validate each source component independently. Contact between two closed
+    // CAD bodies must not turn their common edges into non-manifold edges.
+    for body in &geometry.bodies {
+        let end = body
+            .first_triangle
+            .checked_add(body.triangle_count)
+            .ok_or("Invalid CAD component range")?;
+        let faces = triangles
+            .get_mut(body.first_triangle..end)
+            .ok_or("Missing CAD component triangles")?;
+        closed_fixture(faces, shells, budget)
+            .map_err(|e| format!("Component '{}': {e}", body.name))?;
+    }
+    Ok(())
+}
 fn closed_fixture(
     triangles: &mut [Triangle],
     shells: &mut usize,
@@ -502,8 +526,13 @@ fn verify(project: &Project, path: &Toolpath, budget: &mut Budget<'_>) -> Result
                 }),
             });
         }
-        closed_fixture(&mut tree.triangles[start..], &mut shells, budget)
-            .map_err(|e| format!("Fixture '{}': {e}", model.name))?;
+        closed_model(
+            &mut tree.triangles[start..],
+            &model.part.geometry,
+            &mut shells,
+            budget,
+        )
+        .map_err(|e| format!("Fixture '{}': {e}", model.name))?;
     }
     if tree.triangles.is_empty() {
         return Ok(());
@@ -623,7 +652,12 @@ pub fn check_stock_in_vise(project: &Project, id: u64) -> Result<(), String> {
             points,
         });
     }
-    closed_fixture(&mut tree.triangles, &mut 0, &mut budget)?;
+    closed_model(
+        &mut tree.triangles,
+        &model.part.geometry,
+        &mut 0,
+        &mut budget,
+    )?;
     tree.build(0, tree.triangles.len(), &mut budget)?;
     if tree.containing(center, &mut budget)?.is_some() {
         return Err("Stock is enclosed inside a solid vise body".into());

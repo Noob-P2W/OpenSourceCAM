@@ -219,7 +219,18 @@ fn is_zero(value: &usize) -> bool {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct Body {
+    pub name: String,
+    pub first_triangle: usize,
+    pub triangle_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Geometry {
+    /// Source CAD components, with disjoint vertices even at touching surfaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<Body>,
     /// Zero-area facets removed during model import, before any geometry links exist.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub removed_degenerate_triangles: usize,
@@ -230,6 +241,67 @@ pub struct Geometry {
     /// It is data only and never executed. STEP/IGES mesh coordinates are in mm.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cad_source: Option<String>,
+}
+
+impl Geometry {
+    pub fn body_at(&self, triangle: usize) -> Option<usize> {
+        self.bodies.iter().position(|b| {
+            triangle >= b.first_triangle && triangle - b.first_triangle < b.triangle_count
+        })
+    }
+
+    /// Also prevents a saved assembly from making one vertex belong to two bodies.
+    pub fn body_owners(&self) -> Result<Vec<usize>, String> {
+        let mut owners = vec![usize::MAX; self.mesh.vertices.len()];
+        let mut end = 0;
+        for (id, body) in self.bodies.iter().enumerate() {
+            if body.name.len() > 1024 || body.triangle_count == 0 || body.first_triangle != end {
+                return Err("Invalid CAD component name or triangle range".into());
+            }
+            end = end
+                .checked_add(body.triangle_count)
+                .ok_or("Invalid CAD component range")?;
+            if end > self.mesh.triangles.len() {
+                return Err("CAD component references missing triangles".into());
+            }
+            for triangle in &self.mesh.triangles[body.first_triangle..end] {
+                for vertex in triangle {
+                    let owner = owners
+                        .get_mut(*vertex as usize)
+                        .ok_or("Invalid component vertex")?;
+                    if *owner != usize::MAX && *owner != id {
+                        return Err("CAD components must not share vertex indices".into());
+                    }
+                    *owner = id;
+                }
+            }
+        }
+        if !self.bodies.is_empty() && end != self.mesh.triangles.len() {
+            return Err("CAD components must cover every triangle".into());
+        }
+        Ok(owners)
+    }
+
+    pub fn repair_import(&mut self) -> Result<(), String> {
+        self.mesh.validate_import_input()?;
+        self.body_owners()?;
+        // Keep body ranges aligned when zero-area faces are removed.
+        let mut first = 0;
+        for body in &mut self.bodies {
+            let count = self.mesh.triangles
+                [body.first_triangle..body.first_triangle + body.triangle_count]
+                .iter()
+                .filter(|t| area_squared(t.map(|i| self.mesh.vertices[i as usize])) > 0.)
+                .count();
+            body.first_triangle = first;
+            body.triangle_count = count;
+            first += count;
+        }
+        self.removed_degenerate_triangles = self.mesh.repair_degenerate_triangles()?;
+        self.bodies.retain(|b| b.triangle_count > 0);
+        self.body_owners()?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -256,6 +328,9 @@ impl PartialEq for Part {
 impl Part {
     pub fn validate(&self) -> Result<(), String> {
         self.geometry.mesh.validate()?;
+        if !self.geometry.bodies.is_empty() {
+            self.geometry.body_owners()?;
+        }
         if self
             .rotation
             .iter()
@@ -421,6 +496,7 @@ pub fn import_bytes(
     let part = Part {
         rotation: [0.; 3],
         geometry: Arc::new(Geometry {
+            bodies: Vec::new(),
             removed_degenerate_triangles,
             source_name: path
                 .file_name()

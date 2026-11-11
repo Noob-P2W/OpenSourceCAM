@@ -33,13 +33,20 @@ fn groups(part: &Part) -> Result<Vec<Group>, String> {
     let mut vertices = Vec::new();
     let mut weld = BTreeMap::new();
     let mut ids = Vec::new();
-    for v in &mesh.vertices {
+    let owners = if part.geometry.bodies.is_empty() {
+        None
+    } else {
+        Some(part.geometry.body_owners()?)
+    };
+    for (index, v) in mesh.vertices.iter().enumerate() {
         let p = part.point(*v);
         let key = p.map(|v| (v / 0.00001).round() as i64);
-        let id = *weld.entry(key).or_insert_with(|| {
-            vertices.push(p);
-            vertices.len() - 1
-        });
+        let id = *weld
+            .entry((owners.as_ref().map_or(usize::MAX, |v| v[index]), key))
+            .or_insert_with(|| {
+                vertices.push(p);
+                vertices.len() - 1
+            });
         ids.push(id);
     }
     let triangles: Vec<_> = mesh

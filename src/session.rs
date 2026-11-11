@@ -24,6 +24,13 @@ pub enum Edit {
         id: u64,
         grip: f64,
     },
+    ConfigureViseGroup {
+        id: u64,
+        fixed: usize,
+        moving: usize,
+        max_closure: f64,
+        bodies: Vec<usize>,
+    },
     OpenVise {
         id: u64,
     },
@@ -206,6 +213,10 @@ impl Session {
                         + g.mesh.triangles.len() * 12
                         + g.cad_source.as_ref().map_or(0, String::len)
                         + g.source_name.len()
+                        + g.bodies
+                            .iter()
+                            .map(|b| b.name.len() + std::mem::size_of::<crate::import::Body>())
+                            .sum::<usize>()
                 })
                 .sum()
         }
@@ -366,6 +377,20 @@ impl Session {
                 moving,
                 max_closure,
             } => crate::vise::configure(&mut candidate, id, fixed, moving, max_closure)?,
+            Edit::ConfigureViseGroup {
+                id,
+                fixed,
+                moving,
+                max_closure,
+                bodies,
+            } => crate::vise::configure_group(
+                &mut candidate,
+                id,
+                fixed,
+                moving,
+                max_closure,
+                &bodies,
+            )?,
             Edit::ClampVise { id, grip } => crate::vise::clamp(&mut candidate, id, grip)?,
             Edit::OpenVise { id } => crate::vise::open(&mut candidate, id)?,
             Edit::AddViseProfile { data } => crate::vise::add(&mut candidate, &data)?,
