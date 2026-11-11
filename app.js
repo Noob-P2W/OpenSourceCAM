@@ -15,7 +15,7 @@ document.querySelectorAll('[data-go-pane]').forEach(button=>button.onclick=()=>{
 let worker=createEngine(),jobCheckpoint=null,restarting=null;
 let sequence=0,pending=new Map(),project,selected=0,path=null,revision=0,busy=false;
 let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},simulation=null,highlight=null,toolFocus=null,playing=false,playbackFrame=null,playbackProgress=100,lastPlaybackTime=0;
-let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null,lastStockRequest=0;
+let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null;
 let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
 const playbackToolCache=new Map();
 const geometryState={key:null,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false};
@@ -27,8 +27,8 @@ function projectJSON(){return serializedProject??=JSON.stringify(project)}
 function refreshEditor(){if(!project)return;$('json').dataset.dirty='false';const data=projectJSON();const open=$('advanced-editor').open;$('json').value=(open||data.length<512*1024)?data:'';$('json').placeholder='Open this editor to load project JSON. Large models use extra memory in text form.'}
 let canUndo=false,canRedo=false,lastState,autosaved=false,fieldsDirty=false,fieldTimer;
 function scheduleFields(){clearTimeout(fieldTimer);fieldTimer=setTimeout(()=>{if(document.activeElement?.matches('input:not([type=checkbox]),textarea')){scheduleFields();return}task(async()=>{})},350)}
-function markFields(){fieldsDirty=true;serializedProject=null;autosaved=false;path=null;simulation=null;clearStockRequests();pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';historyButtons();draw();scheduleFields()}
-function historyButtons(){$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','recognize','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation;$('play').disabled=busy||!path?.moves.length}
+function markFields(){fieldsDirty=true;$('show-simulation').checked=false;serializedProject=null;autosaved=false;path=null;simulation=null;clearStockRequests();pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';historyButtons();draw();scheduleFields()}
+function historyButtons(){$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','recognize','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation;$('play').disabled=busy||!path?.moves.length;$('simulation-requirement').hidden=!!path?.moves.length;for(const id of ['simulate','show-simulation'])$(id).disabled=busy||!path?.moves.length}
 function displayView(view){presentation={setup_allowances:view.setup_allowances,part_fingerprint:view.part_fingerprint,part_transform:view.part_transform,stock_outline:view.stock_outline,stock_definition:view.stock_definition,setup_issue:view.setup_issue};Object.defineProperty(project,'_display',{value:presentation,configurable:true});workspacePreview=view.workspace_preview||[];canUndo=view.can_undo;canRedo=view.can_redo}
 function applyView(view){project=view.project;serializedProject=null;displayView(view)}
 function persist(){try{const data=projectJSON();const previous=localStorage.getItem('oc-project');let backupWarning=false;if(previous&&previous!==data){try{localStorage.setItem('oc-backup',previous)}catch{backupWarning=true}}localStorage.setItem('oc-project',data);autosaved=true;$('saved').textContent=backupWarning?'Saved on this device · previous backup could not be refreshed':'Saved on this device';return true}catch{autosaved=false;$('saved').textContent='Not saved — download a backup';status('Browser storage unavailable or full. Download a backup before closing.',true);return false}}
@@ -69,7 +69,7 @@ $('add').onclick=()=>task(async()=>{selected=project.operations.length;await ses
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
 $('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;resetPlaybackTools();if(p.moves.length)queuePlaybackTool(p.moves[0].operation);simulation=null;clearStockRequests();$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;if($('show-simulation').checked)requestStockPreview(true);draw();status('Paths generated and checked')});
 $('export').onclick=()=>task(async()=>{const gcode=await call('export');download(gcode,filename('.nc'));status('G-code generated from current project and downloaded')});
-$('simulate').onclick=()=>task(async()=>{shell.close('inspect-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value),budget:simulationBudget()});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value),budget:simulationBudget()};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`Sampled stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
+$('simulate').onclick=()=>task(async()=>{if(!path?.moves.length)throw Error('Generate valid toolpaths before simulating stock.');shell.close('inspect-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value),budget:simulationBudget()});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value),budget:simulationBudget()};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`Sampled stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
 for(const action of ['plan','surface'])$(action).onclick=()=>task(async()=>{
  shell.close('planning-dialog');status('Planning model-linked operations…');
  const options={fit_stock:!$('use-setup-stock').checked,xy_margin:$('plan-margin').valueAsNumber,top_allowance:$('plan-top').valueAsNumber,backing:$('plan-backing').valueAsNumber,replace_operations:$('replace-operations').checked,face:$('plan-face').checked,outside:$('plan-outside').checked,cavities:$('plan-cavities').checked};
@@ -90,7 +90,8 @@ const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show
 $('view').onchange=()=>viewport.setView($('view').value);$('fit-view').onclick=()=>viewport.fit();$('zoom-in').onclick=()=>viewport.magnify(1.25);$('zoom-out').onclick=()=>viewport.magnify(.8);
 $('show-paths').oninput=()=>{viewport.controls.paths=$('show-paths').checked;draw()};
 for(const id of ['wireframe','show-stock','selected-path','show-tool'])$(id).oninput=draw;
-$('playback-detail').onchange=()=>{clearStockRequests();if(path)path.preview_initial=null;requestStockPreview();draw()};
+try{const saved=localStorage.getItem('oc-stock-resolution');if([...$('simulation-detail').options].some(o=>o.value===saved))$('simulation-detail').value=saved}catch{}
+$('simulation-detail').onchange=()=>{try{localStorage.setItem('oc-stock-resolution',$('simulation-detail').value)}catch{};clearStockRequests();if(path)path.preview_initial=null;requestStockPreview();draw()};
 $('show-simulation').oninput=()=>{clearStockRequests();if($('show-simulation').checked)requestStockPreview(true);else $('stock-playback-state').textContent='';draw()};
 $('progress').oninput=()=>{pausePlayback();requestStockPreview(true);draw()};
 new ResizeObserver(draw).observe($('canvas'));
@@ -133,8 +134,9 @@ $('plan-margin').oninput=()=>{$('stock-margin').value=$('plan-margin').value};$(
 function clearStockRequests(){stockEpoch++;stockWanted=null;if(!path||!$('show-simulation').checked)$('stock-playback-state').textContent='';clearTimeout(stockTimer);stockTimer=null}
 function requestStockPreview(reset=false){
  if(!$('show-simulation').checked||!path?.moves.length)return;
- const progress=Number($('progress').value)/100,resolution=Number($('playback-detail').value);
+ const progress=Number($('progress').value)/100,resolution=Number($('simulation-detail').value);
  if(reset){clearStockRequests();simulation=path.preview_initial?.resolution===resolution?path.preview_initial:path.initial_stock?{...path.initial_stock,resolution:32,preview:true}:null;draw()}
+ if(!reset&&simulation?.resolution===resolution&&simulation.summary.progress===progress)return;
  if(progress===0&&(resolution===32||path.preview_initial?.resolution===resolution)){stockWanted=null;$('stock-playback-state').textContent='Uncut stock · 0%';return}
  stockWanted={progress,resolution,epoch:stockEpoch,revision,path};
  $('stock-playback-state').textContent=`Stock ${((simulation?.summary.progress||0)*100).toFixed(1)}% · updating`;
@@ -144,9 +146,7 @@ function simulationBudget(){const preference=shell.prefs().simulationBudget||'au
 function pumpStockPreview(){
  if(stockRequest||!stockWanted)return;
  if(busy){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},100);return}
- const wait=Math.max(0,100-(performance.now()-lastStockRequest));
- if(wait){if(stockTimer===null)stockTimer=setTimeout(()=>{stockTimer=null;pumpStockPreview()},wait);return}
- const request=stockWanted;stockWanted=null;stockRequest=true;lastStockRequest=performance.now();
+ const request=stockWanted;stockWanted=null;stockRequest=true;
  engineCall('stock-preview',{progress:request.progress,resolution:request.resolution,epoch:request.epoch,budget:simulationBudget()}).then(value=>{
   if(request.epoch!==stockEpoch||request.revision!==revision||request.path!==path||!$('show-simulation').checked)return;
   if(request.progress>Number($('progress').value)/100+1e-9)return;
