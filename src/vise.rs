@@ -1,4 +1,4 @@
-//! Reusable imported parallel-jaw geometry profiles, in work coordinates.
+//! Reusable imported parallel-jaw geometry profiles in work or machine coordinates.
 use crate::{
     faces,
     import::{Geometry, Mesh, Part, Units},
@@ -93,8 +93,8 @@ fn model(p: &Project, id: u64) -> Result<&WorkspaceModel, String> {
         .iter()
         .find(|m| m.id == id)
         .ok_or("Vise not found")?;
-    if m.kind != ModelKind::Vise || m.frame != Frame::Work {
-        return Err("Choose a vise in work coordinates".into());
+    if m.kind != ModelKind::Vise {
+        return Err("Choose a vise".into());
     }
     m.validate(p.machine.as_ref())?;
     Ok(m)
@@ -174,7 +174,7 @@ fn assembly_group(
         .ok_or("Movable face has no CAD component")?;
     if fixed_body == moving_body {
         return Err(
-            "Both gripping faces belong to the same CAD body. Select separate jaw bodies.".into(),
+            "Both gripping faces belong to the same CAD body. Re-export the vise as an assembly with separate fixed and movable jaw bodies; selecting faces cannot separate fused geometry.".into(),
         );
     }
     let mut selected = vec![false; geometry.bodies.len()];
@@ -357,6 +357,44 @@ pub fn clamp(p: &mut Project, id: u64, grip: f64) -> Result<(), String> {
     crate::collision::check_stock_in_vise(p, id)?;
     Ok(())
 }
+
+/// Seat stock by relocating its work origin while keeping the vise fixed in the machine.
+/// Use a Session transaction so any failure also rolls back geometry and the origin.
+pub fn clamp_stock_in_vise(p: &mut Project, id: u64, grip: f64) -> Result<(), String> {
+    let machine = p.machine.as_ref().ok_or("Machine setup is required")?;
+    machine.validate(p.process)?;
+    let m = model(p, id)?;
+    let work_offset = m.offset(Some(machine));
+    let machine_offset = if m.frame == Frame::Machine {
+        m.part.offset
+    } else {
+        std::array::from_fn(|i| work_offset[i] + machine.work_origin[i])
+    };
+    // The existing clamp seats the vise around the work-origin stock. Its translation
+    // gives the inverse movement needed to seat that same stock in the fixed vise.
+    let m = p.workspace.iter_mut().find(|m| m.id == id).unwrap();
+    m.frame = Frame::Work;
+    m.part.offset = work_offset;
+    clamp(p, id, grip)?;
+    let seated_offset = model(p, id)?.part.offset;
+    let machine = p.machine.as_mut().unwrap();
+    for i in 0..3 {
+        machine.work_origin[i] -= seated_offset[i] - work_offset[i];
+    }
+    machine.validate(p.process)?;
+    let m = p.workspace.iter_mut().find(|m| m.id == id).unwrap();
+    m.frame = Frame::Machine;
+    m.part.offset = machine_offset;
+    crate::workspace::validate(&p.workspace, p.machine.as_ref())?;
+    // Machine-framed fixtures now have different work positions. Check the final
+    // placement, including the closed vise, rather than relying on the temporary pose.
+    for m in &p.workspace {
+        if m.kind != ModelKind::Machine {
+            crate::collision::check_stock_in_vise(p, m.id)?;
+        }
+    }
+    Ok(())
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LibraryProfile {
@@ -366,9 +404,12 @@ struct LibraryProfile {
 pub fn export(p: &Project, id: u64) -> Result<String, String> {
     let mut copy = p.clone();
     open(&mut copy, id)?;
+    let mut portable = model(&copy, id)?.clone();
+    portable.part.offset = portable.offset(copy.machine.as_ref());
+    portable.frame = Frame::Work;
     serde_json::to_string(&LibraryProfile {
         format_version: 1,
-        model: model(&copy, id)?.clone(),
+        model: portable,
     })
     .map_err(|e| e.to_string())
 }

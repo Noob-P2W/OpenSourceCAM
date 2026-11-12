@@ -144,17 +144,34 @@ shells may be indistinguishable. Reimport a browser STEP assembly to obtain its
 component metadata. The supported contact remains unrotated rectangular stock,
 opposing rectangular planes, and straight jaws with their moving geometry behind
 the gripping plane. Fused solids, stepped/curved contacts and other orientations
-still require prepared geometry.
-Clamp places the vise around the stock at the specified jaw grip and materializes
-the closed jaw mesh. SAT stock/fixture surface interference and closed-shell stock
+still require prepared geometry. A flattened vise exported as one connected CAD
+body cannot provide independent jaw motion. The clamping panel identifies a
+single-component import and asks for a separate-body assembly export.
+Imported vises default to “Move stock and part into fixed vise” in the browser.
+The built-in example keeps its existing “Move vise around stock” default. The
+placement choice remains available before clamping; picking faces alone records
+a draft and prompts the user to clamp.
+
+The shared Rust `ClampStockInVise` / `ClampStockInViseSetup` Session actions seat
+stock and part in a fixed vise by relocating `machine.work_origin`. They preserve
+stock, part and operation machining coordinates and geometry links, pin the vise
+in `Frame::Machine` at its original machine offset, and materialize the closed jaw
+mesh. A machine definition is required. Other machine-framed fixtures retain their
+physical placement; stock interference is checked again against the final fixture
+poses. Setup, closure and origin changes roll back together on failure. The legacy
+`ClampVise` / `ClampViseSetup` actions place the vise around the stock instead.
+SAT stock/fixture surface interference and closed-shell stock
 containment are checked atomically. The same posed mesh feeds existing tool/shaft/
 holder clearance preflight; edits invalidate paths. Jaw interpolation is display
 only. Internal vise self-clearance, supports/parallels and physical clamping forces
-are not simulated. Work coordinates are used; existing machine/work-origin frames
-remain available for static placement and future machine visualization.
+are not simulated. Vise picking, profile configuration, queries and opening support
+both work and machine frames. Opening restores jaw geometry without moving the
+work origin or fixed vise; reclamping can reseat stock at another grip. Existing
+machine coordinate limits and NC travel/clearance preflight remain enforced.
 Profiles persist through project saves, undo and worker recovery. Device-local IndexedDB
 vise library records and portable JSON profiles reuse the prepared model and
-configuration. Library export restores the jaw's open geometry; no machine
+configuration. Library export restores the jaw's open geometry and converts its
+placement to portable work coordinates, so reuse needs no source machine. No machine
 connection or calibrated controller binding is created.
 
 Model imports accept at most 250,000 triangles / 750,000 imported vertices. CAD
@@ -220,3 +237,9 @@ only dirty strips and retains model/tool buffers; line geometry drops unused nor
 fields on the WebGL path. The axis widget and drawing surface resize only when
 the relevant view state changes. These are scoped optimizations, not a claim that
 every CAM algorithm has been replaced or that arbitrary assemblies are certified.
+
+Imported reference placement matrices are also applied in the software renderer.
+Both WebGL and software pose tests check translated/rotated vise pixels and jaw
+opening/closure. Fixed-vise clamping keeps the fixed jaw anchored on screen while
+stock moves, with picking still expressed in work coordinates. Explicit placement
+and Fit reset the temporary camera anchor.

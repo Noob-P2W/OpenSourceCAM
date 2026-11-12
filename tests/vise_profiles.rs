@@ -318,6 +318,34 @@ fn cad_fixed_body_and_invalid_body_selection_are_rejected_atomically() {
 }
 
 #[test]
+fn single_body_cad_vise_explains_that_separate_jaw_bodies_are_required() {
+    let (mut p, fixed, moving) = job();
+    let geometry = std::sync::Arc::make_mut(&mut p.workspace[0].part.geometry);
+    geometry.bodies = vec![opensourcecam::import::Body {
+        name: "Single imported body".into(),
+        first_triangle: 0,
+        triangle_count: geometry.mesh.triangles.len(),
+    }];
+    let mut s = Session::new(p.clone());
+    let history = s.history_checkpoint().unwrap();
+    let error = s
+        .apply(Edit::ClampStockInViseSetup {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.,
+            bodies: vec![],
+            grip: 3.,
+        })
+        .unwrap_err();
+    assert!(error.contains("same CAD body"));
+    assert!(error.contains("assembly with separate fixed and movable jaw bodies"));
+    assert!(error.contains("selecting faces cannot separate fused geometry"));
+    assert_eq!(s.project(), &p);
+    assert_eq!(s.history_checkpoint().unwrap(), history);
+}
+
+#[test]
 fn touching_cad_bodies_are_not_welded_by_face_selection_or_jaw_detection() {
     use opensourcecam::import::Body;
     use std::sync::Arc;
@@ -480,4 +508,217 @@ fn apply_clamping_draft_and_close_are_one_atomic_action() {
     assert!((s.project().workspace[0].clamp.as_ref().unwrap().closed_by - 0.5).abs() < 1e-7);
     s.apply(Edit::Undo).unwrap();
     assert_eq!(serde_json::to_string(s.project()).unwrap(), before);
+}
+
+#[test]
+fn fixed_vise_preserves_machine_pose_and_linked_work_coordinates() {
+    use opensourcecam::workspace::Frame;
+    for frame in [Frame::Work, Frame::Machine] {
+        let (mut p, fixed, moving) = assembly_job();
+        let sample =
+            Project::from_json(include_bytes!("../examples/machining-from-stock.cam.json"))
+                .unwrap();
+        p.stock = sample.stock;
+        p.part = sample.part;
+        p.operations = sample.operations;
+        p.tool_library = sample.tool_library;
+        p.active_tool = sample.active_tool;
+        p.active_preset = sample.active_preset;
+        p.tool = sample.tool;
+        p.machine.as_mut().unwrap().work_origin = [50., 60., 10.];
+        p.workspace[0].frame = frame;
+        p.workspace[0].part.offset = if frame == Frame::Work {
+            [35., 45., 20.]
+        } else {
+            [85., 105., 30.]
+        };
+        let before = p.clone();
+        let machine_offset = [85., 105., 30.];
+        let original = p.workspace[0].part.geometry.mesh.clone();
+        let mut expected = p.clone();
+        vise::configure_group(&mut expected, 1, fixed, moving, 30., &[3]).unwrap();
+        vise::clamp(&mut expected, 1, 3.).unwrap();
+        let old_offset = before.workspace[0].offset(before.machine.as_ref());
+        let seated = expected.workspace[0].offset(expected.machine.as_ref());
+        let mut s = Session::new(p);
+        let setup = serde_json::json!({"kind":"clamp_stock_in_vise_setup", "id":1,
+            "fixed":fixed, "moving":moving, "max_closure":30., "bodies":[3], "grip":3.});
+        s.apply(serde_json::from_value(setup).unwrap()).unwrap();
+        let closed = s.project().clone();
+        assert_eq!(closed.workspace[0].frame, Frame::Machine);
+        assert_eq!(closed.workspace[0].part.offset, machine_offset);
+        assert_eq!(closed.part, before.part);
+        assert_eq!(closed.stock, before.stock);
+        assert_eq!(closed.operations, before.operations);
+        assert_eq!(closed.setup_face, before.setup_face);
+        assert!(closed.operations.iter().all(|o| o.model_link.is_some()));
+        for i in 0..3 {
+            assert!(
+                (closed.machine.as_ref().unwrap().work_origin[i]
+                    - before.machine.as_ref().unwrap().work_origin[i]
+                    + seated[i]
+                    - old_offset[i])
+                    .abs()
+                    < 1e-8
+            );
+        }
+        let m = &closed.workspace[0];
+        let profile = m.clamp.as_ref().unwrap();
+        for (i, vertex) in original.vertices.iter().enumerate() {
+            let old = before.workspace[0].point(*vertex, None);
+            let now = m.point(m.part.geometry.mesh.vertices[i], None);
+            for axis in 0..3 {
+                // Work-frame references acquire the original work origin when pinned.
+                let old = old[axis]
+                    + if frame == Frame::Work {
+                        before.machine.as_ref().unwrap().work_origin[axis]
+                    } else {
+                        0.
+                    };
+                let travel = if axis == 1 && profile.moving_vertices.contains(&i) {
+                    -profile.closed_by
+                } else {
+                    0.
+                };
+                assert!((now[axis] - old - travel).abs() < 1e-8);
+            }
+        }
+        assert!(vise::info(&closed, 1).is_ok());
+        opensourcecam::collision::check_stock_in_vise(&closed, 1).unwrap();
+        let saved = Project::from_json(&serde_json::to_vec(&closed).unwrap()).unwrap();
+        assert_eq!(saved, closed);
+        let checkpoint = s.history_checkpoint().unwrap();
+        let mut recovered = Session::new(saved);
+        recovered.restore_history(&checkpoint).unwrap();
+        recovered.apply(Edit::Undo).unwrap();
+        assert_eq!(recovered.project(), &before);
+        recovered.apply(Edit::Redo).unwrap();
+        assert_eq!(recovered.project(), &closed);
+        s.apply(Edit::OpenVise { id: 1 }).unwrap();
+        assert_eq!(s.project().workspace[0].part.geometry.mesh, original);
+        assert_eq!(s.project().machine, closed.machine);
+        assert_eq!(s.project().workspace[0].part.offset, machine_offset);
+        // Machine-frame profiles can be reconfigured, queried, and clamped again.
+        s.apply(Edit::ConfigureViseGroup {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.,
+            bodies: vec![3],
+        })
+        .unwrap();
+        let reclamp = serde_json::json!({"kind":"clamp_stock_in_vise", "id":1,"grip":3.});
+        s.apply(serde_json::from_value(reclamp).unwrap()).unwrap();
+        assert_eq!(s.project(), &closed);
+        let data = vise::export(&closed, 1).unwrap();
+        assert_eq!(s.project(), &closed);
+        let mut portable = Session::new(Project::default());
+        portable.apply(Edit::AddViseProfile { data }).unwrap();
+        let m = &portable.project().workspace[0];
+        assert_eq!(m.frame, Frame::Work);
+        assert_eq!(
+            m.part.offset,
+            closed.workspace[0].offset(closed.machine.as_ref())
+        );
+        assert_eq!(m.part.geometry.mesh, original);
+        assert_eq!(m.clamp.as_ref().unwrap().closed_by, 0.);
+        portable.apply(Edit::ClampVise { id: 1, grip: 3. }).unwrap();
+    }
+}
+
+#[test]
+fn fixed_vise_rejects_invalid_setup_without_changing_project_or_history() {
+    for case in 0..7 {
+        let (mut p, fixed, moving) = assembly_job();
+        let mut travel = 30.;
+        let mut grip = 3.;
+        let mut bodies = vec![3];
+        match case {
+            0 => p.machine = None,
+            1 => travel = 0.1,
+            2 => grip = p.stock.thickness,
+            3 => bodies = vec![1],
+            4 => p.workspace[0].rotation[2] = 45.,
+            5 => {
+                p.machine.as_mut().unwrap().work_origin[0] = 999_990.;
+                p.workspace[0].part.offset[0] = 20.;
+            }
+            _ => {
+                p.stock.profile = opensourcecam::blank::StockProfile::Cylinder {
+                    diameter: 80.,
+                    length: 12.,
+                    rotation: [0.; 3],
+                }
+            }
+        }
+        let mut s = Session::new(p);
+        // Keep a redo entry too: a failed clamp must preserve both history stacks.
+        s.apply(Edit::AddOperation).unwrap();
+        s.apply(Edit::Undo).unwrap();
+        let before = s.project().clone();
+        let history = s.history_checkpoint().unwrap();
+        assert!(
+            s.apply(Edit::ClampStockInViseSetup {
+                id: 1,
+                fixed,
+                moving,
+                max_closure: travel,
+                bodies,
+                grip,
+            })
+            .is_err(),
+            "case {case}"
+        );
+        assert_eq!(s.project(), &before, "case {case}");
+        assert_eq!(s.history_checkpoint().unwrap(), history, "case {case}");
+    }
+}
+
+#[test]
+fn fixed_vise_checks_other_machine_fixtures_in_final_placement() {
+    use opensourcecam::{
+        blank,
+        workspace::{Frame, ModelKind, WorkspaceModel},
+    };
+    use std::sync::Arc;
+    let (mut p, fixed, moving) = job();
+    p.workspace[0].part.offset = [200., 0., 0.];
+    let mut part = p.workspace[0].part.clone();
+    part.offset = [0.; 3];
+    Arc::make_mut(&mut part.geometry).mesh =
+        blank::mesh_from_boxes(&[([210., 20., -8.], [215., 25., -2.])]);
+    let mut fixture = WorkspaceModel::new(2, ModelKind::Fixture, part);
+    fixture.frame = Frame::Machine;
+    p.workspace.push(fixture);
+    // The extra fixture is clear of stock before the work origin is moved.
+    opensourcecam::collision::check_stock_in_vise(&p, 2).unwrap();
+    let mut s = Session::new(p.clone());
+    let history = s.history_checkpoint().unwrap();
+    assert!(s
+        .apply(Edit::ClampStockInViseSetup {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.,
+            bodies: vec![],
+            grip: 3.,
+        })
+        .unwrap_err()
+        .contains("penetrates"));
+    assert_eq!(s.project(), &p);
+    assert_eq!(s.history_checkpoint().unwrap(), history);
+    // A clear machine fixture keeps the same machine location and permits seating.
+    p.workspace[1].part.offset = [500., 0., 0.];
+    let fixture = p.workspace[1].clone();
+    let mut s = Session::new(p);
+    s.apply(Edit::ClampStockInViseSetup {
+        id: 1,
+        fixed,
+        moving,
+        max_closure: 30.,
+        bodies: vec![],
+        grip: 3.,
+    })
+    .unwrap();
+    assert_eq!(s.project().workspace[1], fixture);
 }

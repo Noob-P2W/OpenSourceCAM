@@ -25,12 +25,18 @@ export class Viewport {
  initGL(){this.three=new ThreeView(this.canvas,this.gl);this.canvas.camViewport=this;}
  release(item){if(item?.three)this.three?.remove(item.three)}
  setView(preset){this.preset=preset;this.yaw=preset==='top'||preset==='front'?-Math.PI/2:preset==='right'?0:-Math.PI/4;this.elevation=preset==='top'?Math.PI/2:['front','right'].includes(preset)?0:Math.asin(1/Math.sqrt(3));this.fit(this.fitTarget||(this.includeReferences?'all':'part'))}
- fit(mode='part'){this.focusBounds=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
+ fit(mode='part'){this.focusBounds=null;this.fixedScale=null;this.screenAnchor=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
+ // Keep a physical reference steady across a work-origin edit; explicit Fit releases the scale.
+ keepPointOnScreen(point,screenPoint){
+  if(point?.length<3||screenPoint?.length<2||!point?.slice(0,3).every(Number.isFinite)||!screenPoint?.slice(0,2).every(Number.isFinite))return;
+  if(this.viewScale)this.fixedScale=this.viewScale/this.zoom;
+  this.screenAnchor={point:[...point],screenPoint:[...screenPoint]};this.requestDraw();
+ }
  magnify(factor){this.zoom=Math.max(.1,Math.min(30,this.zoom*factor));this.requestDraw()}
  upload(data,color,lines=false,retain=true){const item={data,color,lines,count:data.length/6};if(this.gl){item.three=this.three.upload(data,color,lines);delete item.data;}if(retain)this.buffers.push(item);return item}
  mesh(mesh,transform,color,retain=true,key=null,matrix=null){
   if(this.gl){const source=transform&&!matrix?{vertices:mesh.vertices.map(transform),triangles:mesh.triangles}:mesh;const item={color,lines:false,count:mesh.triangles.length*3,matrix};item.three=this.three.mesh(source,color,key);if(retain)this.buffers.push(item);return item}
-  const vertices=transform?mesh.vertices.map(transform):mesh.vertices;
+  const vertices=matrix?mesh.vertices.map(v=>[0,1,2].map(i=>matrix[i]*v[0]+matrix[4+i]*v[1]+matrix[8+i]*v[2]+matrix[12+i])):transform?mesh.vertices.map(transform):mesh.vertices;
   const data=new Float32Array(mesh.triangles.length*18);let offset=0;
   for(const triangle of mesh.triangles){const p=triangle.map(i=>vertices[i]);const u=p[1].map((v,i)=>v-p[0][i]),v=p[2].map((v,i)=>v-p[0][i]);let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];const length=Math.hypot(...n)||1;n=n.map(x=>x/length);for(const vertex of p){data.set(vertex,offset);data.set(n,offset+3);offset+=6}}
   return this.upload(data,color,false,retain);
@@ -108,11 +114,12 @@ export class Viewport {
   for(const p of this.annotationPoints||[])for(let i=0;i<3;i++){bounds.min[i]=Math.min(bounds.min[i],p[i]);bounds.max[i]=Math.max(bounds.max[i],p[i])}
   const center=bounds.min.map((v,i)=>(v+bounds.max[i])/2),radius=Math.max(.001,Math.hypot(...bounds.max.map((v,i)=>v-bounds.min[i]))/2);
   const cy=Math.cos(this.yaw),sy=Math.sin(this.yaw),ce=Math.cos(this.elevation),se=Math.sin(this.elevation);const right=[-sy,cy,0],up=[-se*cy,-se*sy,ce],depth=[ce*cy,ce*sy,se];const dot=(a,b)=>a.reduce((n,x,i)=>n+x*b[i],0);
-  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))*this.zoom;
+  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=(this.fixedScale??Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey))))*this.zoom;this.viewScale=scale;
   this.pickRay=(x,y)=>{const u=(x-w/2-this.pan[0])/scale,v=(h/2+this.pan[1]-y)/scale;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*radius*4),direction:depth.map(c=>-c)}};
   if(!this.axisWidget){this.axisWidget=document.createElement('div');this.axisWidget.className='scene-axis-widget';this.axisWidget.setAttribute('aria-label','Work coordinate axes in millimetres');this.canvas.parentElement.append(this.axisWidget)}this.axisWidget.hidden=!this.controls.axes;
   const axisKey=`${this.yaw}:${this.elevation}:${this.controls.dark}`;if(this.axisKey!==axisKey){this.axisKey=axisKey;this.axisWidget.innerHTML=`<svg viewBox="0 0 82 82" role="img" aria-label="3D coordinate axes">${['X','Y','Z'].map((label,i)=>{const x=41+right[i]*27,y=41-up[i]*27;return `<path d="M41 41L${x} ${y}" stroke="${['#df3c3c','#278d48','#2879d4'][i]}" stroke-width="2"/><text x="${x+2}" y="${y-2}" fill="${['#df3c3c','#278d48','#2879d4'][i]}" font-size="11">${label}</text>`}).join('')}<text x="4" y="78" fill="${this.controls.dark?'#cad9e4':'#435b6c'}" font-size="9">Work · mm</text></svg>`;}
   const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
+  if(this.screenAnchor){const {point,screenPoint}=this.screenAnchor,current=projectPoint(point);this.pan[0]+=screenPoint[0]-current[0];this.pan[1]+=screenPoint[1]-current[1];this.screenAnchor=null}
   this.projectWorld=projectPoint;
   const jawOffset=item=>{if(!item.jawMotion)return [0,0,0];if(item.jawMotion.start===null)item.jawMotion.start=performance.now();const fraction=Math.max(0,1-(performance.now()-item.jawMotion.start)/450);if(fraction>0)this.requestDraw();return item.jawMotion.from.map(v=>v*fraction)};
   const visible=this.buffers.filter(item=>(!item.setupStock||showStock)&&(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!this.pathBuffers.includes(item)||this.controls.paths!==false)&&(item!==this.pathBuffers[1]||this.controls.rapids)).sort((a,b)=>(a.lines?2:a.selection?1:0)-(b.lines?2:b.selection?1:0));

@@ -24,6 +24,18 @@ pub enum Edit {
         id: u64,
         grip: f64,
     },
+    ClampStockInVise {
+        id: u64,
+        grip: f64,
+    },
+    ClampStockInViseSetup {
+        id: u64,
+        fixed: usize,
+        moving: usize,
+        max_closure: f64,
+        bodies: Vec<usize>,
+        grip: f64,
+    },
     ClampViseSetup {
         id: u64,
         fixed: usize,
@@ -415,6 +427,27 @@ impl Session {
                 &bodies,
             )?,
             Edit::ClampVise { id, grip } => crate::vise::clamp(&mut candidate, id, grip)?,
+            Edit::ClampStockInVise { id, grip } => {
+                crate::vise::clamp_stock_in_vise(&mut candidate, id, grip)?;
+            }
+            Edit::ClampStockInViseSetup {
+                id,
+                fixed,
+                moving,
+                max_closure,
+                bodies,
+                grip,
+            } => {
+                crate::vise::configure_group(
+                    &mut candidate,
+                    id,
+                    fixed,
+                    moving,
+                    max_closure,
+                    &bodies,
+                )?;
+                crate::vise::clamp_stock_in_vise(&mut candidate, id, grip)?;
+            }
             Edit::ClampViseSetup {
                 id,
                 fixed,
