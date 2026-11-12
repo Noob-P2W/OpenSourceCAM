@@ -16,7 +16,7 @@ export function initShell(api){
   drilling:[['Hole making',[['drill_once','Drill hole',()=>newOperation('drill_once')],['drill','Peck drilling',()=>newOperation('drill')]]],['Preparation',[['library','Choose drill',()=>openTools()]]]],
   actions:[['Calculate',[['generate','Generate paths',()=>click('generate')],['simulate','Stock simulation',()=>openInspect()]]],['Output',[['post','NC preview',()=>{openInspect();click('nc-preview')}],['post','Post / export',()=>openInspect()]]]],
   libraries:[['Local libraries',[['library','Tool library',()=>openTools()],['machine','Machine library',()=>openMachines()]]],['Setup',[['machine','Active machine',()=>open('active-machine-dialog')],['vise','Fixtures',()=>openSetup('workholding')]]]],
-  inspect:[['View',[['axes','Axonometric',()=>api.viewport.setView('axo')],['fit','Fit workpiece',()=>api.viewport.fit()],['fit','Fit all models',()=>api.viewport.fit('all')]]],['Inspect',[['simulate','Material removal',()=>openInspect()],['recognize','Part features',()=>showFeatures()]]]]};
+  inspect:[['View',[['axes','Axonometric',()=>api.viewport.setView('axo')],['fit','Fit workpiece',()=>api.viewport.fit()],['fit','Fit all models',()=>api.viewport.fit('all')]]],['Inspect',[['recognize','Part features',()=>showFeatures()]]]]};
  const machiningIds=new Set(['2d','3d','drilling','actions']);
  function click(id){$(id).click()}
  function paintIcons(root=document){root.querySelectorAll('[data-icon]').forEach(node=>node.innerHTML=icon(node.dataset.icon,'illustration'));installStaticHelp(root)}
