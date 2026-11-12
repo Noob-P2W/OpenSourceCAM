@@ -37,6 +37,9 @@ try{
   const edited=await progress();await page.clock.runFor(500);assert.equal(await progress(),edited,'Edits invalidate paths and stop their animation');await generate(page);assert.equal(await page.locator('#play').isEnabled(),true);assert.equal(await page.locator('#show-simulation').isEnabled(),true);
   // A cheap engine must be allowed to deliver faster than the former 10 FPS cap.
   await page.evaluate(()=>{window.fastStock=true;window.stockTicks=0});await visibility(page,'show-simulation',true);await seek(10);await page.locator('#play').click();await page.clock.runFor(1000);assert.ok(await page.evaluate(()=>window.stockTicks)>15,'Fast stock updates must follow animation frames rather than a fixed 100 ms timer');await page.locator('#play').click();
+  await page.locator('#play').click();await page.clock.runFor(100);await page.locator('#simulation-off').click();await page.clock.runFor(32);
+  assert.equal(await page.locator('#show-simulation').evaluate(el=>el.checked),false);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#canvas').getAttribute('data-stock-progress'),'');assert.equal(await page.locator('#save-stock').isDisabled(),true);assert.equal(await page.locator('#play').isEnabled(),true,'Exiting simulation retains generated paths');
+  const stoppedTicks=await page.evaluate(()=>window.stockTicks),stoppedProgress=await progress();await page.clock.runFor(1000);assert.equal(await page.evaluate(()=>window.stockTicks),stoppedTicks,'Simulation off stops background stock requests');assert.equal(await progress(),stoppedProgress,'Simulation off stops playback');
   assert.deepEqual(errors,[]);console.log(`PASS: ${width}px ${software?'software':'WebGL'} playback, visible motion, pause/resume, scrub, completion/replay, single animation loop and invalidation`);await context.close();
  }
 }finally{await browser.close()}

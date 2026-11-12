@@ -44,9 +44,17 @@ export class ThreeView {
  render(items,{width,height,dpr,center,depth,up,scale,pan,radius,dark}){
   const size=`${width}:${height}:${dpr}`;if(this.size!==size){this.size=size;this.renderer.setPixelRatio(dpr);this.renderer.setSize(width,height,false)}this.renderer.setClearColor(dark?0x0e171f:0xf2f5f6,1);
   this.camera.left=(-width/2-pan[0])/scale;this.camera.right=(width/2-pan[0])/scale;this.camera.top=(height/2+pan[1])/scale;this.camera.bottom=(-height/2+pan[1])/scale;
-  this.camera.near=Math.max(.000001,radius*.00001);this.camera.far=radius*8;this.camera.position.fromArray(center).addScaledVector(new THREE.Vector3(...depth),radius*4);this.camera.up.fromArray(up);this.camera.lookAt(...center);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld();
+  // Fit controls the screen scale and orbit center, not which scene depths survive.
+  let nearest=radius,farthest=-radius;const worldBounds=new THREE.Box3();
   for(const e of this.entries)e.object.visible=false;
   for(const item of items){const entry=item.three;if(!entry)continue;const object=entry.object;object.visible=true;object.material.color.setRGB(...item.drawColor);if(!item.lines)object.material.wireframe=!!item.wireframe;object.geometry.setDrawRange(0,item.drawCount);object.matrixAutoUpdate=false;object.matrix.identity();if(item.matrix)object.matrix.fromArray(item.matrix);if(entry.origin)object.matrix.multiply(new THREE.Matrix4().makeTranslation(...entry.origin));object.matrix.elements[12]+=item.drawOffset[0];object.matrix.elements[13]+=item.drawOffset[1];object.matrix.elements[14]+=item.drawOffset[2];object.renderOrder=entry.marker?10:item.selection?1:item.lines?2:0;object.material.polygonOffset=!!item.selection;object.material.polygonOffsetFactor=-1;object.material.polygonOffsetUnits=-1;}
+  for(const item of items){const object=item.three?.object;if(!object||!item.drawCount)continue;
+   if(!object.geometry.boundingBox)object.geometry.computeBoundingBox();
+   worldBounds.copy(object.geometry.boundingBox).applyMatrix4(object.matrix);if(worldBounds.isEmpty())continue;
+   let lo=0,hi=0;for(let i=0;i<3;i++){const a=(worldBounds.min.getComponent(i)-center[i])*depth[i],b=(worldBounds.max.getComponent(i)-center[i])*depth[i];lo+=Math.min(a,b);hi+=Math.max(a,b)}nearest=Math.max(nearest,hi);farthest=Math.min(farthest,lo);
+  }
+  const padding=Math.max(.001,(nearest-farthest)*.01);this.cameraDistance=Math.max(radius*4,nearest+padding*2);
+  this.camera.near=Math.max(.000001,this.cameraDistance-nearest-padding);this.camera.far=this.cameraDistance-farthest+padding;this.camera.position.fromArray(center).addScaledVector(new THREE.Vector3(...depth),this.cameraDistance);this.camera.up.fromArray(up);this.camera.lookAt(...center);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld();
   this.renderer.render(this.scene,this.camera);this.prune();
  }
  dispose(){for(const entry of [...this.entries])this.remove(entry);for(const list of this.cache.values())for(const e of list)e.geometry.dispose();this.cache.clear();this.aliases.clear();this.renderer.dispose()}

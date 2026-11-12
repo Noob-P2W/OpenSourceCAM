@@ -1,5 +1,6 @@
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});
 try{
  const page=await browser.newPage();await page.goto(process.env.PWA_URL);await page.locator('#status').filter({hasText:'Ready'}).waitFor();
@@ -58,5 +59,68 @@ try{
   assert.ok(pose.screenError<1e-6&&pose.scaleError<1e-6&&pose.pickError<1e-6,`Reference anchor, scale and work-coordinate picking must agree: ${JSON.stringify(pose)}`);
   assert.ok(pose.stockMoved&&pose.stable&&pose.zoomWorks&&pose.fitResets,'Anchoring must move stock on screen, survive redraws, support zoom and reset on Fit');
   console.log(`PASS: ${software?'Canvas':'WebGL'} placed vise pixels, cached close/open jaw poses and fixed-reference screen anchor with work-coordinate picking`);
+ }
+ // A distant reference must survive both depth planes while orbiting a part fit.
+ // Optionally exercise a local saved project without adding private geometry to fixtures.
+ const saved=process.env.CAM_TEST_RENDER_PROJECT?JSON.parse(readFileSync(process.env.CAM_TEST_RENDER_PROJECT,'utf8')):null;
+ const clipping=await page.evaluate(async saved=>{
+  const {Viewport}=await import('./viewport.js'),THREE=await import('./vendor/three.module.js');
+  const host=document.createElement('div'),canvas=document.createElement('canvas');canvas.style.cssText='width:640px;height:480px';host.append(canvas);document.body.append(host);
+  const v=new Viewport(canvas,()=>{},()=>{});v.controls={grid:false,axes:false};
+  try{
+   const mesh={vertices:[],triangles:[[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]]};
+   for(const z of [0,110])mesh.vertices.push([0,0,z],[150,0,z],[150,440,z],[0,440,z]);
+   let project={stock:{width:120,height:80,thickness:12},workspace:[{id:1,name:'Distant vise',kind:'vise',part:{geometry:{mesh,bodies:[{name:'Base',first_triangle:0,triangle_count:12}]}}}]};
+   let workspace=[{id:1,kind:'vise',vertices:mesh.vertices.map(([x,y,z])=>[x+540,y-350,z-170]),triangles:mesh.triangles,geometry_key:'distant',transform:[[1,0,0,0],[0,1,0,0],[0,0,1,0],[540,-350,-170,1]]}];
+   if(saved){const core=await import('./pkg/opensourcecam.js');await core.default();const session=new core.WebSession(JSON.stringify(saved));try{const view=JSON.parse(session.view());project=view.project;workspace=view.workspace_preview}finally{session.free()}}
+   const reference=workspace[0],center=[0,1,2].map(i=>(reference.vertices.reduce((n,p)=>Math.min(n,p[i]),Infinity)+reference.vertices.reduce((n,p)=>Math.max(n,p[i]),-Infinity))/2);
+   const pixels=()=>{const p=new Uint8Array(canvas.width*canvas.height*4);v.gl.readPixels(0,0,canvas.width,canvas.height,v.gl.RGBA,v.gl.UNSIGNED_BYTE,p);return p};
+   const brown=(p,i)=>p[i]>p[i+1]&&p[i+1]>p[i+2]&&p[i]<220;
+   const results=[];
+   for(const mode of ['part','all',{model:reference.id,body:0}]){
+    v.fit(mode);v.zoom=mode==='part'?.1:1;
+    for(const yaw of [0,.4,.8,1.2,1.6,2,2.4,2.8,3.2]){
+     v.yaw=yaw;v.elevation=.2;v.draw(project,workspace,null,0,null,null,false,false);
+     // Pan without changing the part fit or its orbit center.
+     const p=v.projectWorld(center);v.pan[0]+=320-p[0];v.pan[1]+=240-p[1];v.draw(project,workspace,null,0,null,null,false,false);
+     const original=pixels(),camera=v.three.camera,ray=v.pickRay(320,240);
+     let minDepth=Infinity,maxDepth=-Infinity,minRayDistance=Infinity;
+     for(const vertex of reference.vertices){const z=new THREE.Vector3(...vertex).project(camera).z;minDepth=Math.min(minDepth,z);maxDepth=Math.max(maxDepth,z);minRayDistance=Math.min(minRayDistance,vertex.reduce((n,x,i)=>n+(x-ray.origin[i])*ray.direction[i],0))}
+     for(const e of v.three.entries)e.object.frustumCulled=false;
+     v.three.renderer.render(v.three.scene,camera);const uncull=pixels();for(const e of v.three.entries)e.object.frustumCulled=true;
+     // Independent depth oracle: preserve the orthographic XY projection, use a generous slab.
+     const eye=camera.position.clone(),target=eye.clone().addScaledVector(new THREE.Vector3(...ray.direction),v.three.cameraDistance),distance=Math.max(5000,v.three.cameraDistance*4);
+     camera.position.copy(target).addScaledVector(new THREE.Vector3(...ray.direction),-distance);camera.lookAt(target);camera.near=.001;camera.far=distance*2;camera.updateProjectionMatrix();camera.updateMatrixWorld();v.three.renderer.render(v.three.scene,camera);const wide=pixels();
+     let solid=0,missing=0,cullDiff=0;for(let i=0;i<wide.length;i+=4){if(brown(wide,i)){solid++;if(!brown(original,i))missing++}if(original[i]!==uncull[i]||original[i+1]!==uncull[i+1]||original[i+2]!==uncull[i+2])cullDiff++}
+     results.push({mode,yaw,minDepth,maxDepth,minRayDistance,solid,missing,cullDiff});
+    }
+   }
+   return results;
+  }finally{v.three.dispose();host.remove()}
+ },saved);
+ for(const r of clipping){assert.ok(r.minDepth>-1&&r.maxDepth<1,`Complete reference must stay between depth planes: ${JSON.stringify(r)}`);assert.ok(r.minRayDistance>0,'Picking ray must start in front of the complete reference');assert.ok(r.solid>100&&r.missing<=Math.max(3,r.solid*.01),`Reference pixels must match the independent depth oracle: ${JSON.stringify(r)}`);assert.equal(r.cullDiff,0,'Local mesh origins and updated placement matrices must agree with frustum culling');}
+ console.log(`PASS: ${saved?'Supplied saved project':'Distant transformed vise'} pixels, depth planes, picking and frustum culling over ${clipping.length} part/all/component orbit views`);
+
+ // Use the real scene UI with a renderer and prohibit geometry/session edits.
+ for(const width of [390,768]){
+  await page.setViewportSize({width,height:900});
+  const centered=await page.evaluate(async()=>{
+   const {initScene}=await import('./scene.js'),{Viewport}=await import('./viewport.js');
+   const root=document.createElement('div');root.style.width='260px';root.innerHTML='<div id="center-test-tree"></div><div class="center-test-host"></div>';document.body.append(root);
+   const oldTree=document.getElementById('tree-workholding'),oldHost=document.querySelector('.canvas-host');oldTree.id='center-test-old-tree';oldHost.classList.remove('canvas-host');root.firstChild.id='tree-workholding';root.lastChild.className='canvas-host';
+   const canvas=document.createElement('canvas');canvas.style.cssText='width:280px;height:280px';root.lastChild.append(canvas);
+   const mesh={vertices:[[540,-350,-170],[690,-350,-170],[690,90,-60],[540,90,-60]],triangles:[[0,1,2],[0,2,3]]},project={stock:{width:120,height:80,thickness:12},workspace:[{id:99,name:'Test vise with a very long imported assembly filename.stp',kind:'vise',part:{geometry:{mesh}}}]},workspace=[{id:99,kind:'vise',...mesh}];
+   const before=JSON.stringify(project),v=new Viewport(canvas,()=>{},()=>{});v.controls={grid:false,axes:false};const draw=()=>v.draw(project,workspace,null,0,null,null,false,false);
+   try{
+    const ui=initScene({project:()=>project,viewport:v,viseState:()=>null,edit:()=>{throw Error('Camera centering must not edit geometry')}});ui.render();draw();v.zoom=3;v.pan=[50,-30];
+    const button=root.querySelector('#tree-references summary button:last-child'),details=button.closest('details'),expanded=details.open;button.click();draw();
+    const center=[615,-130,-115],p=v.projectWorld(center),target=v.fitTarget,reset=v.zoom===1&&v.pan.every(x=>x===0);
+    v.yaw+=1.2;v.elevation=.6;draw();const orbited=v.projectWorld(center);
+    return{label:button.textContent,accessible:button.getAttribute('aria-label'),reset,target,unchanged:JSON.stringify(project)===before,expanded:details.open===expanded,selection:ui.selection(),p,orbited,width:canvas.clientWidth,height:canvas.clientHeight,overflow:root.querySelector('#tree-references').scrollWidth>root.querySelector('#tree-references').clientWidth+1};
+   }finally{v.three.dispose();root.remove();oldTree.id='tree-workholding';oldHost.classList.add('canvas-host')}
+  });
+  assert.match(centered.label,/Center view on vise/);assert.match(centered.accessible,/Test vise/);assert.ok(centered.reset&&centered.unchanged&&centered.expanded&&!centered.overflow);assert.deepEqual(centered.target,{model:99});assert.equal(centered.selection,null,'Centering must not open selection or placement controls');
+  for(const p of [centered.p,centered.orbited])assert.ok(Math.abs(p[0]-centered.width/2)<1e-6&&Math.abs(p[1]-centered.height/2)<1e-6,'Camera must fit and orbit around the reference center');
+  console.log(`PASS: ${width}px tree Center view on vise fits/orbits the reference without geometry or selection changes`);
  }
 }finally{await browser.close()}

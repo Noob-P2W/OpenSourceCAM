@@ -243,3 +243,25 @@ Both WebGL and software pose tests check translated/rotated vise pixels and jaw
 opening/closure. Fixed-vise clamping keeps the fixed jaw anchored on screen while
 stock moves, with picking still expressed in work coordinates. Explicit placement
 and Fit reset the temporary camera anchor.
+
+## Reference viewing, import order and leaving simulation
+
+The WebGL camera depth range covers visible scene geometry independently of the
+fitted selection, including translated/rotated references and moving jaws. Picking
+starts in front of those references. Each reference tree entry offers **Center view
+on vise/reference**, which fits the model and uses its center for orbit without
+changing geometry or machining placement. Placement still has its separate
+**Center over stock** action.
+
+Workpiece import replaces the workpiece and fitted stock and clears its old
+operations and selected setup face. It retains reference models, process identity,
+CNC/post configuration, tool library and active tool/preset, whether the vise or
+workpiece was imported first. Reference import also retains the current workpiece
+and operations. Both are atomic, undoable session edits.
+
+**Simulated stock** is available in the main viewport controls. **Turn simulation
+off** pauses playback, clears the sampled stock display and pending preview queue,
+and restores the original model. Completed results arriving after it is disabled
+cannot restore simulation. Generated toolpaths remain available for playback or
+export. The existing calculation-cancel control stops an in-progress explicit
+simulation calculation.

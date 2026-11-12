@@ -295,11 +295,13 @@ impl Session {
             Edit::NewProject { process } => candidate = Project::new_for_process(process),
             Edit::ImportPart { part } => {
                 let fitted = Project::from_part(part)?;
-                let mut imported = Project::new_for_process(candidate.process);
-                imported.name = fitted.name;
-                imported.stock = fitted.stock;
-                imported.part = fitted.part;
-                candidate = imported;
+                candidate.name = fitted.name;
+                candidate.stock = fitted.stock;
+                candidate.part = fitted.part;
+                // Face selections and operations (including model links) belong to
+                // the old workpiece. References and machine/tool setup do not.
+                candidate.setup_face = None;
+                candidate.operations.clear();
             }
             Edit::AddLibraryTool { tool_kind } => {
                 if candidate.tool_library.tools.is_empty() && !candidate.operations.is_empty() {
