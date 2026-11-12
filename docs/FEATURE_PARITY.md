@@ -15,7 +15,7 @@ This is an implementation inventory, not a release promise or certification.
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
 | Supported milling toolpaths and export preflight | Supported | Shared Rust core |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
-| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, 32–512-cell incremental playback with changed-strip transfers, selectable calculation budget, synchronized library tool assembly, and OBJ download |
+| Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, 32–1024-cell incremental playback with changed-strip transfers, selectable calculation budget, synchronized library tool assembly, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
@@ -248,8 +248,8 @@ and Fit reset the temporary camera anchor.
 
 The WebGL camera depth range covers visible scene geometry independently of the
 fitted selection, including translated/rotated references and moving jaws. Picking
-starts in front of those references. Each reference tree entry offers **Center view
-on vise/reference**, which fits the model and uses its center for orbit without
+starts in front of those references. The viewport **Center on vise** button beside the fit controls fits the selected
+vise (or the first vise) and uses its center for orbit without
 changing geometry or machining placement. Placement still has its separate
 **Center over stock** action.
 
@@ -265,3 +265,9 @@ and restores the original model. Completed results arriving after it is disabled
 cannot restore simulation. Generated toolpaths remain available for playback or
 export. The existing calculation-cancel control stops an in-progress explicit
 simulation calculation.
+
+The viewport places **Center on vise** beside **Fit part** and **Fit all**.
+The Actions ribbon keeps **Stock simulation**; the duplicate Material removal
+entry is removed. Its menu includes **Disable stock simulation**. Simulation
+defaults to 128 cells with explicit 768/1024-cell options for larger stock;
+existing calculation and work limits remain enforced.

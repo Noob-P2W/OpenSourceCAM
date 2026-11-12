@@ -52,7 +52,7 @@ fn six_mm_cutter_slot_and_display_agree_at_all_preview_resolutions() {
         .map(|p| p[0].hypot(p[1]))
         .fold(0., f64::max);
     assert!((radius - 3.).abs() < 1e-9);
-    for resolution in [32, 128, 512] {
+    for resolution in [32, 128, 512, 768, 1024] {
         let sim = stock::preview(&p, &path, 1., resolution, &AtomicBool::new(false)).unwrap();
         let [nx, ny] = sim.summary.resolution;
         let [dx, dy] = sim.summary.cell_size;

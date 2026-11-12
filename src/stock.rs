@@ -122,11 +122,11 @@ fn calculate(
     verify: bool,
     limit: u64,
 ) -> Result<Simulation, String> {
-    if !(16..=512).contains(&resolution)
+    if !(16..=1024).contains(&resolution)
         || !progress.is_finite()
         || !(0.0..=1.0).contains(&progress)
     {
-        return Err("Stock preview needs 16–512 cells on its longest side and a progress fraction from 0 to 1".into());
+        return Err("Stock preview needs 16–1024 cells on its longest side and a progress fraction from 0 to 1".into());
     }
     crate::cam::validate_setup(project)?;
     let mut grid = Grid::new(project, resolution)?;
@@ -371,8 +371,8 @@ pub(crate) struct Grid {
 }
 impl Grid {
     pub fn new(project: &Project, resolution: usize) -> Result<Self, String> {
-        if !(16..=512).contains(&resolution) {
-            return Err("Stock preview needs 16–512 cells on its longest side".into());
+        if !(16..=1024).contains(&resolution) {
+            return Err("Stock preview needs 16–1024 cells on its longest side".into());
         }
         let s = &project.stock;
         let longest = s.width.max(s.height);
@@ -734,6 +734,37 @@ fn capsule_row(a: Point3, b: Point3, r: f64, y: f64) -> Option<[f64; 2]> {
 #[cfg(test)]
 mod sweep_tests {
     use super::*;
+    #[test]
+    fn high_resolution_retains_work_and_mesh_budgets() {
+        let project = Project::default();
+        let cancel = AtomicBool::new(false);
+        let tool = Footprint {
+            radius: 3.,
+            ball: false,
+            cone: None,
+        };
+        let point = Point3 {
+            x: 10.,
+            y: 10.,
+            z: -1.,
+        };
+        let mut grid = Grid::new(&project, 1024).unwrap();
+        let error = grid.cut(point, point, tool, 8, &cancel).unwrap_err();
+        assert!(error.contains("calculation budget"));
+        assert_eq!(grid.evaluations, 9);
+        // Cleared cells skip evaluation but must still count against traversal.
+        grid.heights.fill(grid.bottom);
+        grid.evaluations = 0;
+        grid.visited = 0;
+        let error = grid.cut(point, point, tool, 8, &cancel).unwrap_err();
+        assert!(error.contains("traversal budget"));
+        assert_eq!(grid.evaluations, 0);
+        assert_eq!(grid.visited, 33);
+        grid.heights.fill(0.);
+        let error = grid.mesh_rows(0..grid.ny, 100, &cancel).err().unwrap();
+        assert!(error.contains("triangle budget"));
+    }
+
     #[test]
     fn capsule_rows_contain_the_exact_cutter_footprint() {
         for angle in 0..36 {

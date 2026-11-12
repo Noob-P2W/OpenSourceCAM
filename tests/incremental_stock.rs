@@ -109,3 +109,63 @@ fn budget_choices_are_bounded_and_cached_frames_are_transactional() {
     assert_eq!(recovered.metadata["reset"], true);
     assert_eq!(standard.vertices, recovered.vertices);
 }
+
+#[test]
+fn high_resolution_inspection_playback_and_export_share_limits() {
+    let mut p = job();
+    p.stock.width = 100.;
+    p.stock.height = 100.;
+    p.operations[0].strategy = Strategy::DrillOnce;
+    p.operations[0].x = 50.;
+    p.operations[0].y = 50.;
+    p.tool_library.tools[0] = opensourcecam::tool_library::LibraryTool::new(
+        1,
+        1,
+        opensourcecam::tool_library::ToolKind::Drill,
+    );
+    let playback = PlaybackPreview::new(&p).unwrap();
+    let cancel = AtomicBool::new(false);
+    for resolution in [513, 768, 1024] {
+        let detailed = stock::simulate(&p, &playback.path, 1., resolution, &cancel).unwrap();
+        let fresh = stock::preview(&p, &playback.path, 1., resolution, &cancel).unwrap();
+        assert_eq!(detailed.summary.resolution, [resolution, resolution]);
+        assert_eq!(detailed.heights.len(), resolution * resolution);
+        assert_eq!(detailed.heights, fresh.heights);
+        assert!(detailed.summary.removed_volume_mm3 > 0.);
+        assert!(detailed.geometry.mesh.triangles.len() <= 2_000_000);
+        for progress in [0.5, 1.] {
+            let frame = playback
+                .frame(&p, progress, resolution, 1, 50_000_000)
+                .unwrap();
+            let reference =
+                stock::preview(&p, &playback.path, progress, resolution, &cancel).unwrap();
+            assert_eq!(
+                frame.metadata["summary"]["resolution"],
+                serde_json::json!([resolution, resolution])
+            );
+            assert!(
+                (frame.metadata["summary"]["removed_volume_mm3"]
+                    .as_f64()
+                    .unwrap()
+                    - reference.summary.removed_volume_mm3)
+                    .abs()
+                    < 1e-7
+            );
+        }
+        let obj = opensourcecam::commands::stock_obj(&p, 1., resolution).unwrap();
+        assert_eq!(obj, stock::obj_data(&detailed).unwrap());
+        assert!(
+            stock::simulate_budget(&p, &playback.path, 1., resolution, &cancel, u64::MAX).is_err()
+        );
+    }
+    for resolution in [15, 1025, usize::MAX] {
+        assert!(stock::simulate(&p, &playback.path, 1., resolution, &cancel).is_err());
+        assert!(stock::preview(&p, &playback.path, 1., resolution, &cancel).is_err());
+        assert!(
+            stock::simulate_budget(&p, &playback.path, 1., resolution, &cancel, 200_000_000)
+                .is_err()
+        );
+        assert!(playback.frame(&p, 1., resolution, 1, 50_000_000).is_err());
+        assert!(opensourcecam::commands::stock_obj(&p, 1., resolution).is_err());
+    }
+}

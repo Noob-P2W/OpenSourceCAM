@@ -192,7 +192,7 @@ fn stock_preview_uses_drill_point_geometry_and_playback_prefix() {
     let cut = stock::simulate(&p, &path, 1.0, 20, &AtomicBool::new(false)).unwrap();
     assert!((cut.heights[10 * 20 + 10] + 4.0).abs() < 1e-9);
     assert!(cut.heights[10 * 20 + 12] > -3.0);
-    assert!(stock::simulate(&p, &path, 1.0, 1000, &AtomicBool::new(false)).is_err());
+    assert!(stock::simulate(&p, &path, 1.0, 1025, &AtomicBool::new(false)).is_err());
 }
 
 #[test]

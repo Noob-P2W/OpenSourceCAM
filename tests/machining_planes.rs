@@ -275,11 +275,11 @@ fn desktop_detail_resolves_small_removal_with_bounded_resolution() {
     let path = cam::generate(&p).unwrap();
     let cancel = AtomicBool::new(false);
     let low = stock::simulate(&p, &path, 1., 32, &cancel).unwrap();
-    let high = stock::simulate(&p, &path, 1., 512, &cancel).unwrap();
-    assert_eq!(high.summary.resolution, [512, 512]);
+    let high = stock::simulate(&p, &path, 1., 1024, &cancel).unwrap();
+    assert_eq!(high.summary.resolution, [1024, 1024]);
     assert!(high.summary.removed_volume_mm3 > 0.);
     assert!(high.geometry.mesh.triangles.len() > low.geometry.mesh.triangles.len());
-    assert!(stock::simulate(&p, &path, 1., 513, &cancel).is_err());
+    assert!(stock::simulate(&p, &path, 1., 1025, &cancel).is_err());
 }
 
 #[test]

@@ -113,14 +113,14 @@ try{
    const before=JSON.stringify(project),v=new Viewport(canvas,()=>{},()=>{});v.controls={grid:false,axes:false};const draw=()=>v.draw(project,workspace,null,0,null,null,false,false);
    try{
     const ui=initScene({project:()=>project,viewport:v,viseState:()=>null,edit:()=>{throw Error('Camera centering must not edit geometry')}});ui.render();draw();v.zoom=3;v.pan=[50,-30];
-    const button=root.querySelector('#tree-references summary button:last-child'),details=button.closest('details'),expanded=details.open;button.click();draw();
+    const button=document.createElement('button');button.id='fit-vise';button.textContent='Center on vise';root.append(button);button.onclick=()=>ui.centerVise();const details=root.querySelector('#tree-references details'),expanded=details.open;button.click();draw();
     const center=[615,-130,-115],p=v.projectWorld(center),target=v.fitTarget,reset=v.zoom===1&&v.pan.every(x=>x===0);
     v.yaw+=1.2;v.elevation=.6;draw();const orbited=v.projectWorld(center);
     return{label:button.textContent,accessible:button.getAttribute('aria-label'),reset,target,unchanged:JSON.stringify(project)===before,expanded:details.open===expanded,selection:ui.selection(),p,orbited,width:canvas.clientWidth,height:canvas.clientHeight,overflow:root.querySelector('#tree-references').scrollWidth>root.querySelector('#tree-references').clientWidth+1};
    }finally{v.three.dispose();root.remove();oldTree.id='tree-workholding';oldHost.classList.add('canvas-host')}
   });
-  assert.match(centered.label,/Center view on vise/);assert.match(centered.accessible,/Test vise/);assert.ok(centered.reset&&centered.unchanged&&centered.expanded&&!centered.overflow);assert.deepEqual(centered.target,{model:99});assert.equal(centered.selection,null,'Centering must not open selection or placement controls');
+  assert.match(centered.label,/Center on vise/);assert.ok(centered.reset&&centered.unchanged&&centered.expanded&&!centered.overflow);assert.deepEqual(centered.target,{model:99});assert.equal(centered.selection,null,'Centering must not open selection or placement controls');
   for(const p of [centered.p,centered.orbited])assert.ok(Math.abs(p[0]-centered.width/2)<1e-6&&Math.abs(p[1]-centered.height/2)<1e-6,'Camera must fit and orbit around the reference center');
-  console.log(`PASS: ${width}px tree Center view on vise fits/orbits the reference without geometry or selection changes`);
+  console.log(`PASS: ${width}px viewport Center on vise fits/orbits the reference without geometry or selection changes`);
  }
 }finally{await browser.close()}

@@ -1,7 +1,7 @@
 import {visibility} from './test-ui.mjs';
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
-import {ready,generate,editOperation,saveOperation} from './test-ui.mjs';
+import {ready,generate,editOperation,saveOperation,ribbon} from './test-ui.mjs';
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});
 try{
  for(const [width,height,software] of [[390,844,false],[768,1024,false],[1440,900,false],[390,844,true]]){
@@ -17,7 +17,7 @@ try{
   const progress=async()=>Number(await page.locator('#progress').inputValue());
   const seek=async value=>{await page.locator('#progress').evaluate((input,value)=>{input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}))},value);await page.clock.runFor(32)};
   await page.locator('#play').click();await page.clock.runFor(500);
-  assert.ok(Math.abs(await progress()-advance(500))<advance(40),`Playback should advance at normal frame rates, got ${await progress()}%`);
+  assert.ok(Math.abs(await progress()-advance(500))<advance(40),`Playback should advance at normal frame rates, got ${await progress()}%, expected ${advance(500)}%, duration ${seconds}s`);
   await page.locator('#play').click();const paused=await progress();await page.clock.runFor(500);assert.equal(await progress(),paused);
   await page.locator('#play').click();assert.equal(await progress(),paused,'Resume must keep the paused position');await page.clock.runFor(300);assert.ok(await progress()>paused);
   await page.locator('#play').click();await page.locator('#playback-speed').selectOption('2');const speedStart=await progress();await page.locator('#play').click();await page.clock.runFor(300);assert.ok(Math.abs(await progress()-speedStart-advance(300,2))<advance(40,2),'2× speed must double playback progress');await page.locator('#play').click();await page.locator('#playback-speed').selectOption('0.5');const slowStart=await progress();await page.locator('#play').click();await page.clock.runFor(300);assert.ok(Math.abs(await progress()-slowStart-advance(300,.5))<advance(40,.5),'0.5× speed must halve playback progress');await page.locator('#playback-speed').selectOption('1');
@@ -37,7 +37,7 @@ try{
   const edited=await progress();await page.clock.runFor(500);assert.equal(await progress(),edited,'Edits invalidate paths and stop their animation');await generate(page);assert.equal(await page.locator('#play').isEnabled(),true);assert.equal(await page.locator('#show-simulation').isEnabled(),true);
   // A cheap engine must be allowed to deliver faster than the former 10 FPS cap.
   await page.evaluate(()=>{window.fastStock=true;window.stockTicks=0});await visibility(page,'show-simulation',true);await seek(10);await page.locator('#play').click();await page.clock.runFor(1000);assert.ok(await page.evaluate(()=>window.stockTicks)>15,'Fast stock updates must follow animation frames rather than a fixed 100 ms timer');await page.locator('#play').click();
-  await page.locator('#play').click();await page.clock.runFor(100);await page.locator('#simulation-off').click();await page.clock.runFor(32);
+  await page.locator('#play').click();await page.clock.runFor(100);await ribbon(page,'Actions','Stock simulation');await page.locator('#simulation-off-menu').click();await page.clock.runFor(32);
   assert.equal(await page.locator('#show-simulation').evaluate(el=>el.checked),false);assert.equal(await page.locator('#play').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#canvas').getAttribute('data-stock-progress'),'');assert.equal(await page.locator('#save-stock').isDisabled(),true);assert.equal(await page.locator('#play').isEnabled(),true,'Exiting simulation retains generated paths');
   const stoppedTicks=await page.evaluate(()=>window.stockTicks),stoppedProgress=await progress();await page.clock.runFor(1000);assert.equal(await page.evaluate(()=>window.stockTicks),stoppedTicks,'Simulation off stops background stock requests');assert.equal(await progress(),stoppedProgress,'Simulation off stops playback');
   assert.deepEqual(errors,[]);console.log(`PASS: ${width}px ${software?'software':'WebGL'} playback, visible motion, pause/resume, scrub, completion/replay, single animation loop and invalidation`);await context.close();
