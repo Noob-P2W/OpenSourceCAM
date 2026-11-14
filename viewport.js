@@ -12,14 +12,14 @@ export class Viewport {
   canvas.addEventListener('pointermove',event=>{
    if(!this.pointers.has(event.pointerId))return;
    const old=this.pointers.get(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);const points=[...this.pointers.values()];
-   if(points.length===2){const distance=Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];if(this.gesture){this.zoom=Math.max(.1,Math.min(30,this.zoom*distance/Math.max(1,this.gesture.distance)));this.pan[0]+=center[0]-this.gesture.center[0];this.pan[1]+=center[1]-this.gesture.center[1]}this.gesture={distance,center}}
+   if(points.length===2){const distance=Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];if(this.gesture){const rect=canvas.getBoundingClientRect();this.magnify(distance/Math.max(1,this.gesture.distance),[this.gesture.center[0]-rect.left,this.gesture.center[1]-rect.top]);this.pan[0]+=center[0]-this.gesture.center[0];this.pan[1]+=center[1]-this.gesture.center[1]}this.gesture={distance,center}}
    else if(event.shiftKey||event.buttons===2){this.pan[0]+=event.clientX-old[0];this.pan[1]+=event.clientY-old[1]}
    else if(event.buttons===4||event.pointerType==='touch'){this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
   const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.pickRay){const rect=canvas.getBoundingClientRect();const ray=this.pickRay(event.clientX-rect.left,event.clientY-rect.top);if(this.onPick)this.onPick(ray);else this.onInspect?.(ray,{x:event.clientX-rect.left,y:event.clientY-rect.top})}};
   canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
-  canvas.addEventListener('wheel',event=>{event.preventDefault();this.magnify(Math.exp(-event.deltaY*.001))},{passive:false});
+  canvas.addEventListener('wheel',event=>{event.preventDefault();const rect=canvas.getBoundingClientRect();this.magnify(Math.exp(-event.deltaY*.001),[event.clientX-rect.left,event.clientY-rect.top])},{passive:false});
 
  }
  initGL(){this.three=new ThreeView(this.canvas,this.gl);this.canvas.camViewport=this;}
@@ -32,7 +32,7 @@ export class Viewport {
   if(this.viewScale)this.fixedScale=this.viewScale/this.zoom;
   this.screenAnchor={point:[...point],screenPoint:[...screenPoint]};this.requestDraw();
  }
- magnify(factor){this.zoom=Math.max(.1,Math.min(30,this.zoom*factor));this.requestDraw()}
+ magnify(factor,anchor=[this.canvas.clientWidth/2,this.canvas.clientHeight/2]){if(!Number.isFinite(factor)||factor<=0)return;const next=Math.max(.1,Math.min(30,this.zoom*factor)),ratio=next/this.zoom;this.pan=this.pan.map((pan,i)=>{const offset=anchor[i]-(i?this.canvas.clientHeight:this.canvas.clientWidth)/2;return offset-(offset-pan)*ratio});this.zoom=next;this.requestDraw()}
  upload(data,color,lines=false,retain=true){const item={data,color,lines,count:data.length/6};if(this.gl){item.three=this.three.upload(data,color,lines);delete item.data;}if(retain)this.buffers.push(item);return item}
  mesh(mesh,transform,color,retain=true,key=null,matrix=null){
   if(this.gl){const source=transform&&!matrix?{vertices:mesh.vertices.map(transform),triangles:mesh.triangles}:mesh;const item={color,lines:false,count:mesh.triangles.length*3,matrix};item.three=this.three.mesh(source,color,key);if(retain)this.buffers.push(item);return item}
