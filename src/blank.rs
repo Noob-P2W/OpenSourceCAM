@@ -214,8 +214,8 @@ impl Stock {
         };
         match d.kind {
             StockKind::Rectangular => {
-                for i in 0..3 {
-                    if !slab(i, d.size[i] / 2.) {
+                for (i, size) in d.size.iter().enumerate() {
+                    if !slab(i, size / 2.) {
                         return None;
                     }
                 }

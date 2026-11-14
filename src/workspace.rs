@@ -70,8 +70,8 @@ impl WorkspaceModel {
         std::array::from_fn(|i| columns[i / 3][i % 3] as f32)
     }
     fn rotate(&self, mut p: [f64; 3]) -> [f64; 3] {
-        for axis in 0..3 {
-            let (sin, cos) = self.rotation[axis].to_radians().sin_cos();
+        for (axis, angle) in self.rotation.iter().enumerate() {
+            let (sin, cos) = angle.to_radians().sin_cos();
             let a = (axis + 1) % 3;
             let b = (axis + 2) % 3;
             let x = p[a];

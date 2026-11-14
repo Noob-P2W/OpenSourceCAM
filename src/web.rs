@@ -677,10 +677,11 @@ mod preview_cache_tests {
         assert_ne!(moved.transform, original.transform);
         let p = session.inner.project();
         let model = &p.workspace[0];
-        for i in 0..3 {
-            assert!(
-                (moved.transform[3][i] - model.point([0.; 3], p.machine.as_ref())[i]).abs() < 1e-8
-            )
+        for (actual, expected) in moved.transform[3]
+            .iter()
+            .zip(model.point([0.; 3], p.machine.as_ref()))
+        {
+            assert!((actual - expected).abs() < 1e-8)
         }
     }
 }
