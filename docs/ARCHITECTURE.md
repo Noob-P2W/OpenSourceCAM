@@ -87,6 +87,13 @@ The history budget excludes geometry shared with the current project, and includ
 unique older meshes retained by undo. Browser views serialize borrowed project data
 without an intermediate serde_json::Value representation of the whole mesh.
 
+Device-local project snapshots live in `web/storage.js`: IndexedDB stores the current
+and previous serialized projects in one transaction, with ordered asynchronous
+writes. Startup migrates legacy localStorage saves only after a successful commit;
+corrupt JSON remains available for raw recovery. Preferences and the existing local
+component libraries retain their own storage. The footer marks a project saved only
+after transaction completion, and service-worker updates await the pending save.
+
 The page caches compact project JSON per committed revision; the advanced editor
 is populated lazily for large projects. Canvas redraws are coalesced, geometry
 paths cached/batched, backing buffers bounded to 4 million pixels and DPR 2, and

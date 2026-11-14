@@ -26,7 +26,7 @@ This is an implementation inventory, not a release promise or certification.
 | Stock fitting and workholding | Supported | Modal Setup: rectangular/round physical stock, XYZ stock/part orientation and offsets, shape-preserving fit, configurable example vise/backing and imported fixture transforms |
 | Feature recognition | Selected stored plane respected | Face list/camera picking, explicit side-face setup, recognition at the selected XY level, linked operation targets, persistent candidate list and on-model highlights; unsupported/open-mesh diagnostics |
 | Editing / undo history | Native implementation | Rust Session, bounded undo/redo and worker cancellation that preserves both stacks |
-| Autosave / recovery | Native save protections | Local current/previous autosave and draft recovery |
+| Autosave / recovery | Native save protections | IndexedDB current/previous autosave, legacy migration and draft recovery |
 | Install/offline updates | Native packages | Service worker, version display and update prompt |
 | Controller streaming | Not implemented | Not implemented |
 
@@ -312,3 +312,22 @@ remain available. The cube's diamond is Home view, and TOP remains directly
 clickable. The redundant view dropdown, Inspect fit buttons and permanent stock
 size overlay are removed. Vise component hover highlights the corresponding
 geometry; on desktop the setup dock fills the available right-side height.
+
+
+Browser wheel zoom keeps the point under the pointer fixed after panning. Zoom
+buttons use the viewport center, and pinch zoom follows the midpoint between the
+fingers, including simultaneous pan. The existing zoom limits still apply.
+
+Projects autosave asynchronously to IndexedDB after committed edits, including
+imports, placement, clamping and undo/redo. A single transaction rotates the
+current/previous snapshots, so an interrupted or failed save retains both earlier
+snapshots. Existing localStorage projects/backups migrate without changing their
+JSON; legacy text is removed only after the database commit. Invalid saved JSON
+remains available through Recover draft. File → Backup & recovery → Previous
+autosave restores the previous snapshot and remains undoable. The footer reports
+Saving, Autosaved, or Not saved; updates await a completed save before reloading.
+Pending field edits are flushed when the page becomes hidden when possible;
+leaving with unsaved changes retains the browser unload warning. Small preferences
+and device tool/machine libraries retain their existing storage. Offline packaging
+includes the storage module. Browser storage may still be evicted or unavailable;
+downloaded project backups remain independent of it.

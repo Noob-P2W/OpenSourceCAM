@@ -83,8 +83,10 @@ text and tessellates assemblies while retaining named component boundaries
 (0.1 mm linear / 0.3 radian
 angular deflection). The kernel adds about 7.5 MiB to the offline download.
 Inputs are limited to 32 MiB, output to 250,000 triangles / 750,000 vertices; an
-import is stopped after 120 seconds. Very large CAD can still exceed mobile memory. CAD source plus mesh can exceed
-local-storage quota: download the project if the app reports that autosave is unavailable.
+import is stopped after 120 seconds. Very large CAD can still exceed mobile memory. Project autosave uses IndexedDB, with atomic current/previous snapshots and
+automatic migration from older localStorage saves. CAD source and meshes remain
+complete in these saves. Storage capacity and retention still depend on the
+browser; download a project backup if autosave is unavailable.
 A failed import leaves the current project intact. CAD import does not imply all
 shapes are supported by automatic machining strategies. The browser now has depth-tested solids, camera gestures, rendered sampled
 stock and structured machine/library editors. Full native UI parity is still

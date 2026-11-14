@@ -27,7 +27,7 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
-    for script in ('app.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'three-view.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+    for script in ('app.js', 'storage.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'three-view.js', 'worker.js', 'cad-worker.js', 'sw.js'):
         run('node', '--check', 'web/' + script)
     run('node', 'web/cad-mesh-smoke.mjs')
     run('cargo', 'fmt', '--all', '--', '--check')
@@ -41,6 +41,8 @@ def web():
     try:
         run('node', 'web/startup-smoke.mjs', env=env)
         run('node', 'web/renderer-smoke.mjs', env=env)
+        run('node', 'web/zoom-smoke.mjs', env=env)
+        run('node', 'web/storage-smoke.mjs', env=env)
         run('node', 'web/smoke.mjs', env=env)
         run('node', 'web/cad-smoke.mjs', env=env)
         run('node', 'web/import-order-smoke.mjs', env=env)

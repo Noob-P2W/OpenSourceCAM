@@ -17,13 +17,14 @@ try{
  await page.locator('#preview-detail').filter({hasText:'Full geometry is retained'}).waitFor();
  const strokes=await page.evaluate(()=>window.strokeCount);assert.ok(strokes<40,`Too many canvas strokes: ${strokes}`);
  assert.ok(await page.locator('#canvas').evaluate(c=>c.width*c.height)<=4000000);
- await section(page,'setup');await page.getByLabel('Stock X · mm',{exact:true}).fill('270');await page.locator('#apply-stock').click();await page.waitForFunction(()=>document.getElementById('undo').disabled===false);await closeDialogs(page);await page.locator('#undo').click();await page.waitForFunction(()=>JSON.parse(localStorage.getItem('oc-project')).stock.width===260);await section(page,'setup');assert.equal(await page.getByLabel('Stock X · mm',{exact:true}).inputValue(),'260');
+ await section(page,'setup');await page.getByLabel('Stock X · mm',{exact:true}).fill('270');await page.locator('#apply-stock').click();await page.waitForFunction(()=>document.getElementById('undo').disabled===false);await closeDialogs(page);await page.locator('#undo').click();await page.waitForFunction(async ()=>JSON.parse(await (await import('./storage.js')).readSnapshot()).stock.width===260);await section(page,'setup');assert.equal(await page.getByLabel('Stock X · mm',{exact:true}).inputValue(),'260');
  await section(page,'project');const event=page.waitForEvent('download');await page.locator('#save').click();const download=await event;const saved=JSON.parse(readFileSync(await download.path(),'utf8'));assert.equal(saved.part.geometry.mesh.triangles.length,100000);assert.equal(saved.part.geometry.mesh.vertices.length,(nx+1)*(ny+1));
  for(let i=0;i<2;i++){
   await page.keyboard.press('Escape');await section(page,'import');
   await page.waitForFunction(()=>!document.getElementById('model').disabled);
   void acceptNextConfirmation(page);await page.locator('#model').setInputFiles({name:`dense-repeat-${i}.stl`,mimeType:'application/octet-stream',buffer:bytes});await page.locator('#status').filter({hasText:'Model imported'}).waitFor();assert.equal(await page.locator('#json').inputValue(),'');
  }
+ await page.locator('#saved').filter({hasText:'Autosaved on this device'}).waitFor({state:'attached'});const persisted=await page.evaluate(async()=>await (await import('./storage.js')).readSnapshot());assert.ok(persisted.length*2>5*1024*1024,'Fixture exceeds the former text-storage quota');assert.equal(await page.evaluate(()=>localStorage.getItem('oc-project')),null);await page.reload();await page.locator('#status').filter({hasText:'Ready'}).waitFor();const restored=await page.evaluate(async()=>JSON.parse(await (await import('./storage.js')).readSnapshot()));assert.equal(restored.part.geometry.mesh.triangles.length,100000);assert.equal(restored.part.geometry.mesh.vertices.length,(nx+1)*(ny+1));
  assert.ok(importMs<20000,`Dense STL import took ${importMs}ms`);
  console.log(`PASS: 100,000-triangle STL imported in ${importMs} ms, ${strokes} strokes, exact vertex sharing, full-resolution save, bounded canvas, lazy editor, undo after edit, repeated large imports`);
  await context.close();

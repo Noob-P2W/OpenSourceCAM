@@ -30,7 +30,7 @@ try{
   const editor=page.locator('#tool-library-editor');
   for(const [kind,count] of [['drill',2],['holder',3]]){
    await editor.getByLabel('New tool type',{exact:true}).selectOption(kind);await editor.getByRole('button',{name:'Add tool',exact:true}).click();
-   await page.waitForFunction(count=>JSON.parse(localStorage.getItem('oc-project')).tool_library.tools.length===count,count);
+   await page.waitForFunction(async count=>JSON.parse(await (await import('./storage.js')).readSnapshot()).tool_library.tools.length===count,count);
   }
   await closeDialogs(page);const project=await state(page),[mill,drill,holder]=project.tool_library.tools;
   mill.name='Measured 4 mm end mill';mill.holder=holder.id;Object.assign(mill.geometry,{diameter:4,shaft_diameter:6,flute_length:14,shoulder_length:14,overall_length:63,stickout:35,gauge_length:75});
