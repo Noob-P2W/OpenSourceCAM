@@ -1,4 +1,4 @@
-import {confirmAction} from './dialogs.js';
+import {confirmAction,bindContextMenu} from './dialogs.js';
 // Scene editing presentation. Rust owns all transforms and geometry updates.
 export function initScene(api){
  const tree=document.createElement('div');tree.id='tree-references';tree.setAttribute('role','group');tree.setAttribute('aria-label','Reference models and components');document.getElementById('tree-workholding').after(tree);
@@ -8,9 +8,10 @@ export function initScene(api){
  const button=(root,text,fn)=>{const b=el('button',text);b.type='button';b.onclick=fn;root.append(b);return b};
  const model=()=>api.project().workspace.find(m=>m.id===selected?.id);
  function highlight(){if(selected)api.highlight(selected.id,selected.body)}
- async function select(id,body,placement=false){selected={id,body};if(api.viewport.fitTarget?.model!==id)api.viewport.fit({model:id});highlight();render();if(innerWidth<700)document.body.dataset.browser='false';if(placement||!api.viseOpen()){api.suspendVise();panel.hidden=false;await fields()} }
+ async function select(id,body,placement=false){selected={id,body};if(api.viewport.fitTarget?.model!==id)api.viewport.fit({model:id});highlight();render();if(innerWidth<700)document.body.dataset.browser='false';if(placement){api.suspendVise();panel.hidden=false;await fields()} }
  async function fields(){const request=++version,m=model();if(!m){panel.hidden=true;return}const target=selected.body===undefined?m.name:m.part.geometry.bodies[selected.body].name;panel.replaceChildren();const head=el('div');head.className='dialog-head';head.append(el('h2','3D placement'));button(head,'×',()=>{panel.hidden=true;api.viewport.requestDraw()}).setAttribute('aria-label','Close 3D placement');panel.append(head);const root=el('div');root.className='dialog-body';panel.append(root);root.append(el('strong',target));const note=el('p','Work XYZ · mm. Rotate about component center.');note.className='info-note';root.append(note);
   let info;try{info=await api.call('vise-query',{data:{action:'placement',id:m.id,body:selected.body??null}})}catch(e){root.append(el('p',e.message));return}if(request!==version)return;
+  const componentLabel=el('label','Editing'),chooseComponent=el('select');chooseComponent.setAttribute('aria-label','Reference component');chooseComponent.add(new Option('Whole reference',''));for(const [i,b] of (m.part.geometry.bodies||[]).entries())chooseComponent.add(new Option(b.name,String(i)));chooseComponent.value=selected.body===undefined?'':String(selected.body);chooseComponent.onchange=()=>select(m.id,chooseComponent.value===''?undefined:Number(chooseComponent.value),true);componentLabel.append(chooseComponent);root.append(componentLabel);
   const component=selected.body!==undefined,position=component?[...info.center]:[...m.part.offset],rotation=component?[0,0,0]:[...m.rotation];let frame=m.frame;
   const triple=(title,values)=>{const group=el('fieldset'),legend=el('legend',title);group.append(legend);for(let i=0;i<3;i++){const label=el('label','XYZ'[i]),input=el('input');input.type='number';input.step='any';input.value=Number(values[i].toFixed(6));input.setAttribute('aria-label',`${title} ${'XYZ'[i]}`);input.oninput=()=>values[i]=input.valueAsNumber;label.append(input);group.append(label)}root.append(group)};
   if(!component){const label=el('label','Coordinate frame'),choose=el('select');choose.add(new Option('Work coordinates','work'));choose.add(new Option('Machine coordinates','machine'));choose.value=frame;choose.onchange=()=>{frame=choose.value};label.append(choose);root.append(label)}
@@ -22,8 +23,23 @@ export function initScene(api){
   if(m.kind==='vise')button(root,'Configure clamping…',()=>{panel.hidden=true;api.openVise(m.id)});
  }
  function centerVise(){const vises=api.project().workspace.filter(m=>m.kind==='vise');const vise=vises.find(m=>m.id===selected?.id)||vises.find(m=>m.id===api.viewport.fitTarget?.model)||vises[0];if(vise)api.viewport.fit({model:vise.id})}
- function render(){const centerButton=document.getElementById('fit-vise');if(centerButton)centerButton.disabled=!api.project().workspace.some(m=>m.kind==='vise');const project=api.project();if(selected&&!project.workspace.some(m=>m.id===selected.id)){selected=null;panel.hidden=true;}if(project!==lastProject){lastProject=project;if(!panel.hidden&&selected)void fields()}const open=new Set([...tree.querySelectorAll('details[open]')].map(n=>n.dataset.model));tree.replaceChildren();for(const m of api.project().workspace){const entry=el('details');entry.dataset.model=m.id;entry.open=open.has(String(m.id))||selected?.id===m.id||!!api.viseState(m.id);const summary=el('summary');const expand=button(summary,entry.open?'▾':'▸',()=>{entry.open=!entry.open;expand.textContent=entry.open?'▾':'▸'});expand.setAttribute('aria-label',`Expand or collapse ${m.name}`);const name=button(summary,m.name,()=>select(m.id,undefined));name.dataset.reference=m.id;name.title=m.name;name.style.cssText='min-width:0;white-space:nowrap';const menu=el('details');menu.className='item-actions';const more=el('summary','⋯');more.setAttribute('aria-label',`Actions for ${m.name}`);menu.append(more);button(menu,'Position',()=>select(m.id,undefined,true));if(m.kind==='vise')button(menu,'Configure clamping',()=>api.openVise(m.id));button(menu,`Delete ${m.kind==='machine'?'reference':m.kind}`,()=>api.task(async()=>{if(await confirmAction({title:`Delete ${m.name}?`,message:'Remove this reference from the project? You can undo this change.',accept:'Delete',destructive:true})){api.suspendVise();await api.edit({kind:'remove_workspace',id:m.id});api.status('Reference deleted. Undo is available.')}}));summary.append(menu);entry.append(summary);const list=el('div');list.className='component-tree';list.setAttribute('role','group');list.setAttribute('aria-label',`${m.name} components`);const draft=api.viseState(m.id),bodies=m.part.geometry.bodies||[];const owner=face=>bodies.findIndex(b=>face>=b.first_triangle&&face<b.first_triangle+b.triangle_count);const fixed=owner(draft?.fixed),moving=owner(draft?.moving);
-   bodies.forEach((b,i)=>{const row=el('div');row.className='component-row';const pick=button(row,`${i+1} · ${b.name.split(' / ').at(-1)}`,()=>select(m.id,i));pick.dataset.sceneBody=i;pick.title=b.name;pick.setAttribute('role','treeitem');pick.setAttribute('aria-selected',String(selected?.id===m.id&&selected.body===i));pick.ondblclick=()=>api.viewport.fit({model:m.id,body:i});const place=button(row,'↔',()=>select(m.id,i,true));place.className='component-position';place.dataset.scenePosition=i;place.setAttribute('aria-label',`Position component ${i+1}`);place.title='Position and rotate this component in 3D';
-    if(draft){const check=el('input');check.type='checkbox';check.dataset.viseBody=i;check.checked=i===moving||draft.bodies.includes(i);check.disabled=i===fixed||i===moving||m.clamp?.closed_by>0;check.title=i===fixed?'Fixed gripping component':i===moving?'Movable gripping component':'Attach this whole component to the moving jaw';check.setAttribute('aria-label',`${b.name} moves with jaw`);check.onchange=()=>{api.toggleBody(m.id,i,check.checked);render()};row.append(check)}list.append(row)});entry.append(list);tree.append(entry)} }
+ function render(){
+  const centerButton=document.getElementById('fit-vise');if(centerButton)centerButton.disabled=!api.project().workspace.some(m=>m.kind==='vise');
+  const project=api.project();if(selected&&!project.workspace.some(m=>m.id===selected.id)){selected=null;panel.hidden=true}
+  if(project!==lastProject){lastProject=project;if(!panel.hidden&&selected)void fields()}
+  tree.replaceChildren();
+  for(const m of project.workspace){
+   const entry=el('div');entry.className='reference-entry';entry.dataset.model=m.id;
+   const name=button(entry,m.name,()=>select(m.id,undefined));name.dataset.reference=m.id;name.setAttribute('role','treeitem');name.setAttribute('aria-selected',String(selected?.id===m.id));
+   bindContextMenu(name,()=>[
+    {label:'Edit placement',disabled:!!(m.clamp?.engaged||m.clamp?.closed_by>1e-7),action:()=>select(m.id,undefined,true)},
+    m.kind==='vise'&&{label:'Configure clamping',action:()=>{panel.hidden=true;api.openVise(m.id)}},
+    m.vise&&{label:'Edit example vise',action:()=>api.editExampleVise(m)},
+    {label:'Center view',action:()=>api.viewport.fit({model:m.id})},
+    {label:`Delete ${m.kind==='machine'?'reference':m.kind}`,action:()=>api.task(async()=>{if(await confirmAction({title:`Delete ${m.name}?`,message:'Remove this reference from the project? You can undo this change.',accept:'Delete',destructive:true})){api.suspendVise();await api.edit({kind:'remove_workspace',id:m.id});api.status('Reference deleted. Undo is available.')}})}
+   ]);tree.append(entry);
+  }
+ }
+
  return{render,select,centerVise,close:()=>{panel.hidden=true},selection:()=>selected};
 }
