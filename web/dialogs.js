@@ -15,14 +15,14 @@ export function confirmAction({title='Confirm action',message,accept='Continue',
 
 // One floating action menu for project entries. No inline action lists.
 let contextMenu,contextOwner;
-function closeContextMenu(restore=false){contextMenu?.remove();contextMenu=null;if(restore&&contextOwner?.isConnected)contextOwner.focus();contextOwner=null}
+function closeContextMenu(restore=false){contextMenu?.remove();contextMenu=null;if(restore&&contextOwner?.isConnected)contextOwner.focus({preventScroll:true});contextOwner=null}
 export function showContextMenu(items,x,y,owner){
  document.dispatchEvent(new Event('cam-context-menu-open'));closeContextMenu();
  const available=items.filter(Boolean);if(!available.length)return;
  const menu=document.createElement('div');menu.id='project-context-menu';menu.className='project-context-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','Project entry actions');contextMenu=menu;contextOwner=owner;
  for(const item of available){if(typeof item.checked==='boolean'){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=item.checked;input.disabled=item.disabled===true;input.onchange=()=>{closeContextMenu();item.action()};label.append(input,document.createTextNode(item.label));menu.append(label);continue}const b=document.createElement('button');b.type='button';b.setAttribute('role','menuitem');b.textContent=item.label;b.disabled=item.disabled===true;b.onclick=()=>{closeContextMenu();item.action()};menu.append(b)}
  document.body.append(menu);const r=menu.getBoundingClientRect();menu.style.left=`${Math.max(8,Math.min(x,innerWidth-r.width-8))}px`;menu.style.top=`${Math.max(8,Math.min(y,innerHeight-r.height-8))}px`;
- const enabled=()=>[...menu.querySelectorAll('button:not(:disabled),input:not(:disabled)')];enabled()[0]?.focus();
+ const enabled=()=>[...menu.querySelectorAll('button:not(:disabled),input:not(:disabled)')];enabled()[0]?.focus({preventScroll:true});
  menu.onkeydown=e=>{const buttons=enabled(),index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(index+(e.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus()}else if(e.key==='Escape'){e.preventDefault();closeContextMenu(true)}else if(e.key==='Tab')closeContextMenu()};
 }
 export function bindContextMenu(target,getItems){
@@ -37,4 +37,7 @@ export function bindContextMenu(target,getItems){
 }
 document.addEventListener('pointerdown',e=>{if(contextMenu&&!contextMenu.contains(e.target))closeContextMenu()});
 document.addEventListener('cam-context-menu-open',()=>closeContextMenu());
-document.addEventListener('scroll',e=>{if(!contextMenu?.contains(e.target))closeContextMenu()},true);window.addEventListener('resize',()=>closeContextMenu());
+// Pending layout/focus scroll events must not dismiss a newly opened menu.
+// Dismiss for an explicit scrolling gesture outside it instead.
+for(const type of ['wheel','touchmove'])document.addEventListener(type,e=>{if(contextMenu&&!contextMenu.contains(e.target))closeContextMenu()},{capture:true,passive:true});
+window.addEventListener('resize',()=>closeContextMenu());
