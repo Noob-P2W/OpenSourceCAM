@@ -81,6 +81,32 @@ fn face_selection_reorients_the_setup_and_survives_undo_and_recovery() {
     .unwrap();
     assert!(hit.horizontal);
     assert!(!hit.segments.is_empty());
+    let measured = commands::geometry_query(
+        &before,
+        GeometryQuery::Pick {
+            origin: [b.min[0] + 1., b.min[1] + 1., b.max[2] + 10.],
+            direction: [0., 0., -1.],
+        },
+    )
+    .unwrap();
+    assert!(measured["inclination_degrees"].as_f64().unwrap().abs() < 1e-6);
+    let edges = measured["edge_lengths"].as_array().unwrap();
+    assert_eq!(edges.len(), hit.segments.len() / 2);
+    // The fixture has straight outer edges measuring 80 and 50 mm.
+    for expected in [80., 50.] {
+        assert!(edges
+            .iter()
+            .any(|v| (v.as_f64().unwrap() - expected).abs() < 1e-6));
+    }
+    let vertical = commands::geometry_query(
+        &before,
+        GeometryQuery::Pick {
+            origin: std::array::from_fn(|i| side.center[i] + side.normal[i] * 10.),
+            direction: side.normal.map(|v| -v),
+        },
+    )
+    .unwrap();
+    assert!((vertical["inclination_degrees"].as_f64().unwrap() - 90.).abs() < 1e-6);
 }
 #[test]
 fn facing_stops_at_the_model_and_never_below_it() {

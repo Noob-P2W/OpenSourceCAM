@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {ready,section,closeDialogs,state} from './test-ui.mjs';
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});
 async function clickPoint(page,p){await page.waitForTimeout(100);const point=await page.locator('#canvas').evaluate((canvas,p)=>{const [x,y]=canvas.camViewport.projectWorld(p),r=canvas.getBoundingClientRect();return{x:r.left+x,y:r.top+y}},p);await page.mouse.click(point.x,point.y)}
-async function orbit(page,dx){const r=await page.locator('#canvas').boundingBox();await page.mouse.move(r.x+r.width/2,r.y+r.height/2);await page.mouse.down();await page.mouse.move(r.x+r.width/2+dx,r.y+r.height/2);await page.mouse.up()}
+async function orbit(page,dx){const r=await page.locator('#canvas').boundingBox();await page.mouse.move(r.x+r.width/2,r.y+r.height/2);await page.mouse.down({button:'middle'});await page.mouse.move(r.x+r.width/2+dx,r.y+r.height/2);await page.mouse.up({button:'middle'})}
 let legacyProfile;
 try{for(const width of [390,768,1440]){
  const context=await browser.newContext({viewport:{width,height:1000},hasTouch:true}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.PWA_URL);await ready(page);

@@ -792,3 +792,45 @@ fn older_closed_profiles_without_engaged_state_remain_clamped() {
     let restored = Project::from_json(&serde_json::to_vec(&data).unwrap()).unwrap();
     assert!(restored.workspace[0].clamp.as_ref().unwrap().is_clamped());
 }
+
+#[test]
+fn switching_machine_preserves_clamping_origin_and_tools() {
+    let (mut p, fixed, moving) = assembly_job();
+    p.ensure_tool_library();
+    p.workspace[0].part.offset = [200., 30., 10.];
+    let mut s = Session::new(p);
+    s.apply(Edit::ClampStockInViseSetup {
+        id: 1,
+        fixed,
+        moving,
+        max_closure: 30.,
+        bodies: vec![3],
+        grip: 3.,
+    })
+    .unwrap();
+    let before = s.project().clone();
+    for mut record in opensourcecam::machine_library::builtins() {
+        // Legacy machine records must not bridge their embedded cutter into the job.
+        record.profile.format_version = 1;
+        record.profile.milling_tool = Some(before.tool.clone());
+        s.apply(Edit::UseMachine {
+            record: Box::new(record),
+        })
+        .unwrap();
+        let after = s.project();
+        assert_eq!(after.workspace, before.workspace);
+        assert_eq!(after.stock, before.stock);
+        assert_eq!(after.part, before.part);
+        assert_eq!(
+            after.machine.as_ref().unwrap().work_origin,
+            before.machine.as_ref().unwrap().work_origin
+        );
+        assert_eq!(after.tool_library, before.tool_library);
+        assert_eq!(after.active_tool, before.active_tool);
+        assert_eq!(after.active_preset, before.active_preset);
+        assert_eq!(after.operations, before.operations);
+        assert!(after.workspace[0].clamp.as_ref().unwrap().is_clamped());
+    }
+    s.apply(Edit::Undo).unwrap();
+    assert_eq!(s.project().workspace, before.workspace);
+}

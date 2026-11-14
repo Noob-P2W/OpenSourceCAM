@@ -14,17 +14,17 @@ export class Viewport {
    const old=this.pointers.get(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);const points=[...this.pointers.values()];
    if(points.length===2){const distance=Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];if(this.gesture){this.zoom=Math.max(.1,Math.min(30,this.zoom*distance/Math.max(1,this.gesture.distance)));this.pan[0]+=center[0]-this.gesture.center[0];this.pan[1]+=center[1]-this.gesture.center[1]}this.gesture={distance,center}}
    else if(event.shiftKey||event.buttons===2){this.pan[0]+=event.clientX-old[0];this.pan[1]+=event.clientY-old[1]}
-   else {this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
+   else if(event.buttons===4||event.pointerType==='touch'){this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
-  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.pickRay){const rect=canvas.getBoundingClientRect();const ray=this.pickRay(event.clientX-rect.left,event.clientY-rect.top);if(this.onPick)this.onPick(ray);else this.onInspect?.(ray)}};
+  const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.pickRay){const rect=canvas.getBoundingClientRect();const ray=this.pickRay(event.clientX-rect.left,event.clientY-rect.top);if(this.onPick)this.onPick(ray);else this.onInspect?.(ray,{x:event.clientX-rect.left,y:event.clientY-rect.top})}};
   canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
   canvas.addEventListener('wheel',event=>{event.preventDefault();this.magnify(Math.exp(-event.deltaY*.001))},{passive:false});
-  canvas.addEventListener('dblclick',()=>this.fit());
+
  }
  initGL(){this.three=new ThreeView(this.canvas,this.gl);this.canvas.camViewport=this;}
  release(item){if(item?.three)this.three?.remove(item.three)}
- setView(preset){this.preset=preset;this.yaw=preset==='top'||preset==='front'?-Math.PI/2:preset==='right'?0:-Math.PI/4;this.elevation=preset==='top'?Math.PI/2:['front','right'].includes(preset)?0:Math.asin(1/Math.sqrt(3));this.fit(this.fitTarget||(this.includeReferences?'all':'part'))}
+ setView(preset){this.preset=preset;this.yaw=preset==='top'||preset==='front'?-Math.PI/2:preset==='right'?0:-Math.PI/4;this.elevation=preset==='top'?Math.PI/2:['front','right'].includes(preset)?0:preset==='axo'?Math.PI/6:Math.asin(1/Math.sqrt(3));this.fit(this.fitTarget||(this.includeReferences?'all':'part'))}
  fit(mode='part'){this.focusBounds=null;this.fixedScale=null;this.screenAnchor=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
  // Keep a physical reference steady across a work-origin edit; explicit Fit releases the scale.
  keepPointOnScreen(point,screenPoint){

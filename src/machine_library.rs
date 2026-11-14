@@ -40,8 +40,26 @@ impl MachineRecord {
     }
     pub fn apply(&self, p: &mut Project) -> Result<(), String> {
         self.validate()?;
-        apply_profile(&self.profile, p)?;
+        // A machine definition changes the CNC, not the job's cutting tools or pose.
+        let origin = if p.part.is_some() || !p.workspace.is_empty() {
+            p.machine.as_ref().map(|m| m.work_origin)
+        } else {
+            None
+        };
+        let work_offset = p.post.work_offset;
+        let mut machine_only = self.profile.clone();
+        machine_only.format_version = 3;
+        machine_only.milling_tool = None;
+        machine_only.apply(p)?;
+        if let Some(origin) = origin {
+            let machine = p.machine.as_mut().ok_or("Machine setup is required")?;
+            machine.work_origin = origin;
+            machine.validate(p.process)?;
+        }
         p.post = self.post.clone();
+        if origin.is_some() {
+            p.post.work_offset = work_offset;
+        }
         Ok(())
     }
 }

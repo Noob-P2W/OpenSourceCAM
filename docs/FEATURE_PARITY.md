@@ -90,7 +90,7 @@ level. See [machining geometry and clearing](MACHINING_WORKFLOW.md).
 
 ## Machining workflow update
 
-Browser playback uses the Rust feed/rapid timeline: 1× is estimated elapsed machining time, excluding controller acceleration and tool-change delays. Face opens direct model picking and returns to the same operation draft. Pocket/hole drafts can bind picked geometry before choosing a tool; generation retains cutter-fit checks. The separate Setup → Auto recognize survey groups opposite views of a through-hole and inspects supported prismatic openings across all planar levels and opening-face orientations (bounded to 64 orientations / four million triangle-orientation visits / 500 candidates). It changes neither setup nor operations. Other directions require explicit setup orientation and fixture review; there is no automatic workflow recommendation. Right-click inspects current-axis holes/pockets or a model face. Selected geometry has an orange surface shade and outline.
+Browser playback uses the Rust feed/rapid timeline: 1× is estimated elapsed machining time, excluding controller acceleration and tool-change delays. Face opens direct model picking and returns to the same operation draft. Pocket/hole drafts can bind picked geometry before choosing a tool; generation retains cutter-fit checks. The separate Setup → Auto recognize survey groups opposite views of a through-hole and inspects supported prismatic openings across all planar levels and opening-face orientations (bounded to 64 orientations / four million triangle-orientation visits / 500 candidates). It changes neither setup nor operations. Other directions require explicit setup orientation and fixture review; there is no automatic workflow recommendation. Left-click inspects current-axis holes/pockets or a model face. Selected geometry has an orange surface shade and outline.
 
 Finishing and roughing contact queries use a bounded triangle hierarchy with analytic swept-flat-cutter contact and conservative ball-cutter subdivision rather than a fine whole-stock height grid. Finishing uses adaptive parallel spans, with separate sampling (0.005–5 mm), contact tolerance and stepover controls. Roughing still uses a bounded 262,144-cell clearing grid. The 50-million-work and 200,000-move safeguards remain; fine sampling is not a guaranteed global surface-error bound. Mesh tessellation and cutter/stepover still constrain finish. Simulation resolution remains separate from machining accuracy.
 
@@ -291,3 +291,24 @@ successful action. The single button is in a fixed footer so it stays visible
 when the component/placement settings are scrolled. The separate Open jaw button is removed. Clamped state is saved
 explicitly, including zero-travel contact; legacy profiles with positive jaw travel
 are recognized as clamped. Undo, reload and profile export retain correct state.
+
+Machine selection retains the existing work origin, stock, part, fixture pose,
+clamped state, work offset and tool assignments; it replaces the CNC definition
+and postprocessor without importing another legacy cutter. The tree groups unique
+used cutters separately from fixtures/vises. The workpiece branch has its own
+expansion guide; duplicate Import/Setup/Operations shortcuts, the recognition
+explanation and the second Scan button are removed. The workpiece context menu
+can seat stock and part in the configured vise and clamp them.
+
+Actions → Stock simulation and Post / export open separate dialogs. NC preview
+and export contain no material-removal controls. Inspect provides distinct
+axonometric (30° elevation) and isometric views plus an **Inspect part features**
+checkbox. In inspection mode, selecting a supported hole/pocket, mesh surface or
+surface boundary edge displays measurements in the right inspector. Surface area,
+normal, inclination and boundary lengths come from Rust; mesh edge measurements
+follow the imported tessellation and do not infer analytic CAD curves.
+Middle-drag orbits, right-drag pans, and left-click selects; touch orbit/pinch
+remain available. The cube's diamond is Home view, and TOP remains directly
+clickable. The redundant view dropdown, Inspect fit buttons and permanent stock
+size overlay are removed. Vise component hover highlights the corresponding
+geometry; on desktop the setup dock fills the available right-side height.

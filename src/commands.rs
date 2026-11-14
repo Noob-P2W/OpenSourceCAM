@@ -289,7 +289,24 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
         GeometryQuery::Faces => Ok(json!(crate::faces::list(part)?)),
         GeometryQuery::Face { triangle } => Ok(json!(crate::faces::face(part, triangle)?)),
         GeometryQuery::Pick { origin, direction } => {
-            Ok(json!(crate::faces::pick(part, origin, direction)?))
+            let face = crate::faces::pick(part, origin, direction)?;
+            let lengths: Vec<f64> = face
+                .segments
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| {
+                    (0..3)
+                        .map(|i| (pair[1][i] - pair[0][i]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .collect();
+            let inclination = face.normal[2].abs().clamp(0., 1.).acos().to_degrees();
+            let mut value = json!(face);
+            value["edge_lengths"] = json!(lengths);
+            value["inclination_degrees"] = json!(inclination);
+            Ok(value)
         }
         GeometryQuery::FacingDraft { triangle } => {
             Ok(json!(crate::faces::facing(project, triangle)?))
