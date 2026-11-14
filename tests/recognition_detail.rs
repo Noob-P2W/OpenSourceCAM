@@ -83,3 +83,60 @@ fn tapers_islands_and_open_pockets_are_recognized_but_not_flattened_by_simple_pa
         }
     }
 }
+
+#[test]
+fn open_pocket_markers_are_on_real_floors_after_placement() {
+    let mut p = load("recognition-open-pocket");
+    p.part.as_mut().unwrap().rotation = [0., 0., 90.];
+    p.part.as_mut().unwrap().offset = [-20., 77., -100.];
+    let entries = shapes(&p);
+    let mut checked = 0;
+    for entry in entries.iter().filter(|e| {
+        e["current_orientation"] == true && e["feature"]["detail"]["shape"] == "open_pocket"
+    }) {
+        let marker: [f64; 3] = serde_json::from_value(entry["marker"].clone()).unwrap();
+        let floor = entry["feature"]["detail"]["floor_z"].as_f64().unwrap();
+        assert!((marker[2] - floor).abs() < 0.002);
+        let face = opensourcecam::faces::pick(
+            p.part.as_ref().unwrap(),
+            [marker[0], marker[1], marker[2] + 1000.],
+            [0., 0., -1.],
+        )
+        .unwrap();
+        assert!(
+            (face.z - marker[2]).abs() < 0.002,
+            "Marker must point at the exposed pocket floor"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn grouped_through_holes_retain_both_physical_openings() {
+    let p = Project::from_part(
+        import::import_file(Path::new("examples/models/mount.stl"), Units::Millimetres).unwrap(),
+    )
+    .unwrap();
+    let entries = shapes(&p);
+    for entry in entries
+        .iter()
+        .filter(|e| e["feature"]["through"] == true && e["feature"]["diameter"].is_number())
+    {
+        let openings = entry["orientations"].as_array().unwrap();
+        assert!(openings.len() >= 2);
+        let top = openings
+            .iter()
+            .find(|o| o["normal"][2].as_f64().unwrap() > 0.99)
+            .unwrap();
+        let bottom = openings
+            .iter()
+            .find(|o| o["normal"][2].as_f64().unwrap() < -0.99)
+            .unwrap();
+        assert!(
+            (top["marker"][2].as_f64().unwrap() - bottom["marker"][2].as_f64().unwrap() - 12.)
+                .abs()
+                < 0.002
+        );
+    }
+}

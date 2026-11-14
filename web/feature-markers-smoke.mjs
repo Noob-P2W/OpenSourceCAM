@@ -1,0 +1,14 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {ready,importModel,ribbon,idle,state} from './test-ui.mjs';
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});
+try{for(const width of [390,1440]){
+ const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.PWA_URL);await ready(page);
+ await importModel(page,new URL('../tests/fixtures/recognition-open-pocket.stl',import.meta.url).pathname);await ribbon(page,'Setup','Auto recognize');await page.locator('#status').filter({hasText:'Recognition complete'}).waitFor();await idle(page);
+ const survey=await page.evaluate(async()=>{const c=await import('./pkg/opensourcecam.js');await c.default();const s=new c.WebSession(await(await import('./storage.js')).readSnapshot());try{return JSON.parse(s.geometry(JSON.stringify({action:'survey'})))}finally{s.free()}});
+ const part=(await state(page)).part,vertices=part.geometry.mesh.vertices.map(v=>v.map((x,i)=>x+part.offset[i]));for(const e of survey.features)for(const opening of e.orientations)for(let i=0;i<3;i++)assert.ok(opening.marker[i]>=Math.min(...vertices.map(v=>v[i]))-.01&&opening.marker[i]<=Math.max(...vertices.map(v=>v[i]))+.01,'Marker remains inside the physical part bounds');
+ if(width===390)await page.locator('#browser-toggle').evaluate(b=>{if(document.body.dataset.browser==='true')b.click()});
+ async function check(){await page.waitForTimeout(100);const measurements=await page.locator('#canvas').evaluate((c,survey)=>{const r=c.getBoundingClientRect(),vp=c.camViewport;return [...document.querySelectorAll('.feature-tag:not([hidden])')].map(tag=>{const e=survey.features[Number(tag.dataset.featureTag)],n=[Math.cos(vp.elevation)*Math.cos(vp.yaw),Math.cos(vp.elevation)*Math.sin(vp.yaw),Math.sin(vp.elevation)],rank=o=>o.normal.reduce((s,v,i)=>s+v*n[i],0),opening=[...e.orientations].sort((a,b)=>rank(b)-rank(a))[0],p=vp.projectWorld(opening.marker),t=tag.getBoundingClientRect();return Math.hypot(t.x+t.width/2-r.x-p[0],t.y+t.height/2-r.y-p[1])})},survey);for(const distance of measurements)assert.ok(distance<1,'Label stays centered on its model anchor')}
+ for(const view of ['top','front','right','home']){await page.locator(`[data-view=${view}]`).click();await check()}
+ await page.locator('#canvas').evaluate(c=>{c.camViewport.pan=[35,20];c.camViewport.magnify(1.3)});await check();await page.screenshot({path:`/tmp/cam-feature-markers-${width}.png`});assert.deepEqual(errors,[]);await context.close();console.log(`PASS: ${width}px feature anchors on part geometry and screen alignment across view changes, pan and zoom`);
+}}finally{await browser.close()}

@@ -331,3 +331,11 @@ leaving with unsaved changes retains the browser unload warning. Small preferenc
 and device tool/machine libraries retain their existing storage. Offline packaging
 includes the storage module. Browser storage may still be evicted or unavailable;
 downloaded project backups remain independent of it.
+
+
+Recognition survey anchors and outlines use the inverse setup rotation when
+returning to work coordinates. Open-pocket/island markers use an actual floor
+triangle rather than an elevated bounding-box center. Grouped through-holes keep
+both opening anchors and display the one facing the camera. Part bounds are
+reused across recognition level loops; existing recognition budgets and machining
+validation remain unchanged.

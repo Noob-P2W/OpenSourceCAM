@@ -275,7 +275,7 @@ function renderFeatureTree(survey){
  }
 
 }
-function positionFeatureTags(result){if(!result?.projectPoint||!geometryState.survey)return;const w=$('canvas').clientWidth,h=$('canvas').clientHeight;for(const tag of $('feature-tags').children){const entry=geometryState.survey.features[Number(tag.dataset.featureTag)],p=result.projectPoint(entry.marker),facing=entry.normal.reduce((n,v,i)=>n+v*result.camera[i],0);tag.hidden=facing<.1||p[0]<14||p[0]>w-14||p[1]<20||p[1]>h-14;tag.style.left=`${p[0]}px`;tag.style.top=`${p[1]}px`;}}
+function positionFeatureTags(result){if(!result?.projectPoint||!geometryState.survey)return;const w=$('canvas').clientWidth,h=$('canvas').clientHeight;for(const tag of $('feature-tags').children){const entry=geometryState.survey.features[Number(tag.dataset.featureTag)],directions=entry.orientations.filter(o=>o.marker),opening=(directions.length?directions:[entry]).reduce((best,o)=>o.normal.reduce((n,v,i)=>n+v*result.camera[i],0)>best.normal.reduce((n,v,i)=>n+v*result.camera[i],0)?o:best),p=result.projectPoint(opening.marker),facing=opening.normal.reduce((n,v,i)=>n+v*result.camera[i],0);tag.hidden=facing<.1||p[0]<14||p[0]>w-14||p[1]<20||p[1]>h-14;tag.style.left=`${p[0]}px`;tag.style.top=`${p[1]}px`;}}
 async function recognizeAll(){
  status('Inspecting features across model orientations and levels…');$('features').replaceChildren();$('feature-tags').replaceChildren();
  let survey;try{survey=await call('geometry',{data:{action:'survey'}})}catch(error){$('feature-notes').textContent=`Recognition could not inspect this model. ${error.message}`;shell.showFeatures();throw error;}

@@ -982,10 +982,11 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
                 }
             }
         }
+        let top_z = aligned.bounds().max[2];
         let matrix = crate::blank::rotation(aligned.rotation);
         let mut report = recognize_detailed(aligned, None, &topology, &cancel)?;
         for z in levels {
-            if (z - aligned.bounds().max[2]).abs() > TOLERANCE {
+            if (z - top_z).abs() > TOLERANCE {
                 report
                     .features
                     .extend(recognize_detailed(aligned, Some(z), &topology, &cancel)?.features);
@@ -997,9 +998,7 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
             }
             let transform = |p: [f64; 3]| {
                 let q: [f64; 3] = std::array::from_fn(|i| p[i] - aligned.offset[i]);
-                part.point(std::array::from_fn(|i| {
-                    (0..3).map(|j| matrix[j][i] * q[j]).sum::<f64>() / aligned.units.factor()
-                }))
+                part.point(crate::blank::inverse(matrix, q).map(|v| v / aligned.units.factor()))
             };
             let outline: Vec<_> = feature.outline.iter().map(|p| transform(*p)).collect();
             let mut axis = [
@@ -1014,9 +1013,32 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
             } else {
                 format!("unique:{}", results.len())
             };
-            let direction =
-                serde_json::json!({"normal":face.normal,"face":face.id,"current":face.horizontal});
-            let entry = serde_json::json!({"label":feature.label(),"machinable":feature.detail.shape.machinable(),"marker":transform([feature.center[0],feature.center[1],feature.opening_z]),"feature":feature,"outline":outline,"normal":face.normal,"face":face.id,"current_orientation":face.horizontal,"orientations":[direction.clone()]});
+            // Open/concave floors can have their bounding-box center outside the
+            // feature or over an island. Anchor to an actual floor triangle.
+            let anchor = if matches!(
+                feature.detail.shape,
+                Shape::OpenPocket | Shape::PocketWithIslands
+            ) {
+                feature
+                    .detail
+                    .floor_triangles
+                    .iter()
+                    .map(|&id| {
+                        aligned.geometry.mesh.triangles[id]
+                            .map(|v| aligned.point(aligned.geometry.mesh.vertices[v as usize]))
+                    })
+                    .max_by(|a, b| {
+                        let area = |t| normal(t).iter().map(|v| v * v).sum::<f64>();
+                        area(*a).total_cmp(&area(*b))
+                    })
+                    .map(|t| std::array::from_fn(|i| t.iter().map(|p| p[i]).sum::<f64>() / 3.))
+                    .unwrap_or([feature.center[0], feature.center[1], feature.bottom_z])
+            } else {
+                [feature.center[0], feature.center[1], feature.opening_z]
+            };
+            let marker = transform(anchor);
+            let direction = serde_json::json!({"normal":face.normal,"face":face.id,"current":face.horizontal,"marker":marker});
+            let entry = serde_json::json!({"label":feature.label(),"machinable":feature.detail.shape.machinable(),"marker":marker,"feature":feature,"outline":outline,"normal":face.normal,"face":face.id,"current_orientation":face.horizontal,"orientations":[direction.clone()]});
             if let Some(&index) = identities.get(&identity) {
                 let existing = &mut results[index];
                 let mut orientations = existing["orientations"].as_array().unwrap().clone();
@@ -1078,9 +1100,10 @@ pub fn pick_feature(
             }
         }
     }
+    let top_z = part.bounds().max[2];
     let mut candidates = recognize_detailed(part, None, &topology, &cancel)?.features;
     for z in levels {
-        if (z - part.bounds().max[2]).abs() > TOLERANCE {
+        if (z - top_z).abs() > TOLERANCE {
             candidates.extend(recognize_detailed(part, Some(z), &topology, &cancel)?.features);
         }
     }
