@@ -14,10 +14,15 @@ pub struct Profile {
     pub moving: usize,
     pub max_closure: f64,
     pub closed_by: f64,
+    #[serde(default)]
+    pub engaged: bool,
     pub moving_vertices: Vec<usize>,
     pub grip: f64,
 }
 impl Profile {
+    pub fn is_clamped(&self) -> bool {
+        self.engaged || self.closed_by > 1e-7
+    }
     pub fn validate_geometry(&self, geometry: &Geometry) -> Result<(), String> {
         self.validate(&geometry.mesh)?;
         if geometry.bodies.is_empty() {
@@ -262,7 +267,7 @@ pub fn configure_group(
     if model(p, id)?
         .clamp
         .as_ref()
-        .is_some_and(|c| c.closed_by > 1e-7)
+        .is_some_and(Profile::is_clamped)
     {
         return Err("Open the jaw before reconfiguring it".into());
     }
@@ -276,6 +281,7 @@ pub fn configure_group(
         moving,
         max_closure,
         closed_by: 0.,
+        engaged: false,
         moving_vertices,
         grip: 3.,
     });
@@ -308,6 +314,7 @@ pub fn open(p: &mut Project, id: u64) -> Result<(), String> {
     d[axis] = sign * m.clamp.as_ref().unwrap().closed_by;
     translate(m, &indices, d);
     m.clamp.as_mut().unwrap().closed_by = 0.;
+    m.clamp.as_mut().unwrap().engaged = false;
     Ok(())
 }
 pub fn clamp(p: &mut Project, id: u64, grip: f64) -> Result<(), String> {
@@ -353,6 +360,7 @@ pub fn clamp(p: &mut Project, id: u64, grip: f64) -> Result<(), String> {
     let m = p.workspace.iter_mut().find(|m| m.id == id).unwrap();
     translate(m, &indices, delta);
     m.clamp.as_mut().unwrap().closed_by = closure.max(0.);
+    m.clamp.as_mut().unwrap().engaged = true;
     m.clamp.as_mut().unwrap().grip = grip;
     crate::collision::check_stock_in_vise(p, id)?;
     Ok(())

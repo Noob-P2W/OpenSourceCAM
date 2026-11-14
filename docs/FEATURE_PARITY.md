@@ -182,13 +182,11 @@ linear / 0.3 rad angular tessellation settings. The 32 MiB source file limit,
 budgets remain separate and unchanged. Large supported inputs still need device
 verification; exceeding the new cap fails before changing the workspace.
 
-Reference assemblies now have an expandable component list below Workholding in
-the Project & operations browser. Clicking a component recolours its existing
-render buffer instead of drawing a coplanar duplicate. Clamping controls are
-non-modal; moving-group checkboxes live in the component tree. Selection and
-reference framing retain the complete source geometry. Import and scene selection
-frame the reference itself rather than including a distant stock origin. The
-viewport includes a scene-sized grid and a camera-oriented XYZ indicator.
+Each reference has one main entry below Workholding. Right-click opens its
+floating action menu; component membership is listed only in the clamping panel.
+The placement editor's component selector retains individual-body positioning.
+Selection and framing retain complete geometry, with no duplicate left-side list.
+The viewport includes a scene-sized grid and camera-oriented XYZ indicator.
 
 Shared Session placement transactions support reference XYZ offsets, XYZ rotation,
 work/machine frames and XY centering over stock. Individual CAD components can
@@ -275,7 +273,9 @@ existing calculation and work limits remain enforced.
 ## Project UI actions and setup
 
 References, workpieces and tools/holders expose deletion from their project-list
-action menus. Operations have a visible actions button as well as right-click.
+action menus. All project entries and operations use a shared floating right-click action menu.
+Keyboard users can press Shift+F10 or the menu key; touch users can long-press.
+Menus close on selection, Escape or outside click and stay within the viewport.
 Deletion is undoable; removing a workpiece also removes its model-linked operations,
 while assigned tools/holders retain their existing assignment checks. Visibility,
 operation enabling and jaw-group membership use native checkboxes. Imported-vise
@@ -284,3 +284,10 @@ Setup has one Save setup and continue action; redundant Orientation and NC-previ
 ribbon shortcuts were removed while their controls remain in the relevant dialogs.
 The project sidebar supports mouse/touch resizing, keyboard width changes, header
 dragging into a floating panel, and Dock; narrow screens retain the drawer.
+
+The clamping panel has one action button: **Clamp stock** when released and
+**Release stock** when clamped. It stays open and updates the text after each
+successful action. The single button is in a fixed footer so it stays visible
+when the component/placement settings are scrolled. The separate Open jaw button is removed. Clamped state is saved
+explicitly, including zero-travel contact; legacy profiles with positive jaw travel
+are recognized as clamped. Undo, reload and profile export retain correct state.

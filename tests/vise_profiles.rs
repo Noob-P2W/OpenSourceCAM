@@ -722,3 +722,73 @@ fn fixed_vise_checks_other_machine_fixtures_in_final_placement() {
     .unwrap();
     assert_eq!(s.project().workspace[1], fixture);
 }
+
+#[test]
+fn clamped_state_survives_zero_travel_reload_release_and_undo() {
+    let (mut p, fixed, moving) = job();
+    p.stock.height += 0.5; // Exactly fills the configured open jaw gap.
+    let mut session = Session::new(p);
+    session
+        .apply(Edit::ConfigureVise {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.,
+        })
+        .unwrap();
+    session.apply(Edit::ClampVise { id: 1, grip: 3. }).unwrap();
+    let profile = session.project().workspace[0].clamp.as_ref().unwrap();
+    assert!(profile.closed_by.abs() < 1e-7);
+    assert!(profile.is_clamped());
+    let restored = Project::from_json(&serde_json::to_vec(session.project()).unwrap()).unwrap();
+    assert!(restored.workspace[0].clamp.as_ref().unwrap().is_clamped());
+    assert!(session
+        .apply(Edit::ConfigureVise {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.
+        })
+        .is_err());
+    assert!(session.apply(Edit::CenterWorkspace { id: 1 }).is_err());
+    session.apply(Edit::OpenVise { id: 1 }).unwrap();
+    assert!(!session.project().workspace[0]
+        .clamp
+        .as_ref()
+        .unwrap()
+        .is_clamped());
+    session.apply(Edit::Undo).unwrap();
+    assert!(session.project().workspace[0]
+        .clamp
+        .as_ref()
+        .unwrap()
+        .is_clamped());
+    session.apply(Edit::Redo).unwrap();
+    assert!(!session.project().workspace[0]
+        .clamp
+        .as_ref()
+        .unwrap()
+        .is_clamped());
+}
+
+#[test]
+fn older_closed_profiles_without_engaged_state_remain_clamped() {
+    let (p, fixed, moving) = job();
+    let mut session = Session::new(p);
+    session
+        .apply(Edit::ConfigureVise {
+            id: 1,
+            fixed,
+            moving,
+            max_closure: 30.,
+        })
+        .unwrap();
+    session.apply(Edit::ClampVise { id: 1, grip: 3. }).unwrap();
+    let mut data = serde_json::to_value(session.project()).unwrap();
+    data["workspace"][0]["clamp"]
+        .as_object_mut()
+        .unwrap()
+        .remove("engaged");
+    let restored = Project::from_json(&serde_json::to_vec(&data).unwrap()).unwrap();
+    assert!(restored.workspace[0].clamp.as_ref().unwrap().is_clamped());
+}

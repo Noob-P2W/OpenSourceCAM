@@ -186,7 +186,10 @@ fn editable(project: &mut crate::model::Project, id: u64) -> Result<&mut Workspa
         .iter_mut()
         .find(|m| m.id == id)
         .ok_or("Reference model not found")?;
-    if m.clamp.as_ref().is_some_and(|c| c.closed_by > 1e-7) {
+    if m.clamp
+        .as_ref()
+        .is_some_and(crate::vise::Profile::is_clamped)
+    {
         return Err("Open the jaw before changing its placement".into());
     }
     Ok(m)
