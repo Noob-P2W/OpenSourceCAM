@@ -271,3 +271,16 @@ The Actions ribbon keeps **Stock simulation**; the duplicate Material removal
 entry is removed. Its menu includes **Disable stock simulation**. Simulation
 defaults to 128 cells with explicit 768/1024-cell options for larger stock;
 existing calculation and work limits remain enforced.
+
+## Project UI actions and setup
+
+References, workpieces and tools/holders expose deletion from their project-list
+action menus. Operations have a visible actions button as well as right-click.
+Deletion is undoable; removing a workpiece also removes its model-linked operations,
+while assigned tools/holders retain their existing assignment checks. Visibility,
+operation enabling and jaw-group membership use native checkboxes. Imported-vise
+setup lists moving components directly in Setup → Workholding → Set up clamping.
+Setup has one Save setup and continue action; redundant Orientation and NC-preview
+ribbon shortcuts were removed while their controls remain in the relevant dialogs.
+The project sidebar supports mouse/touch resizing, keyboard width changes, header
+dragging into a floating panel, and Dock; narrow screens retain the drawer.
