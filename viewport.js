@@ -70,15 +70,20 @@ export class Viewport {
   const corners=[];for(const z of [-stock.thickness,0])corners.push([0,0,z],[stock.width,0,z],[stock.width,stock.height,z],[0,stock.height,z]);const segments=[];for(let i=0;i<4;i++)segments.push(corners[i],corners[(i+1)%4],corners[i+4],corners[(i+1)%4+4],corners[i],corners[i+4]);this.stockLines=this.lines(project._display?.stock_outline||segments,this.controls.dark?[.9,.7,.3]:[.65,.42,.1]);
   const axis=Math.max(.001,...this.allBounds.max.map((v,i)=>(v-this.allBounds.min[i])*.12));this.axisLength=axis;this.axisBuffers=[this.lines([[0,0,0],[axis,0,0]],[.88,.22,.22]),this.lines([[0,0,0],[0,axis,0]],[.2,.65,.3]),this.lines([[0,0,0],[0,0,axis]],[.2,.42,.9])];const grid=[],extent=Math.max(stock.width,stock.height,...this.allBounds.max.map((v,i)=>v-this.allBounds.min[i])),base=10**Math.floor(Math.log10(extent/12)),step=Math.ceil(extent/12/base)*base,cx=(this.allBounds.min[0]+this.allBounds.max[0])/2,cy=(this.allBounds.min[1]+this.allBounds.max[1])/2,z=this.allBounds.min[2]-.01;for(let i=-10;i<=10;i++){grid.push([cx+i*step,cy-10*step,z],[cx+i*step,cy+10*step,z],[cx-10*step,cy+i*step,z],[cx+10*step,cy+i*step,z])}this.gridLines=this.lines(grid,this.controls.dark?[.16,.21,.26]:[.83,.85,.86]);
  }
+ // Worker deltas can outpace painting; retain each strip before scheduling a draw.
+ stageStockFrame(frame){
+  const sameFrame=this.stockFrameSource===frame,reset=!this.stockCpu||this.stockFrameEpoch!==frame.epoch||this.stockFrameResolution!==frame.resolution||(frame.reset&&!sameFrame);
+  if(reset){this.stockCpu=new Map();this.stockDirty=new Set();this.stockReset=true}
+  if(!sameFrame)for(const patch of frame.patches){this.stockCpu.set(patch.strip,frame.vertices.slice(patch.offset,patch.offset+patch.length));this.stockDirty.add(patch.strip)}
+  this.stockFrameSource=frame;this.stockFrameEpoch=frame.epoch;this.stockFrameResolution=frame.resolution;
+ }
  updateStockPatches(frame,rebuild=false){
   const remove=item=>{this.release(item);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)};
-  const sameFrame=this.stockFrameSource===frame,reset=!this.stockCpu||this.stockFrameEpoch!==frame.epoch||this.stockFrameResolution!==frame.resolution||(frame.reset&&!sameFrame);
-  if(reset)this.stockCpu=new Map();
-  if(!sameFrame)for(const patch of frame.patches)this.stockCpu.set(patch.strip,frame.vertices.slice(patch.offset,patch.offset+patch.length));
-  this.stockFrameSource=frame;this.stockFrameEpoch=frame.epoch;this.stockFrameResolution=frame.resolution;
-  const all=reset||rebuild||!this.stockPieces.size;if(all){for(const item of this.stockBuffers)remove(item);this.stockBuffers=[];this.stockPieces.clear()}
-  const strips=all?this.stockCpu.keys():frame.patches.map(p=>p.strip);
+  this.stageStockFrame(frame);
+  const all=this.stockReset||rebuild||!this.stockPieces.size;if(all){for(const item of this.stockBuffers)remove(item);this.stockBuffers=[];this.stockPieces.clear()}
+  const strips=all?this.stockCpu.keys():this.stockDirty;
   for(const strip of strips){const old=this.stockPieces.get(strip);if(old){remove(old);this.stockBuffers.splice(this.stockBuffers.indexOf(old),1)}const item=this.upload(this.stockCpu.get(strip),[.45,.7,.4]);this.stockPieces.set(strip,item);this.stockBuffers.push(item)}
+  this.stockDirty.clear();this.stockReset=false;
   this.canvas.dataset.stockTriangles=String(this.stockBuffers.reduce((n,item)=>n+item.count/3,0));
  }
  updatePath(path,filter){
