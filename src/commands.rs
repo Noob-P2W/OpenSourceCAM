@@ -236,6 +236,9 @@ pub fn operation_template(
 pub enum GeometryQuery {
     Faces,
     Survey,
+    Selection {
+        triangles: Vec<usize>,
+    },
     PickFeature {
         origin: [f64; 3],
         direction: [f64; 3],
@@ -272,6 +275,9 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             crate::features::pick_feature(project, origin, direction)?
         )),
         GeometryQuery::Survey => crate::features::survey(project),
+        GeometryQuery::Selection { triangles } => {
+            Ok(json!(crate::faces::selection(part, &triangles)?))
+        }
         GeometryQuery::FeatureGeometry { feature, strategy } => {
             // Resolve client selection against recognition; never trust submitted dimensions.
             let report = crate::features::recognize_level_for_selection(part, feature.opening_z)?;

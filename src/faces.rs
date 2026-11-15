@@ -198,6 +198,23 @@ pub fn list(part: &Part) -> Result<Vec<Face>, String> {
     faces.truncate(500);
     Ok(faces)
 }
+/// Complete display selections at planar boundaries rather than mesh diagonals.
+/// This does not change recognition candidates or machining geometry.
+pub fn selection(part: &Part, triangles: &[usize]) -> Result<Vec<usize>, String> {
+    let count = part.geometry.mesh.triangles.len();
+    if triangles.len() > count || triangles.iter().any(|&id| id >= count) {
+        return Err("Invalid surface selection".into());
+    }
+    let selected: BTreeSet<_> = triangles.iter().copied().collect();
+    let mut result = Vec::new();
+    for group in groups(part)? {
+        if group.triangles.iter().any(|id| selected.contains(id)) {
+            result.extend(group.triangles);
+        }
+    }
+    result.sort_unstable();
+    Ok(result)
+}
 pub fn face(part: &Part, triangle: usize) -> Result<Face, String> {
     if !part.geometry.bodies.is_empty() {
         part.validate()?;

@@ -382,3 +382,34 @@ fn survey_groups_opposite_views_of_the_same_through_hole() {
         4
     );
 }
+
+#[test]
+fn display_selection_completes_planar_faces_without_changing_the_feature() {
+    let p = mount();
+    let face = faces::list(p.part.as_ref().unwrap())
+        .unwrap()
+        .into_iter()
+        .find(|f| f.horizontal && f.triangle_count > 2)
+        .unwrap();
+    let original = p.clone();
+    let ids: Vec<usize> = serde_json::from_value(
+        commands::geometry_query(
+            &p,
+            GeometryQuery::Selection {
+                triangles: vec![face.id],
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ids.len(), face.triangle_count);
+    assert!(ids.contains(&face.id));
+    for id in ids {
+        assert_eq!(
+            faces::face(p.part.as_ref().unwrap(), id).unwrap().id,
+            face.id
+        );
+    }
+    assert_eq!(p, original);
+    assert!(faces::selection(p.part.as_ref().unwrap(), &[usize::MAX]).is_err());
+}

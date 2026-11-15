@@ -339,3 +339,9 @@ triangle rather than an elevated bounding-box center. Grouped through-holes keep
 both opening anchors and display the one facing the camera. Part bounds are
 reused across recognition level loops; existing recognition budgets and machining
 validation remain unchanged.
+
+
+Open-pocket/island inspection highlights complete the selected connected planar
+faces so their edges follow physical surface boundaries rather than mesh diagonals.
+This display query leaves recognized feature dimensions and machining geometry
+unchanged. Results from a superseded selection are ignored.
