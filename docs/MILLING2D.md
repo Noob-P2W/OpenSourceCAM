@@ -108,3 +108,17 @@ Rust regression tests cover each cycle, radius compensation, fractional external
 helix exits, pitch/handedness, axial feed, invalid geometry/tools and bounded pocket
 entries. Browser tests exercise the grouped controls, all new cycle saves and path
 generation, V/thread cutter assignments and circular shape inference.
+
+
+The 2D ribbon is now ordered Roughing, Finishing, Other. Pocket roughing and
+Smooth pocket roughing are separate from Pocket contour; Outside contour opens
+an outside finishing operation. Model edge selection offers a single boundary
+segment or its boundary loop. Chamfer width and tip depth are separate: the Rust
+engine offsets the tip so its measured cone intersects the edge by the requested
+width, rejecting insufficient penetration. Cutter side is inferred from the picked
+face and remains editable. Trace uses wall compensation for picked flat boundaries;
+intentional tool-center and varying-Z traces require Offset cutter from wall off.
+The edge picker follows tessellated boundaries of the hit face, not an analytic CAD
+edge network across multiple faces. Inspect the chain before generating.
+Nonrectangular straight-wall cavities are labelled Pocket and remain inspection
+candidates; rectangular Pocket clearing is not authorized to erase their shape.

@@ -512,3 +512,74 @@ pub fn pick_chain(
     chain.rotate_left(first);
     Ok(chain)
 }
+
+/// Select the boundary segment closest to the actual ray hit, or its complete loop.
+pub fn pick_edges(
+    part: &Part,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    single: bool,
+) -> Result<Vec<[f64; 3]>, String> {
+    let chain = pick_chain(part, origin, direction)?;
+    if !single {
+        return Ok(chain);
+    }
+    let (_, t) = ray_hit(part, origin, direction)?;
+    let hit: [f64; 3] = std::array::from_fn(|i| origin[i] + t * direction[i]);
+    let index = (0..chain.len())
+        .min_by(|&a, &b| {
+            let distance = |i: usize| {
+                let p = chain[i];
+                let q = chain[(i + 1) % chain.len()];
+                let v: [f64; 3] = std::array::from_fn(|j| q[j] - p[j]);
+                let len = v.iter().map(|v| v * v).sum::<f64>();
+                let t = ((0..3).map(|j| (hit[j] - p[j]) * v[j]).sum::<f64>() / len.max(1e-20))
+                    .clamp(0., 1.);
+                (0..3)
+                    .map(|j| (hit[j] - p[j] - t * v[j]).powi(2))
+                    .sum::<f64>()
+            };
+            distance(a).total_cmp(&distance(b))
+        })
+        .ok_or("No edge at this point")?;
+    Ok(vec![chain[index], chain[(index + 1) % chain.len()]])
+}
+
+/// Determine which side of a selected planar boundary is empty from the hit face.
+pub fn waste_side(
+    part: &Part,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    points: &[[f64; 3]],
+    closed: bool,
+) -> Result<bool, String> {
+    let (id, _) = ray_hit(part, origin, direction)?;
+    let face = face(part, id)?;
+    let a = points[0];
+    let b = points[1];
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let len = d[0].hypot(d[1]);
+    if len < 1e-9 {
+        return Ok(true);
+    }
+    let area = (0..points.len())
+        .map(|i| {
+            let a = points[i];
+            let b = points[(i + 1) % points.len()];
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum::<f64>();
+    let sign = if closed && area < 0. { -1. } else { 1. };
+    let q = [
+        (a[0] + b[0]) / 2. - sign * d[1] / len * 0.001,
+        (a[1] + b[1]) / 2. + sign * d[0] / len * 0.001,
+    ];
+    let material = face.fill.iter().any(|t| {
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        };
+        let c = [cross(t[0], t[1]), cross(t[1], t[2]), cross(t[2], t[0])];
+        c.iter().all(|v| *v >= -1e-10) || c.iter().all(|v| *v <= 1e-10)
+    });
+    Ok(material)
+}

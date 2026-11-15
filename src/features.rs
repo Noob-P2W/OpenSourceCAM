@@ -62,6 +62,7 @@ pub enum Shape {
     FilletedBore,
     TaperedHole,
     TaperedPocket,
+    ProfilePocket,
     PocketWithIslands,
     OpenPocket,
 }
@@ -79,6 +80,7 @@ impl Shape {
             Self::FilletedBore => "Hole with rounded transition",
             Self::TaperedHole => "Tapered hole",
             Self::TaperedPocket => "Tapered pocket",
+            Self::ProfilePocket => "Pocket",
             Self::PocketWithIslands => "Pocket with islands",
             Self::OpenPocket => "Open pocket / ledge",
         }
@@ -675,7 +677,17 @@ pub fn recognize_project_with_cancel(
 pub fn recognize_level_for_selection(part: &Part, level: f64) -> Result<Report, String> {
     let cancel = AtomicBool::new(false);
     let topology = Topology::build(part, &cancel)?;
-    recognize_detailed(part, Some(level), &topology, &cancel)
+    let mut report = recognize_detailed(part, Some(level), &topology, &cancel)?;
+    report.features.extend(
+        topology
+            .floor_candidates(part.bounds().max[2])
+            .into_iter()
+            .filter(|f| (f.opening_z - level).abs() < TOLERANCE),
+    );
+    if report.features.len() > MAX_FEATURES {
+        return Err("Recognition exceeds 500 candidates".into());
+    }
+    Ok(report)
 }
 fn recognize_level(part: &Part, level: Option<f64>, cancel: &AtomicBool) -> Result<Report, String> {
     let topology = Topology::build(part, cancel)?;
@@ -1109,9 +1121,8 @@ pub fn pick_feature(
     let cancel = AtomicBool::new(false);
     let topology = Topology::build(part, &cancel)?;
     let mut levels = Vec::<f64>::new();
-    let nearest = crate::faces::ray_hit(part, origin, direction)
-        .ok()
-        .map(|(_, t)| t);
+    let hit = crate::faces::ray_hit(part, origin, direction).ok();
+    let nearest = hit.map(|(_, t)| t);
     let mut found = Vec::new();
     for c in &topology.components {
         if c.class == Class::Up {
@@ -1132,6 +1143,11 @@ pub fn pick_feature(
         }
     }
     for feature in candidates {
+        if feature.detail.shape == Shape::OpenPocket
+            && hit.is_some_and(|(id, _)| !feature.detail.floor_triangles.contains(&id))
+        {
+            continue;
+        }
         let z = feature.opening_z;
         let t = (z - origin[2]) / direction[2];
         if t < 0. || nearest.is_some_and(|hit| t > hit + TOLERANCE) {
@@ -1287,7 +1303,24 @@ impl Topology {
                 FeatureKind::RectangularPocket,
                 [(min[0] + max[0]) / 2., (min[1] + max[1]) / 2.],
                 None,
-                Shape::TaperedPocket,
+                if rings.iter().skip(1).all(|ring| {
+                    ring.iter().all(|p| {
+                        (0..outline.len()).any(|i| {
+                            let a = outline[i];
+                            let b = outline[(i + 1) % outline.len()];
+                            let dx = b[0] - a[0];
+                            let dy = b[1] - a[1];
+                            let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy)
+                                / (dx * dx + dy * dy).max(1e-20))
+                            .clamp(0., 1.);
+                            (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy) <= TOLERANCE
+                        })
+                    })
+                }) {
+                    Shape::ProfilePocket
+                } else {
+                    Shape::TaperedPocket
+                },
                 level,
             )
         };

@@ -457,3 +457,22 @@ fn manual_change_routes_enforce_clearance_travel_and_fixture_checks() {
     opensourcecam::post::checked_geometry_path(&p).unwrap();
     assert!(post::gcode(&p).unwrap_err().contains("contacts fixture"));
 }
+
+#[test]
+fn preview_exposes_every_positive_linear_geometry_dimension() {
+    for kind in ToolKind::ALL {
+        let tool = LibraryTool::new(1, 1, kind);
+        let dims = opensourcecam::tool_preview::dimensions(&tool);
+        for spec in kind
+            .geometry()
+            .into_iter()
+            .filter(|p| p.unit == "mm" && tool.dimension(p.key) > 0.)
+        {
+            assert!(
+                dims.iter().any(|d| d.key == spec.key),
+                "{kind:?}: {}",
+                spec.key
+            );
+        }
+    }
+}

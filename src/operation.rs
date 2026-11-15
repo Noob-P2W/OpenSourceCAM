@@ -39,6 +39,8 @@ pub struct Settings {
     /// Tool-center or contour-boundary chain in work coordinates; depth is subtracted from Z.
     pub path: Vec<[f64; 3]>,
     pub closed: bool,
+    pub chamfer_width: Option<f64>,
+    pub trace_offset: bool,
     pub precleared: bool,
     pub outside: bool,
     pub pitch: Option<f64>,
@@ -74,6 +76,7 @@ impl Settings {
             return Err("A contour needs at most 10,000 finite work-coordinate points".into());
         }
         for (name, value, min, max) in [
+            ("Chamfer width", self.chamfer_width, 0.001, 100.),
             ("Pitch", self.pitch, 0.01, 100.),
             ("Thread depth", self.thread_depth, 0.001, 100.),
             ("Taper angle", self.taper_angle, -45., 45.),

@@ -106,17 +106,8 @@ pub fn dimensions(tool: &LibraryTool) -> Vec<Dimension> {
     let radius = tool.dimension("diameter") / 2.;
     let flute = tool.dimension("flute_length");
     let mut result = Vec::new();
-    for key in [
-        "diameter",
-        "shaft_diameter",
-        "overall_length",
-        "stickout",
-        "shoulder_length",
-        "flute_length",
-        "gauge_length",
-        "tip_diameter",
-        "neck_diameter",
-    ] {
+    for spec in tool.kind.geometry().into_iter().filter(|p| p.unit == "mm") {
+        let key = spec.key;
         let Some(value) = tool
             .geometry
             .get(key)
@@ -215,7 +206,40 @@ pub fn assembly(tool: &LibraryTool, library: &ToolLibrary) -> Vec<([[f64; 3]; 3]
                 (length, shaft / 2.0, false),
             ]);
         }
-        ChamferMill | Countersink | TaperedMill | DovetailMill => {
+        ThreadMill | TapLeft | TapRight => {
+            let pitch = finite(tool.dimension("thread_pitch"), 1.);
+            let neck = finite(tool.dimension("neck_diameter"), shaft / 2.);
+            let tooth = if matches!(tool.kind, TapLeft | TapRight) {
+                (diameter - tool.dimension("minor_diameter")) / 2.
+            } else {
+                finite(tool.dimension("tooth_height"), 0.5)
+            }
+            .clamp(0.001, diameter / 2.);
+            let count = (flute / pitch).floor().clamp(1., 128.) as usize;
+            for i in 0..count {
+                let z = i as f64 * pitch;
+                rings.extend([
+                    (z, diameter / 2. - tooth, true),
+                    (z + pitch / 2., diameter / 2., true),
+                    (z + pitch, diameter / 2. - tooth, true),
+                ]);
+            }
+            rings.extend([(flute, neck / 2., false), (length, shaft / 2., false)]);
+        }
+        ChamferMill | Countersink => {
+            let tip = tool.dimension("tip_diameter").max(0.);
+            let angle = tool.dimension("included_angle").to_radians() / 2.;
+            let cone = ((diameter - tip) / 2. / angle.tan()).min(flute);
+            let r = tip / 2. + cone * angle.tan();
+            rings.extend([
+                (0., tip / 2., true),
+                (cone, r, true),
+                (flute, r, false),
+                (flute, shaft / 2., false),
+                (length, shaft / 2., false),
+            ]);
+        }
+        TaperedMill | DovetailMill => {
             let tip = finite(
                 tool.dimension("tip_diameter"),
                 if tool.kind == DovetailMill {
@@ -236,9 +260,46 @@ pub fn assembly(tool: &LibraryTool, library: &ToolLibrary) -> Vec<([[f64; 3]; 3]
                 (length, shaft / 2.0, false),
             ]);
         }
-        Drill | SpotDrill | CenterDrill => rings.extend([
+        CenterDrill => {
+            let pilot = finite(tool.dimension("pilot_diameter"), 2.);
+            let pilot_length = finite(tool.dimension("pilot_length"), 3.);
+            let point = (pilot / 2. / (tool.dimension("point_angle").to_radians() / 2.).tan())
+                .min(pilot_length);
+            let shoulder = (pilot_length
+                + (diameter - pilot)
+                    / 2.
+                    / (tool.dimension("included_angle").to_radians() / 2.).tan())
+            .min(flute);
+            rings.extend([
+                (0., 0.01, true),
+                (point, pilot / 2., true),
+                (pilot_length, pilot / 2., true),
+                (shoulder, diameter / 2., true),
+                (flute, diameter / 2., true),
+                (flute, shaft / 2., false),
+                (length, shaft / 2., false),
+            ]);
+        }
+        Counterbore => {
+            let pilot = finite(tool.dimension("pilot_diameter"), 2.);
+            let pilot_length = finite(tool.dimension("pilot_length"), 3.).min(flute);
+            rings.extend([
+                (0., pilot / 2., true),
+                (pilot_length, pilot / 2., true),
+                (pilot_length, diameter / 2., true),
+                (flute, diameter / 2., true),
+                (flute, shaft / 2., false),
+                (length, shaft / 2., false),
+            ]);
+        }
+        Drill | SpotDrill => rings.extend([
             (0.0, 0.01, true),
-            (diameter * 0.3, diameter / 2.0, true),
+            (
+                (diameter / 2. / (tool.dimension("point_angle").to_radians() / 2.).tan())
+                    .min(flute),
+                diameter / 2.0,
+                true,
+            ),
             (flute, diameter / 2.0, true),
             (flute, shaft / 2.0, false),
             (length, shaft / 2.0, false),

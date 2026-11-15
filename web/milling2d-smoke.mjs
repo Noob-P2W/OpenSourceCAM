@@ -6,7 +6,7 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));activePage=page;await page.goto(process.env.PWA_URL);await ready(page);await workspace(page);
  for(let i=0;i<2;i++){await page.locator('.op').first().click({button:'right'});await page.getByRole('menuitem',{name:'Delete operation',exact:true}).click();await idle(page)}
- await ribbon(page,'2.5D milling');const labels=await page.locator('#ribbon-commands button').allTextContents();for(const name of ['Face','Pocket','Contour','Roughing','Slot','Trace','Hole milling','Engrave','Chamfer'])assert.equal(labels.filter(s=>s.trim()===name).length,1);assert.ok(!labels.includes('Circular pocket'));
+ await ribbon(page,'2.5D milling');const labels=await page.locator('#ribbon-commands button').allTextContents();for(const name of ['Face','Pocket roughing','Smooth pocket roughing','Outside roughing','Pocket contour','Outside contour','Slot','Trace','Hole milling','Engrave','Chamfer'])assert.equal(labels.filter(s=>s.trim()===name).length,1);assert.ok(!labels.includes('Circular pocket'));
  for(const [command,cycle] of [['Pocket',null],['Pocket','circular_pocket'],['Contour',null],['Roughing',null],['Slot',null],['Trace',null],['Hole milling','bore'],['Hole milling','circular']]){
   await ribbon(page,'2.5D milling',command);await page.locator('#operation-dialog').waitFor({state:'visible'});
   if(cycle){await page.getByLabel(command==='Pocket'?'Pocket shape':'Cycle',{exact:true}).selectOption(cycle);await idle(page)}

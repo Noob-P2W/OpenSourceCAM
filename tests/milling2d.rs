@@ -323,6 +323,7 @@ fn model_boundary_drafts_preserve_heights_and_invalidate_after_placement_changes
                 origin,
                 direction,
                 strategy: Strategy::Trace,
+                single_edge: false,
             },
         )
         .unwrap(),
@@ -334,4 +335,60 @@ fn model_boundary_drafts_preserve_heights_and_invalidate_after_placement_changes
     cam::generate(&p).unwrap();
     p.part.as_mut().unwrap().offset[0] += 1.;
     assert!(cam::generate(&p).unwrap_err().contains("placement changed"));
+}
+
+#[test]
+fn chamfer_width_changes_contact_offset_and_single_edge_stays_open() {
+    let mut p = job(Strategy::Chamfer);
+    p.operations[0].settings.path = vec![[20., 20., 0.], [45., 20., 0.]];
+    p.operations[0].settings.outside = true;
+    p.operations[0].settings.chamfer_width = Some(0.2);
+    let first = cam::generate(&p).unwrap();
+    p.operations[0].settings.chamfer_width = Some(0.4);
+    let second = cam::generate(&p).unwrap();
+    let y = |path: &cam::Toolpath| path.moves.iter().find(|m| m.to.z < 0.).unwrap().to.y;
+    assert!((y(&second) - y(&first) - 0.2).abs() < 1e-6);
+    p.operations[0].settings.chamfer_width = Some(10.);
+    assert!(cam::generate(&p).unwrap_err().contains("tip depth"));
+}
+
+#[test]
+fn picked_slot_tolerates_coordinate_roundoff_and_edges_are_real_boundaries() {
+    use opensourcecam::{
+        commands::GeometryQuery,
+        faces, features,
+        import::{self, Units},
+    };
+    let part = import::import_file(
+        std::path::Path::new("examples/models/mount.stl"),
+        Units::Millimetres,
+    )
+    .unwrap();
+    let p = Project::from_part(part).unwrap();
+    let mut feature = features::recognize_project(&p)
+        .unwrap()
+        .features
+        .into_iter()
+        .find(|f| f.kind == features::FeatureKind::RectangularPocket)
+        .unwrap();
+    feature.center[0] += 1e-7;
+    let op = commands::geometry_query(
+        &p,
+        GeometryQuery::FeatureGeometry {
+            feature,
+            strategy: Strategy::Slot,
+        },
+    )
+    .unwrap();
+    assert_eq!(op["settings"]["path"].as_array().unwrap().len(), 2);
+    let b = p.part.as_ref().unwrap().bounds();
+    let edge = faces::pick_edges(
+        p.part.as_ref().unwrap(),
+        [b.min[0] + 1., b.min[1] + 1., 10.],
+        [0., 0., -1.],
+        true,
+    )
+    .unwrap();
+    assert_eq!(edge.len(), 2);
+    assert!(edge.iter().all(|q| (q[2] - b.max[2]).abs() < 1e-6));
 }

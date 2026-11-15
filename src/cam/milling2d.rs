@@ -27,6 +27,33 @@ fn curve(op: &Operation) -> Vec<[f64; 3]> {
     }
     points
 }
+fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
+    let points = curve(op);
+    let tool = p.operation_tool(op)?;
+    let radius = if op.strategy == Strategy::Chamfer {
+        let record = p
+            .library_tool(Some(op))?
+            .ok_or("Select a measured chamfer mill")?;
+        let contact = record.dimension("tip_diameter") / 2.
+            + (op.depth - op.settings.axial_allowance)
+                * (record.dimension("included_angle").to_radians() / 2.).tan();
+        let width = op.settings.chamfer_width.unwrap_or(0.3);
+        if contact < width {
+            return Err(
+                "Increase tip depth so the cutter reaches the requested chamfer width".into(),
+            );
+        }
+        contact - width
+    } else if op.strategy == Strategy::Trace && op.settings.trace_offset {
+        tool.diameter / 2.
+    } else {
+        return Ok(points);
+    };
+    if radius < 1e-7 {
+        return Ok(points);
+    }
+    crate::contour::offset(&points, op.settings.closed, radius, !op.settings.outside)
+}
 pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), String> {
     let tool = p.operation_tool(op)?;
     validate_cutting_tool(&tool)?;
@@ -93,7 +120,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         if op.strategy.is_curve() && op.settings.radial_allowance != 0. {
             return Err("Tool-center chains do not use radial stock allowance".into());
         }
-        let mut points = curve(op);
+        let mut points = compensated(p, op)?;
         if points.iter().flatten().any(|v| !v.is_finite()) {
             return Err("Chain coordinates must be finite".into());
         }
@@ -137,7 +164,8 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             if -depth + q[2] < -p.stock.thickness - EPS || -depth + q[2] > clearance {
                 return Err("Chain depth extends outside supported stock heights".into());
             }
-            if op.strategy != Strategy::OutsideProfile
+            if !matches!(op.strategy, Strategy::OutsideProfile | Strategy::Chamfer)
+                && !(op.strategy == Strategy::Trace && op.settings.trace_offset)
                 && !p.stock.contains_disc([q[0], q[1], -depth + q[2]], radius)
             {
                 return Err("Contour cutter footprint extends outside the physical blank".into());
@@ -288,7 +316,7 @@ pub(super) fn generate(
     };
     let layers = ((depth - top) / tool.step_down).ceil() as usize;
     if op.has_chain() {
-        let mut points = curve(op);
+        let mut points = compensated(p, op)?;
         if matches!(
             op.strategy,
             Strategy::InsideProfile | Strategy::OutsideProfile

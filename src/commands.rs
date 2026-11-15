@@ -266,6 +266,8 @@ pub enum GeometryQuery {
         origin: [f64; 3],
         direction: [f64; 3],
         strategy: crate::model::Strategy,
+        #[serde(default)]
+        single_edge: bool,
     },
     Survey,
     Selection {
@@ -318,7 +320,8 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                 .iter()
                 .find(|f| {
                     f.kind == feature.kind
-                        && f.center == feature.center
+                        && (f.center[0] - feature.center[0]).hypot(f.center[1] - feature.center[1])
+                            < 0.002
                         && (f.bottom_z - feature.bottom_z).abs() < 0.002
                 })
                 .ok_or("Selected feature changed; recognize the model again")?;
@@ -328,6 +331,7 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             origin,
             direction,
             strategy,
+            single_edge,
         } => {
             if !matches!(
                 strategy,
@@ -339,12 +343,17 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             ) {
                 return Err("This operation does not use an edge chain".into());
             }
-            let points = crate::faces::pick_chain(part, origin, direction)?;
+            let points = crate::faces::pick_edges(part, origin, direction, single_edge)?;
             let mut op = operation_template(project, strategy);
             op.settings.path = points;
-            op.settings.closed = true;
+            op.settings.closed = !single_edge;
             op.settings.start_depth = None;
             op.depth = 0.5;
+            op.settings.outside =
+                crate::faces::waste_side(part, origin, direction, &op.settings.path, !single_edge)?;
+            if strategy == crate::model::Strategy::Trace {
+                op.settings.trace_offset = true;
+            }
             crate::machining::link(&mut op, part);
             Ok(json!(op))
         }
@@ -507,7 +516,7 @@ pub fn operation_defaults(
         .map_or(tool.plunge, |t| t.plunge);
     let clearance = op.settings.clearance.unwrap_or(project.clearance);
     Ok(
-        json!({"feed":inherited_feed,"plunge":inherited_plunge,"spindle_rpm":tool.spindle_rpm,"step_down":tool.step_down,"step_over_percent":tool.step_over*100.,"finish_feed":op.settings.feed.unwrap_or(inherited_feed),"clearance":project.clearance,"retract":clearance,"start_depth":0.,"surface_step":0.5,"path_tolerance":0.01,"peck_clearance":0.254,"pitch":record.filter(|r|r.kind==crate::tool_library::ToolKind::ThreadMill).map(|r|r.dimension("thread_pitch")),"thread_depth":0.3,"taper_angle":0.,"v_width":record.filter(|r|r.kind==crate::tool_library::ToolKind::ChamferMill).map(|r|r.dimension("tip_diameter")+2.*(op.depth-op.settings.axial_allowance)*(r.dimension("included_angle").to_radians()/2.).tan()),"tool_name":tool.name,"preset_name":record.and_then(|r|r.preset(op.preset_id).ok()).map(|p|p.name.clone())}),
+        json!({"feed":inherited_feed,"plunge":inherited_plunge,"spindle_rpm":tool.spindle_rpm,"step_down":tool.step_down,"step_over_percent":tool.step_over*100.,"finish_feed":op.settings.feed.unwrap_or(inherited_feed),"clearance":project.clearance,"retract":clearance,"start_depth":0.,"surface_step":0.5,"path_tolerance":0.01,"peck_clearance":0.254,"pitch":record.filter(|r|r.kind==crate::tool_library::ToolKind::ThreadMill).map(|r|r.dimension("thread_pitch")),"thread_depth":0.3,"chamfer_width":0.3,"taper_angle":0.,"v_width":record.filter(|r|r.kind==crate::tool_library::ToolKind::ChamferMill).map(|r|r.dimension("tip_diameter")+2.*(op.depth-op.settings.axial_allowance)*(r.dimension("included_angle").to_radians()/2.).tan()),"tool_name":tool.name,"preset_name":record.and_then(|r|r.preset(op.preset_id).ok()).map(|p|p.name.clone())}),
     )
 }
 
