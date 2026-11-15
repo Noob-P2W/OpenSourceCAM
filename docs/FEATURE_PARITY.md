@@ -345,3 +345,5 @@ Open-pocket/island inspection highlights complete the selected connected planar
 faces so their edges follow physical surface boundaries rather than mesh diagonals.
 This display query leaves recognized feature dimensions and machining geometry
 unchanged. Results from a superseded selection are ignored.
+
+Floating feature markers are visible only while Inspect → Part features is checked.
