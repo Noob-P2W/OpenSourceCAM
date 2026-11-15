@@ -10,13 +10,14 @@ export class Viewport {
   canvas.addEventListener('webglcontextrestored',()=>{this.lost=false;this.toolSource=null;this.scene=null;requestDraw();onStatus('3D view restored')});
   canvas.addEventListener('pointerdown',event=>{this.pickStart=this.pointers.size===0&&event.button===0?[event.clientX,event.clientY]:null;canvas.setPointerCapture(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);this.gesture=null;if(this.pointers.size===2){const points=[...this.pointers.values()];this.gesture={distance:Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center:[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2]}}});
   canvas.addEventListener('pointermove',event=>{
-   if(!this.pointers.has(event.pointerId))return;
+   if(!this.pointers.has(event.pointerId)){if(this.onHover&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onHover(this.pickRay(event.clientX-rect.left,event.clientY-rect.top));}return;}
    const old=this.pointers.get(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);const points=[...this.pointers.values()];
    if(points.length===2){const distance=Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];if(this.gesture){const rect=canvas.getBoundingClientRect();this.magnify(distance/Math.max(1,this.gesture.distance),[this.gesture.center[0]-rect.left,this.gesture.center[1]-rect.top]);this.pan[0]+=center[0]-this.gesture.center[0];this.pan[1]+=center[1]-this.gesture.center[1]}this.gesture={distance,center}}
    else if(event.shiftKey||event.buttons===2){this.pan[0]+=event.clientX-old[0];this.pan[1]+=event.clientY-old[1]}
    else if(event.buttons===4||event.pointerType==='touch'){this.yaw-=(event.clientX-old[0])*.012;this.elevation=Math.max(-Math.PI/2,Math.min(Math.PI/2,this.elevation+(event.clientY-old[1])*.012));this.preset='orbit'}
    requestDraw();
   });
+  canvas.addEventListener('pointerleave',()=>this.onHover?.(null));
   const release=event=>{const start=this.pickStart;this.pickStart=null;this.pointers.delete(event.pointerId);this.gesture=null;if(event.type==='pointerup'&&start&&Math.hypot(event.clientX-start[0],event.clientY-start[1])<5&&this.pickRay){const rect=canvas.getBoundingClientRect();const ray=this.pickRay(event.clientX-rect.left,event.clientY-rect.top);if(this.onPick)this.onPick(ray);else this.onInspect?.(ray,{x:event.clientX-rect.left,y:event.clientY-rect.top})}};
   canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);canvas.addEventListener('contextmenu',event=>event.preventDefault());
   canvas.addEventListener('wheel',event=>{event.preventDefault();const rect=canvas.getBoundingClientRect();this.magnify(Math.exp(-event.deltaY*.001),[event.clientX-rect.left,event.clientY-rect.top])},{passive:false});
@@ -93,7 +94,7 @@ export class Viewport {
   if(this.highlightSource!==highlight){
    for(const item of this.highlightItems||[]){this.release(item);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
    this.highlightItems=[];this.highlightSource=highlight;
-   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}this.highlightItems.push(this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),[1,.45,.04]));}
+   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}this.highlightItems.push(this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.hover?[.1,.65,1]:[1,.45,.04]));}
   }
 
   // Both the model's tip and the old marker use the shared estimated-time cursor.

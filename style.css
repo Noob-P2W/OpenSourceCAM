@@ -80,3 +80,5 @@ span.project-title{cursor:default;display:flex;align-items:center}div.tree-root{
 #part-branch>summary,#workholding-branch>summary{display:flex;align-items:center;gap:6px}#part-branch>summary::before,#workholding-branch>summary::before{content:"▸";font-size:10px;flex:none}#part-branch[open]>summary::before,#workholding-branch[open]>summary::before{content:"▾"}#tree-tools>.component-row{margin-left:12px;padding-left:8px;border-left:1px solid var(--line)}
 
 body:not([data-feature-inspect=true]) .feature-tags{display:none}
+
+body[data-edge-picking="true"] .feature-tags{display:none}
