@@ -140,3 +140,49 @@ fn grouped_through_holes_retain_both_physical_openings() {
         );
     }
 }
+
+#[test]
+fn open_pockets_require_local_complete_walls_in_each_setup_direction() {
+    let p = load("recognition-open-pocket");
+    let entries = shapes(&p);
+    let pockets: Vec<_> = entries
+        .iter()
+        .filter(|e| e["feature"]["detail"]["shape"] == "open_pocket")
+        .collect();
+    assert!(!pockets.is_empty());
+    for entry in pockets {
+        let f: features::Feature = serde_json::from_value(entry["feature"].clone()).unwrap();
+        let complete =
+            opensourcecam::faces::selection(p.part.as_ref().unwrap(), &f.detail.triangles).unwrap();
+        let mut actual = f.detail.triangles.clone();
+        actual.sort_unstable();
+        actual.dedup();
+        assert_eq!(
+            actual, complete,
+            "Recognition must own its complete planar patches without later selection expansion"
+        );
+    }
+}
+
+#[test]
+fn profile_pocket_markers_use_an_actual_floor_instead_of_a_bounding_box_center() {
+    let p = load("recognition-tapers");
+    let entries = shapes(&p);
+    let entry = entries
+        .iter()
+        .find(|e| {
+            e["current_orientation"] == true && e["feature"]["detail"]["shape"] == "tapered_pocket"
+        })
+        .unwrap();
+    let marker: [f64; 3] = serde_json::from_value(entry["marker"].clone()).unwrap();
+    let f: features::Feature = serde_json::from_value(entry["feature"].clone()).unwrap();
+    assert!(!f.detail.floor_triangles.is_empty());
+    assert!((marker[2] - f.detail.floor_z.unwrap()).abs() < 0.002);
+    let face = opensourcecam::faces::pick(
+        p.part.as_ref().unwrap(),
+        [marker[0], marker[1], marker[2] + 0.001],
+        [0., 0., -1.],
+    )
+    .unwrap();
+    assert!(face.horizontal && (face.z - marker[2]).abs() < 0.002);
+}

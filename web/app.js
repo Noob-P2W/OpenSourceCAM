@@ -223,8 +223,7 @@ function featureHighlight(feature,outline=feature.outline){
  const mesh=project.part?.geometry.mesh,matrix=presentation.part_transform;
  const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v;
  const ids=feature.detail?.triangles||[],fill=ids=>ids.filter(i=>mesh?.triangles[i]).map(i=>mesh.triangles[i].map(v=>transform(mesh.vertices[v])));
- const complete=['open_pocket','pocket_with_islands'].includes(feature.detail?.shape),selection={outline,fill:complete?[]:fill(ids)};
- if(complete)engineCall('geometry',{data:{action:'selection',triangles:ids}}).then(triangles=>{if(highlight!==selection)return;highlight={outline,fill:fill(triangles)};draw()}).catch(error=>{if(highlight===selection)status(error.message,true)});
+ const selection={outline,fill:fill(ids)};
  return selection;
 }
 let pendingFeaturePick=null;

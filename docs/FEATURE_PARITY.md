@@ -360,3 +360,10 @@ and safety limits. No sketch editor or arbitrary pocket/island solver is added.
 Stock fitting preserves top/backing allowances separately from the current part-to-blank
 gaps. Part rotation and repeated fitting no longer reinterpret empty space as extra
 backing. The saved values survive project reload, undo and cancellation recovery.
+
+Open-pocket recognition now follows upward concave wall patches from each floor
+boundary, requiring complete bounded patches and a consistent rim height. It no
+longer borrows depth or surface triangles from a connected wall component wrapping
+the whole part. Ambiguous ledges with unbounded walls or inconsistent rims remain
+unclassified. Feature shading uses the validated triangle set directly, without
+expanding a selected fragment to an unrelated whole plane.

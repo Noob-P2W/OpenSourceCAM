@@ -1051,10 +1051,9 @@ pub fn survey(project: &Project) -> Result<serde_json::Value, String> {
             };
             // Open/concave floors can have their bounding-box center outside the
             // feature or over an island. Anchor to an actual floor triangle.
-            let anchor = if matches!(
-                feature.detail.shape,
-                Shape::OpenPocket | Shape::PocketWithIslands
-            ) {
+            let anchor = if feature.kind == FeatureKind::RectangularPocket
+                && !feature.detail.floor_triangles.is_empty()
+            {
                 feature
                     .detail
                     .floor_triangles
@@ -1195,6 +1194,7 @@ impl Topology {
         let mut curved = false;
         let mut through = false;
         let mut floor = None;
+        let mut floor_triangles = Vec::new();
         for _ in 0..32 {
             let id = self.across(&boundary, previous)?;
             let c = &self.components[id];
@@ -1206,6 +1206,7 @@ impl Topology {
                 if !through {
                     faces.extend(c.faces.iter().copied());
                     floor = Some(level);
+                    floor_triangles = c.faces.clone();
                 }
                 break;
             }
@@ -1340,7 +1341,7 @@ impl Topology {
                 profiles: rings,
                 islands: vec![],
                 floor_z: floor,
-                floor_triangles: vec![],
+                floor_triangles,
             },
         })
     }
@@ -1374,8 +1375,6 @@ impl Topology {
             let mut steep_edges = 0.;
             let mut up = false;
             let mut open = false;
-            let mut opening = z;
-            let mut adjacent = BTreeSet::new();
             for i in 0..outer.len() {
                 let a = self.vertices[outer[i]];
                 let b = self.vertices[outer[(i + 1) % outer.len()]];
@@ -1396,7 +1395,6 @@ impl Topology {
                     let lo = tri.iter().map(|p| p[2]).fold(z, f64::min);
                     up |= hi > z + TOLERANCE;
                     open |= lo < z - TOLERANCE;
-                    adjacent.insert(self.owners[face]);
                 }
             }
             let islands: Vec<_> = c
@@ -1411,15 +1409,6 @@ impl Topology {
             if !up || (!open && islands.is_empty()) || steep_edges < perimeter * 0.5 {
                 continue;
             }
-            for ring in &c.loops {
-                for i in 0..ring.len() {
-                    for &face in &self.edges[&edge(ring[i], ring[(i + 1) % ring.len()])] {
-                        if self.owners[face] != id {
-                            adjacent.insert(self.owners[face]);
-                        }
-                    }
-                }
-            }
             let min: [f64; 2] =
                 std::array::from_fn(|i| outline.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min));
             let max: [f64; 2] = std::array::from_fn(|i| {
@@ -1428,23 +1417,84 @@ impl Topology {
                     .map(|p| p[i])
                     .fold(f64::NEG_INFINITY, f64::max)
             });
-            let mut triangles = c.faces.clone();
-            for other in adjacent {
-                for &face in &self.components[other].faces {
-                    let tri = self.triangles[face].map(|i| self.vertices[i]);
-                    if tri.iter().all(|p| {
-                        p[2] >= z - TOLERANCE
-                            && (0..2)
-                                .all(|i| p[i] >= min[i] - TOLERANCE && p[i] <= max[i] + TOLERANCE)
-                    }) {
-                        opening = tri.iter().map(|p| p[2]).fold(opening, f64::max);
-                        triangles.push(face);
+            // A wall component may wrap around the entire part. Follow only
+            // upward, concave wall patches connected to this floor boundary.
+            let mut walls = BTreeSet::new();
+            let mut rim = None::<f64>;
+            let mut valid = true;
+            for ring in &c.loops {
+                for i in 0..ring.len() {
+                    let a = self.vertices[ring[i]];
+                    let b = self.vertices[ring[(i + 1) % ring.len()]];
+                    let inward = [a[1] - b[1], b[0] - a[0]];
+                    for &seed in &self.edges[&edge(ring[i], ring[(i + 1) % ring.len()])] {
+                        if self.owners[seed] == id || walls.contains(&seed) {
+                            continue;
+                        }
+                        let tri = self.triangles[seed].map(|i| self.vertices[i]);
+                        if !tri.iter().any(|p| p[2] > z + TOLERANCE) {
+                            continue;
+                        }
+                        let n = normal(tri);
+                        let length = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+                        // Raised geometry on the material side is a boss, not a pocket wall.
+                        if n[0] * inward[0] + n[1] * inward[1] <= 0. || n[2].abs() / length > 0.01 {
+                            valid = false;
+                            break;
+                        }
+                        let unit = n.map(|v| v / length);
+                        let mut pending = vec![seed];
+                        let mut patch = BTreeSet::new();
+                        let mut height = z;
+                        while let Some(face) = pending.pop() {
+                            if !patch.insert(face) {
+                                continue;
+                            }
+                            let tri = self.triangles[face].map(|i| self.vertices[i]);
+                            if tri.iter().any(|p| {
+                                p[2] < z - TOLERANCE
+                                    || (0..2).any(|i| {
+                                        p[i] < min[i] - TOLERANCE || p[i] > max[i] + TOLERANCE
+                                    })
+                            }) {
+                                valid = false;
+                                break;
+                            }
+                            height = tri.iter().map(|p| p[2]).fold(height, f64::max);
+                            let t = self.triangles[face];
+                            for j in 0..3 {
+                                for &other in &self.edges[&edge(t[j], t[(j + 1) % 3])] {
+                                    if patch.contains(&other) {
+                                        continue;
+                                    }
+                                    let n = normal(self.triangles[other].map(|i| self.vertices[i]));
+                                    let l = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+                                    if (0..3).map(|i| unit[i] * n[i] / l).sum::<f64>() > 1. - 1e-8 {
+                                        pending.push(other);
+                                    }
+                                }
+                            }
+                        }
+                        if !valid || rim.is_some_and(|r| (r - height).abs() > TOLERANCE) {
+                            valid = false;
+                            break;
+                        }
+                        rim = Some(height);
+                        walls.extend(patch);
+                    }
+                    if !valid {
+                        break;
                     }
                 }
+                if !valid {
+                    break;
+                }
             }
-            if opening <= z + TOLERANCE {
+            let Some(opening) = rim.filter(|r| *r > z + TOLERANCE && valid) else {
                 continue;
-            }
+            };
+            let mut triangles = c.faces.clone();
+            triangles.extend(walls);
             result.push(Feature {
                 kind: FeatureKind::RectangularPocket,
                 min,
