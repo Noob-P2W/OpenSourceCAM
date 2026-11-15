@@ -178,6 +178,8 @@ impl Default for Operation {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_fit_allowances: Option<[f64; 2]>,
     #[serde(default)]
     pub setup_face: Option<usize>,
     #[serde(default)]
@@ -207,6 +209,7 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
+            stock_fit_allowances: None,
             setup_face: None,
             workspace: Vec::new(),
             tool_library: Default::default(),
@@ -256,6 +259,17 @@ impl Default for Project {
 }
 
 impl Project {
+    pub fn fit_allowances(&self) -> [f64; 2] {
+        self.stock_fit_allowances.unwrap_or_else(|| {
+            self.part.as_ref().map_or([0.; 2], |part| {
+                let b = part.bounds();
+                [
+                    (-b.max[2]).max(0.),
+                    (self.stock.thickness + b.min[2]).max(0.),
+                ]
+            })
+        })
+    }
     pub fn library_tool(
         &self,
         op: Option<&Operation>,

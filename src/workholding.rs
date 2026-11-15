@@ -53,6 +53,9 @@ pub fn place_example(project: &mut Project, id: Option<u64>, spec: ViseSpec) -> 
                 if blank::rotation(definition.rotation)[2][2].abs() < 1. - 1e-9 {
                     return Err("For a tilted blank, set backing and fit the stock before seating it in the vise".into());
                 }
+                let mut allowances = project.fit_allowances();
+                allowances[1] += extra;
+                project.stock_fit_allowances = Some(allowances);
                 definition.size[2] += extra;
                 project.stock = definition.build()?;
             }

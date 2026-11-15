@@ -296,6 +296,7 @@ impl Session {
             Edit::ImportPart { part } => {
                 let fitted = Project::from_part(part)?;
                 candidate.name = fitted.name;
+                candidate.stock_fit_allowances = fitted.stock_fit_allowances;
                 candidate.stock = fitted.stock;
                 candidate.part = fitted.part;
                 // Face selections and operations (including model links) belong to
@@ -513,6 +514,7 @@ impl Session {
                 if !clearance.is_finite() || !(0.0..=10000.0).contains(&clearance) {
                     return Err("Clearance must be 0–10,000 mm".into());
                 }
+                candidate.stock_fit_allowances = Some(candidate.fit_allowances());
                 candidate.stock = definition.build()?;
                 candidate.clearance = clearance;
                 if let Some(part) = &mut candidate.part {
@@ -534,11 +536,14 @@ impl Session {
                     )?;
                 }
             }
-            Edit::OrientPart { rotation } => candidate
-                .part
-                .as_mut()
-                .ok_or("Import a part first")?
-                .orient_centered(rotation)?,
+            Edit::OrientPart { rotation } => {
+                candidate.stock_fit_allowances = Some(candidate.fit_allowances());
+                candidate
+                    .part
+                    .as_mut()
+                    .ok_or("Import a part first")?
+                    .orient_centered(rotation)?;
+            }
             Edit::CenterPart => {
                 let stock = &candidate.stock;
                 let part = candidate.part.as_mut().ok_or("Import a part first")?;

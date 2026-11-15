@@ -273,13 +273,7 @@ impl WebSession {
             } else {
                 None
             },
-            setup_allowances: self.inner.project().part.as_ref().map_or([0.; 2], |part| {
-                let b = part.bounds();
-                [
-                    (-b.max[2]).max(0.),
-                    (self.inner.project().stock.thickness + b.min[2]).max(0.),
-                ]
-            }),
+            setup_allowances: self.inner.project().fit_allowances(),
             part_fingerprint: self.cached_part_key(),
             part_geometry_key: self
                 .inner

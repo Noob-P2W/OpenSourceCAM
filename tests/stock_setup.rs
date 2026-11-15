@@ -296,3 +296,48 @@ fn planning_can_preserve_a_measured_setup_and_orientation_changes_stale_links() 
         .to_lowercase()
         .contains("changed"));
 }
+
+#[test]
+fn rotation_does_not_convert_empty_stock_space_into_fitting_allowances() {
+    let mut p = part_project();
+    blank::fit(&mut p, 2., 1., 3.).unwrap();
+    let mut session = Session::new(p);
+    for rotation in [[90., 0., 0.], [0.; 3], [0., 0., 90.], [0.; 3]] {
+        session
+            .apply(Edit::ConfigureSetup {
+                definition: session.project().stock.definition(),
+                rotation,
+                offset: None,
+                clearance: 5.,
+                fit_margin: None,
+                fit_top: None,
+                fit_backing: None,
+            })
+            .unwrap();
+        assert_eq!(session.project().fit_allowances(), [1., 3.]);
+        let bounds = session.project().part.as_ref().unwrap().bounds();
+        let expected = bounds.max[2] - bounds.min[2] + 4.;
+        session
+            .apply(Edit::ConfigureSetup {
+                definition: session.project().stock.definition(),
+                rotation,
+                offset: None,
+                clearance: 5.,
+                fit_margin: Some(2.),
+                fit_top: Some(1.),
+                fit_backing: Some(3.),
+            })
+            .unwrap();
+        close(session.project().stock.thickness, expected);
+        let saved =
+            Project::from_json(serde_json::to_string(session.project()).unwrap().as_bytes())
+                .unwrap();
+        assert_eq!(saved.fit_allowances(), [1., 3.]);
+        let mut recovered = Session::new(saved);
+        recovered
+            .restore_history(&session.history_checkpoint().unwrap())
+            .unwrap();
+        recovered.apply(Edit::Undo).unwrap();
+        assert_eq!(recovered.project().fit_allowances(), [1., 3.]);
+    }
+}

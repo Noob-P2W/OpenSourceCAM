@@ -318,6 +318,12 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
     positive(project.stock.height, "Stock height", 100_000.0)?;
     positive(project.stock.thickness, "Stock thickness", 10_000.0)?;
     project.stock.validate_profile()?;
+    if project
+        .stock_fit_allowances
+        .is_some_and(|a| a.iter().any(|v| !v.is_finite() || *v < 0. || *v > 10000.))
+    {
+        return Err("Blank allowances must be 0–10,000 mm".into());
+    }
     positive(project.clearance, "Clearance", 10_000.0)?;
     if project.tool_library.tools.is_empty() {
         validate_cutting_tool(&project.tool)?;

@@ -45,6 +45,8 @@ struct WorkspaceRef {
 #[serde(deny_unknown_fields)]
 struct ProjectRef {
     #[serde(default)]
+    stock_fit_allowances: Option<[f64; 2]>,
+    #[serde(default)]
     setup_face: Option<usize>,
     workspace: Vec<WorkspaceRef>,
     tool_library: ToolLibrary,
@@ -99,6 +101,7 @@ impl Pool {
     }
     fn project(&mut self, p: &Project) -> ProjectRef {
         ProjectRef {
+            stock_fit_allowances: p.stock_fit_allowances,
             setup_face: p.setup_face,
             workspace: p
                 .workspace
@@ -153,6 +156,7 @@ impl ProjectRef {
             return Err("Unsupported recovery project version".into());
         }
         Ok(Project {
+            stock_fit_allowances: self.stock_fit_allowances,
             setup_face: self.setup_face,
             workspace: self
                 .workspace

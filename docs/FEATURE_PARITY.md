@@ -356,3 +356,7 @@ operations require measured matching-pitch cutters and precleared stock; sampled
 stock simulation is unavailable for enabled thread operations, while checked
 paths and NC remain available. See [2D milling](MILLING2D.md) for geometry, entry
 and safety limits. No sketch editor or arbitrary pocket/island solver is added.
+
+Stock fitting preserves top/backing allowances separately from the current part-to-blank
+gaps. Part rotation and repeated fitting no longer reinterpret empty space as extra
+backing. The saved values survive project reload, undo and cancellation recovery.

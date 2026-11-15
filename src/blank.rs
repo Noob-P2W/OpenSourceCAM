@@ -343,6 +343,7 @@ pub fn fit(project: &mut Project, margin: f64, top: f64, backing: f64) -> Result
         part.offset[i] += desired[i] - world_center[i]
     }
     project.stock = stock;
+    project.stock_fit_allowances = Some([top, backing]);
     contains_part(&project.stock, part)
 }
 pub fn mesh_from_boxes(boxes: &[([f64; 3], [f64; 3])]) -> Mesh {
