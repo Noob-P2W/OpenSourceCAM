@@ -1,5 +1,6 @@
 //! Conservative recognition from a closed, consistently oriented triangle surface.
 //! Results are candidates, never an automatic manufacturing or collision decision.
+pub mod slot;
 use crate::{
     import::{normal, Part},
     model::{Operation, Project, Strategy},
@@ -63,6 +64,7 @@ pub enum Shape {
     TaperedHole,
     TaperedPocket,
     ProfilePocket,
+    ChamferedSlot,
     PocketWithIslands,
     OpenPocket,
 }
@@ -70,7 +72,7 @@ impl Shape {
     pub fn machinable(self) -> bool {
         matches!(
             self,
-            Self::Prismatic | Self::ChamferedBore | Self::FilletedBore
+            Self::Prismatic | Self::ChamferedBore | Self::FilletedBore | Self::ChamferedSlot
         )
     }
     pub fn label(self) -> &'static str {
@@ -81,6 +83,7 @@ impl Shape {
             Self::TaperedHole => "Tapered hole",
             Self::TaperedPocket => "Tapered pocket",
             Self::ProfilePocket => "Pocket",
+            Self::ChamferedSlot => "Slot with entry chamfer",
             Self::PocketWithIslands => "Pocket with islands",
             Self::OpenPocket => "Open pocket / ledge",
         }
@@ -831,8 +834,10 @@ pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, Stri
     if project.operations.len() >= 1000 {
         return Err("Maximum 1,000 operations".into());
     }
-    if let Some(part) = &project.part {
-        accessible(part, feature)?;
+    if feature.detail.shape != Shape::ChamferedSlot {
+        if let Some(part) = &project.part {
+            accessible(part, feature)?;
+        }
     }
     if !feature.opening_z.is_finite()
         || feature.opening_z > TOLERANCE
@@ -844,34 +849,40 @@ pub fn operation(project: &Project, feature: &Feature) -> Result<Operation, Stri
     let tool = project
         .library_tool(None)?
         .ok_or("Choose an active tool from the tool library")?;
-    let strategy = match feature.kind {
-        FeatureKind::RectangularPocket if tool.kind == ToolKind::FlatEndMill => Strategy::Pocket,
-        FeatureKind::CircularHole
-            if matches!(tool.kind, ToolKind::Drill | ToolKind::FlatEndMill) =>
-        {
-            if tool.kind == ToolKind::FlatEndMill {
-                let diameter = feature.diameter.ok_or("Missing hole diameter")?;
-                if tool.dimension("diameter") > diameter + TOLERANCE {
-                    return Err("The active end mill is larger than the circular feature".into());
-                }
-                Strategy::CircularPocket
-            } else {
-                if !feature.through && tool.kind == ToolKind::Drill {
-                    return Err("A flat-bottom blind hole needs a supported bottom strategy; use a matching center-cutting flat end mill or define the drilling operation manually".into());
-                }
-                if feature.diameter.is_none_or(|d| {
-                    !d.is_finite() || (d - tool.dimension("diameter")).abs() > TOLERANCE
-                }) {
-                    return Err("Hole diameter must match the active tool diameter within 0.002 mm; interpolated boring is not implemented".into());
-                }
-                Strategy::Drill
+    let strategy = if feature.detail.shape == Shape::ChamferedSlot {
+        Strategy::Slot
+    } else {
+        match feature.kind {
+            FeatureKind::RectangularPocket if tool.kind == ToolKind::FlatEndMill => {
+                Strategy::Pocket
             }
-        }
-        _ => {
-            return Err(
+            FeatureKind::CircularHole
+                if matches!(tool.kind, ToolKind::Drill | ToolKind::FlatEndMill) =>
+            {
+                if tool.kind == ToolKind::FlatEndMill {
+                    let diameter = feature.diameter.ok_or("Missing hole diameter")?;
+                    if tool.dimension("diameter") > diameter + TOLERANCE {
+                        return Err(
+                            "The active end mill is larger than the circular feature".into()
+                        );
+                    }
+                    Strategy::CircularPocket
+                } else {
+                    if !feature.through && tool.kind == ToolKind::Drill {
+                        return Err("A flat-bottom blind hole needs a supported bottom strategy; use a matching center-cutting flat end mill or define the drilling operation manually".into());
+                    }
+                    if feature.diameter.is_none_or(|d| {
+                        !d.is_finite() || (d - tool.dimension("diameter")).abs() > TOLERANCE
+                    }) {
+                        return Err("Hole diameter must match the active tool diameter within 0.002 mm; interpolated boring is not implemented".into());
+                    }
+                    Strategy::Drill
+                }
+            }
+            _ => return Err(
                 "Choose a flat end mill for a pocket, or a matching drill/flat end mill for a hole"
                     .into(),
-            )
+            ),
         }
     };
     let mut op = draft(project, feature, strategy)?;
@@ -902,6 +913,20 @@ pub fn draft(
     feature: &Feature,
     strategy: Strategy,
 ) -> Result<Operation, String> {
+    if matches!(strategy, Strategy::Slot | Strategy::Chamfer)
+        && matches!(
+            feature.detail.shape,
+            Shape::TaperedPocket | Shape::ProfilePocket | Shape::ChamferedSlot
+        )
+    {
+        return slot::draft(project, feature, strategy);
+    }
+    if feature.detail.shape == Shape::ChamferedSlot {
+        return Err(
+            "Select Slot for the vertical walls, then a separate Chamfer operation for the entry"
+                .into(),
+        );
+    }
     if let Some(part) = &project.part {
         accessible(part, feature)?;
     }
@@ -1325,7 +1350,7 @@ impl Topology {
                 level,
             )
         };
-        Some(Feature {
+        let mut feature = Feature {
             kind,
             min,
             max,
@@ -1343,7 +1368,14 @@ impl Topology {
                 floor_z: floor,
                 floor_triangles,
             },
-        })
+        };
+        if feature.kind == FeatureKind::RectangularPocket
+            && slot::geometry(&feature)
+                .is_ok_and(|s| s.chamfer_width > TOLERANCE && s.chamfer_angle.is_some())
+        {
+            feature.detail.shape = Shape::ChamferedSlot;
+        }
+        Some(feature)
     }
     fn floor_candidates(&self, top_z: f64) -> Vec<Feature> {
         let mut result = Vec::new();

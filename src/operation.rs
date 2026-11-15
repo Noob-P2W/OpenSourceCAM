@@ -30,9 +30,19 @@ pub enum Entry {
     Ramp,
     Helix,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MillingMode {
+    Climb,
+    Conventional,
+}
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    pub height_offset: Option<f64>,
+    pub milling_mode: Option<MillingMode>,
+    pub islands: Vec<Vec<[f64; 3]>>,
+    pub chamfer_angle: Option<f64>,
     pub machining_face: Option<usize>,
     pub pocket_pattern: PocketPattern,
     pub entry: Entry,
@@ -66,6 +76,25 @@ pub struct Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .height_offset
+            .is_some_and(|v| !v.is_finite() || v.abs() > 10000.)
+            || self
+                .chamfer_angle
+                .is_some_and(|v| !v.is_finite() || v <= 0. || v >= 90.)
+        {
+            return Err("Invalid height offset or chamfer angle".into());
+        }
+        if self.islands.iter().map(Vec::len).sum::<usize>() > 10000
+            || self
+                .islands
+                .iter()
+                .flatten()
+                .flatten()
+                .any(|v| !v.is_finite() || v.abs() > 100000.)
+        {
+            return Err("Invalid face island boundaries".into());
+        }
         if self.path.len() > 10000
             || self
                 .path

@@ -367,3 +367,10 @@ longer borrows depth or surface triangles from a connected wall component wrappi
 the whole part. Ambiguous ledges with unbounded walls or inconsistent rims remain
 unclassified. Feature shading uses the validated triangle set directly, without
 expanding a selected fragment to an unrelated whole plane.
+
+Browser finishing now includes connected machining-edge picking with hover previews,
+zero/positive tool-tip offsets, and planar face smoothing with island clearance.
+Chamfered straight slots have separate slot/chamfer drafts with measured entry
+width and angle. Pocket roughing and outside roughing are distinct; outside clearing
+protects the full workpiece envelope. Trace and smooth-loop roughing are retained
+only for saved operations. See [2D milling](MILLING2D.md) for scope and limits.

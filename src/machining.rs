@@ -89,6 +89,7 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
         Strategy::Thread => 16,
         Strategy::Engrave => 17,
         Strategy::Chamfer => 18,
+        Strategy::SurfaceSmooth => 19,
     }]);
     for v in [op.x, op.y, op.width, op.height] {
         hash.number(v);
@@ -104,13 +105,24 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
         hash.bytes(b"opening-depth");
         hash.number(depth);
     }
-    if op.has_chain() {
+    if op.has_chain() || op.strategy == Strategy::SurfaceSmooth {
         for point in &op.settings.path {
             for v in point {
                 hash.number(*v);
             }
         }
         hash.bytes(&[u8::from(op.settings.closed)]);
+        if !op.settings.islands.is_empty() {
+            hash.bytes(b"face islands");
+            for ring in &op.settings.islands {
+                hash.bytes(&(ring.len() as u64).to_le_bytes());
+                for p in ring {
+                    for v in p {
+                        hash.number(*v);
+                    }
+                }
+            }
+        }
     }
     hash.finish()
 }

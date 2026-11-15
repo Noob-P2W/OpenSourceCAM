@@ -50,7 +50,17 @@ fn each_new_cycle_has_finite_feed_moves_reaches_depth_and_retracts() {
         let path = cam::generate(&p).unwrap_or_else(|e| panic!("{strategy:?}: {e}"));
         assert!(path.moves.iter().any(|m| m.motion == Motion::Cut));
         let depth = path.moves.iter().map(|m| m.to.z).fold(0., f64::min);
-        assert!((depth + p.operations[0].depth).abs() < 1e-7, "{strategy:?}");
+        assert!(
+            (depth
+                + if strategy == Strategy::SurfaceSmooth {
+                    0.
+                } else {
+                    p.operations[0].depth
+                })
+            .abs()
+                < 1e-7,
+            "{strategy:?}"
+        );
         for m in &path.moves {
             assert!(m.to.x.is_finite() && m.to.y.is_finite() && m.to.z.is_finite());
             if m.motion == Motion::Rapid && (m.from.x != m.to.x || m.from.y != m.to.y) {
@@ -324,6 +334,8 @@ fn model_boundary_drafts_preserve_heights_and_invalidate_after_placement_changes
                 direction,
                 strategy: Strategy::Trace,
                 single_edge: false,
+                existing_path: Vec::new(),
+                edge_tolerance: None,
             },
         )
         .unwrap(),

@@ -13,6 +13,7 @@ pub mod machine_library;
 pub mod machining;
 pub mod model;
 pub mod operation;
+pub mod planar;
 pub mod post;
 pub mod process;
 mod roughing;

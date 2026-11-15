@@ -13,19 +13,38 @@ fn start(op: &Operation) -> f64 {
     op.settings.start_depth.unwrap_or(0.)
 }
 fn curve(op: &Operation) -> Vec<[f64; 3]> {
-    let mut points = if op.settings.path.is_empty() {
+    if op.settings.path.is_empty() {
         vec![[op.x, op.y, 0.], [op.x + op.width, op.y, 0.]]
     } else {
         op.settings.path.clone()
-    };
-    if op.settings.direction == Direction::Clockwise {
-        if op.settings.closed && points.len() > 1 {
-            points[1..].reverse()
-        } else {
-            points.reverse()
-        }
     }
-    points
+}
+type FaceRegion = (Vec<Vec<[f64; 3]>>, f64);
+fn face_region(op: &Operation) -> Result<FaceRegion, String> {
+    let outer = if op.settings.path.is_empty() {
+        vec![
+            [op.x, op.y, 0.],
+            [op.x + op.width, op.y, 0.],
+            [op.x + op.width, op.y + op.height, 0.],
+            [op.x, op.y + op.height, 0.],
+        ]
+    } else {
+        op.settings.path.clone()
+    };
+    let mut rings = vec![outer];
+    rings.extend(op.settings.islands.clone());
+    let level = rings[0][0][2];
+    if rings
+        .iter()
+        .flatten()
+        .any(|p| !p.iter().all(|v| v.is_finite()) || (p[2] - level).abs() > 1e-6)
+    {
+        return Err("Select a horizontal planar face for surface smoothing".into());
+    }
+    Ok((
+        rings,
+        level + op.settings.height_offset.unwrap_or(0.) + op.settings.axial_allowance,
+    ))
 }
 fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
     let points = curve(op);
@@ -57,13 +76,59 @@ fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
 pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), String> {
     let tool = p.operation_tool(op)?;
     validate_cutting_tool(&tool)?;
-    let depth = op.depth - op.settings.axial_allowance;
-    positive(
-        depth - start(op),
-        "Depth below operation top",
-        p.stock.thickness,
-    )?;
-    if start(op) < 0. || depth > p.stock.thickness || !op.x.is_finite() || !op.y.is_finite() {
+    let depth = if op.has_chain()
+        && matches!(
+            op.strategy,
+            Strategy::InsideProfile | Strategy::OutsideProfile
+        ) {
+        op.settings.height_offset.map_or(op.depth, |h| -h) - op.settings.axial_allowance
+    } else {
+        op.depth - op.settings.axial_allowance
+    };
+    if op.strategy == Strategy::SurfaceSmooth {
+        if !op.settings.precleared {
+            return Err(
+                "Confirm the selected face is already rough-machined before surface smoothing"
+                    .into(),
+            );
+        }
+        let (rings, z) = face_region(op)?;
+        if rings.iter().flatten().any(|q| !p.stock.contains(*q, 0.002)) {
+            return Err(
+                "The selected surface extends outside physical stock; fit the blank in Setup"
+                    .into(),
+            );
+        }
+        if let Some(record) = p.library_tool(Some(op))? {
+            if -z
+                > record
+                    .dimension("stickout")
+                    .min(record.dimension("flute_length"))
+                    + EPS
+            {
+                return Err("Face smoothing exceeds measured cutter reach".into());
+            }
+        }
+        if z > op.settings.clearance.unwrap_or(p.clearance) || z < -p.stock.thickness - EPS {
+            return Err("Face smoothing height is outside stock/clearance limits".into());
+        }
+        crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
+        return Ok(());
+    }
+    if !(op.has_chain()
+        && op.settings.height_offset.is_some()
+        && matches!(
+            op.strategy,
+            Strategy::InsideProfile | Strategy::OutsideProfile
+        ))
+    {
+        positive(
+            depth - start(op),
+            "Depth below operation top",
+            p.stock.thickness,
+        )?;
+    }
+    if start(op) < 0. || depth > p.stock.thickness + EPS || !op.x.is_finite() || !op.y.is_finite() {
         return Err("Invalid operation heights or center".into());
     }
     let clearance = op.settings.clearance.unwrap_or(p.clearance);
@@ -132,7 +197,11 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
                 &points,
                 op.settings.closed,
                 tool.diameter / 2. + op.settings.radial_allowance,
-                op.strategy == Strategy::InsideProfile,
+                if !op.settings.closed && op.model_link.is_some() {
+                    !op.settings.outside
+                } else {
+                    op.strategy == Strategy::InsideProfile
+                },
             )?;
         }
         if points.len() < 2 {
@@ -173,6 +242,13 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         }
         if matches!(op.strategy, Strategy::Engrave | Strategy::Chamfer) {
             let record = p.library_tool(Some(op))?.unwrap();
+            if op.strategy == Strategy::Chamfer
+                && op.settings.chamfer_angle.is_some_and(|a| {
+                    (record.dimension("included_angle") - (180. - 2. * a)).abs() > 0.5
+                })
+            {
+                return Err("Choose a chamfer mill matching the measured chamfer angle".into());
+            }
             let radius = record.dimension("tip_diameter") / 2.
                 + (depth - start(op))
                     * (record.dimension("included_angle").to_radians() / 2.).tan();
@@ -308,13 +384,38 @@ pub(super) fn generate(
 ) -> Result<(), String> {
     cancelled(cancel)?;
     let tool = p.operation_tool(op)?;
-    let depth = op.depth - op.settings.axial_allowance;
+    let depth = if op.has_chain()
+        && matches!(
+            op.strategy,
+            Strategy::InsideProfile | Strategy::OutsideProfile
+        ) {
+        op.settings.height_offset.map_or(op.depth, |h| -h) - op.settings.axial_allowance
+    } else {
+        op.depth - op.settings.axial_allowance
+    };
     let top = if matches!(op.strategy, Strategy::SmoothRough | Strategy::Slot) {
         material_top(p, index)
     } else {
         start(op)
     };
-    let layers = ((depth - top) / tool.step_down).ceil() as usize;
+    if op.strategy == Strategy::SurfaceSmooth {
+        let (rings, z) = face_region(op)?;
+        for [mut a, mut c] in
+            crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?
+        {
+            cancelled(cancel)?;
+            if (op.settings.raster == crate::operation::Raster::PositiveX && a[0] > c[0])
+                || (op.settings.raster == crate::operation::Raster::NegativeX && a[0] < c[0])
+            {
+                std::mem::swap(&mut a, &mut c);
+            }
+            b.enter(a[0], a[1], z)?;
+            b.feed_cut(c[0], c[1], z)?;
+            b.retract()?;
+        }
+        return Ok(());
+    }
+    let layers = (((depth - top) / tool.step_down).ceil() as usize).max(1);
     if op.has_chain() {
         let mut points = compensated(p, op)?;
         if matches!(
@@ -325,12 +426,39 @@ pub(super) fn generate(
                 &points,
                 op.settings.closed,
                 tool.diameter / 2. + op.settings.radial_allowance,
-                op.strategy == Strategy::InsideProfile,
+                if !op.settings.closed && op.model_link.is_some() {
+                    !op.settings.outside
+                } else {
+                    op.strategy == Strategy::InsideProfile
+                },
             )?;
+        }
+        let area = (0..points.len())
+            .map(|i| {
+                let a = points[i];
+                let c = points[(i + 1) % points.len()];
+                a[0] * c[1] - c[0] * a[1]
+            })
+            .sum::<f64>();
+        let reverse = if op.settings.closed {
+            (area < 0.) != (op.settings.direction == Direction::Clockwise)
+        } else {
+            op.settings.direction == Direction::Clockwise
+        };
+        if reverse {
+            if op.settings.closed {
+                points[1..].reverse();
+            } else {
+                points.reverse();
+            }
         }
         for layer in 1..=layers {
             cancelled(cancel)?;
-            let z = -(top + layer as f64 * tool.step_down).min(depth);
+            let z = if depth <= 0. {
+                -depth
+            } else {
+                -(top + layer as f64 * tool.step_down).min(depth)
+            };
             let first = points[0];
             b.enter(first[0], first[1], z + first[2])?;
             let passes = if layer == layers {

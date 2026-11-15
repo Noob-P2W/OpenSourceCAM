@@ -443,43 +443,7 @@ pub fn pick_chain(
     let (id, t) = ray_hit(part, origin, direction)?;
     let face = face(part, id)?;
     let hit: [f64; 3] = std::array::from_fn(|i| origin[i] + t * direction[i]);
-    let edges = face.segments.as_chunks::<2>().0;
-    if edges.len() > 10000 {
-        return Err("Selected face boundary exceeds 10,000 edges".into());
-    }
-    // Use the same welding keys as face extraction. Indexed adjacency avoids a
-    // repeated scan of the entire edge list for every point on a detailed loop.
-    let key = |p: [f64; 3]| p.map(|v| (v / 0.00001).round() as i64);
-    let mut adjacent = BTreeMap::<_, Vec<_>>::new();
-    for (i, &[a, b]) in edges.iter().enumerate() {
-        adjacent.entry(key(a)).or_default().push((i, b));
-        adjacent.entry(key(b)).or_default().push((i, a));
-    }
-    if adjacent.values().any(|v| v.len() != 2) {
-        return Err("Selected face has an open or branching boundary".into());
-    }
-    let mut used = vec![false; edges.len()];
-    let mut loops = Vec::new();
-    for (seed, &[a, b]) in edges.iter().enumerate() {
-        if used[seed] {
-            continue;
-        }
-        used[seed] = true;
-        let mut chain = vec![a, b];
-        while key(*chain.last().unwrap()) != key(a) {
-            let (i, next) = adjacent[&key(*chain.last().unwrap())]
-                .iter()
-                .find(|(i, _)| !used[*i])
-                .ok_or("Selected face boundary does not form separate loops")?;
-            used[*i] = true;
-            chain.push(*next);
-        }
-        chain.pop();
-        if chain.len() < 3 {
-            return Err("Selected boundary has fewer than three vertices".into());
-        }
-        loops.push(chain);
-    }
+    let loops = boundary_loops(&face)?;
     let distance = |chain: &Vec<[f64; 3]>| {
         chain
             .iter()
@@ -548,13 +512,11 @@ pub fn pick_edges(
 /// Determine which side of a selected planar boundary is empty from the hit face.
 pub fn waste_side(
     part: &Part,
-    origin: [f64; 3],
-    direction: [f64; 3],
+    _origin: [f64; 3],
+    _direction: [f64; 3],
     points: &[[f64; 3]],
     closed: bool,
 ) -> Result<bool, String> {
-    let (id, _) = ray_hit(part, origin, direction)?;
-    let face = face(part, id)?;
     let a = points[0];
     let b = points[1];
     let d = [b[0] - a[0], b[1] - a[1]];
@@ -574,12 +536,245 @@ pub fn waste_side(
         (a[0] + b[0]) / 2. - sign * d[1] / len * 0.001,
         (a[1] + b[1]) / 2. + sign * d[0] / len * 0.001,
     ];
-    let material = face.fill.iter().any(|t| {
-        let cross = |a: [f64; 3], b: [f64; 3]| {
-            (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
-        };
-        let c = [cross(t[0], t[1]), cross(t[1], t[2]), cross(t[2], t[0])];
-        c.iter().all(|v| *v >= -1e-10) || c.iter().all(|v| *v <= 1e-10)
-    });
+    let origin = [q[0], q[1], part.bounds().max[2] + 1.];
+    let material =
+        ray_hit(part, origin, [0., 0., -1.]).is_ok_and(|(_, t)| origin[2] - t >= a[2] - 1e-5);
     Ok(material)
+}
+
+pub fn boundary_loops(face: &Face) -> Result<Vec<Vec<[f64; 3]>>, String> {
+    let edges = face.segments.as_chunks::<2>().0;
+    if edges.len() > 10000 {
+        return Err("Selected face boundary exceeds 10,000 edges".into());
+    }
+    // Use the same welding keys as face extraction. Indexed adjacency avoids a
+    // repeated scan of the entire edge list for every point on a detailed loop.
+    let key = |p: [f64; 3]| p.map(|v| (v / 0.00001).round() as i64);
+    let mut adjacent = BTreeMap::<_, Vec<_>>::new();
+    for (i, &[a, b]) in edges.iter().enumerate() {
+        adjacent.entry(key(a)).or_default().push((i, b));
+        adjacent.entry(key(b)).or_default().push((i, a));
+    }
+    if adjacent.values().any(|v| v.len() != 2) {
+        return Err("Selected face has an open or branching boundary".into());
+    }
+    let mut used = vec![false; edges.len()];
+    let mut loops = Vec::new();
+    for (seed, &[a, b]) in edges.iter().enumerate() {
+        if used[seed] {
+            continue;
+        }
+        used[seed] = true;
+        let mut chain = vec![a, b];
+        while key(*chain.last().unwrap()) != key(a) {
+            let (i, next) = adjacent[&key(*chain.last().unwrap())]
+                .iter()
+                .find(|(i, _)| !used[*i])
+                .ok_or("Selected face boundary does not form separate loops")?;
+            used[*i] = true;
+            chain.push(*next);
+        }
+        chain.pop();
+        if chain.len() < 3 {
+            return Err("Selected boundary has fewer than three vertices".into());
+        }
+        loops.push(chain);
+    }
+    Ok(loops)
+}
+
+/// Horizontal mechanical edges come from adjacent surface normals, not a picked face loop.
+pub fn machining_edges(
+    part: &Part,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    single: bool,
+    tolerance: Option<f64>,
+) -> Result<(Vec<[f64; 3]>, bool), String> {
+    if origin
+        .iter()
+        .chain(direction.iter())
+        .any(|v| !v.is_finite())
+        || direction.iter().map(|v| v * v).sum::<f64>() < 1e-12
+        || tolerance.is_some_and(|v| !v.is_finite() || v <= 0.)
+    {
+        return Err("Invalid edge-selection ray or tolerance".into());
+    }
+    let face_hit = ray_hit(part, origin, direction).ok().map(|(_, t)| t);
+    type Key = [i64; 3];
+    type Edge = (Key, Key);
+    type Item = ([f64; 3], [f64; 3], Vec<[f64; 3]>);
+    let key = |p: [f64; 3]| p.map(|v| (v / 0.00001).round() as i64);
+    let vertices: Vec<_> = part
+        .geometry
+        .mesh
+        .vertices
+        .iter()
+        .map(|v| part.point(*v))
+        .collect();
+    let mut candidates = BTreeMap::<Edge, Item>::new();
+    for tri in &part.geometry.mesh.triangles {
+        let p = tri.map(|i| vertices[i as usize]);
+        let n = normal(p);
+        let l = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if l < 1e-12 {
+            continue;
+        }
+        let n = n.map(|v| v / l);
+        for j in 0..3 {
+            let mut a = p[j];
+            let mut b = p[(j + 1) % 3];
+            if (a[2] - b[2]).abs() > 1e-6 {
+                continue;
+            }
+            if key(a) > key(b) {
+                std::mem::swap(&mut a, &mut b);
+            }
+            candidates
+                .entry((key(a), key(b)))
+                .or_insert((a, b, Vec::new()))
+                .2
+                .push(n);
+        }
+    }
+    let edges: Vec<_> = candidates
+        .into_values()
+        .filter(|(_, _, n)| {
+            n.len() == 1
+                || n.iter()
+                    .skip(1)
+                    .any(|v| (0..3).map(|i| v[i] * n[0][i]).sum::<f64>() < 1. - 1e-8)
+        })
+        .collect();
+    if edges.len() > 100000 {
+        return Err("Edge selection exceeds its boundary budget".into());
+    }
+    // Snap to the edge ray rather than requiring a triangle hit first. A
+    // visible silhouette edge may project just outside its adjacent triangles.
+    let metric = |a: [f64; 3], b: [f64; 3]| {
+        let v: [f64; 3] = std::array::from_fn(|i| b[i] - a[i]);
+        let w: [f64; 3] = std::array::from_fn(|i| origin[i] - a[i]);
+        let dot = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| a[i] * b[i]).sum::<f64>();
+        let aa = dot(direction, direction);
+        let bb = dot(v, v).max(1e-20);
+        let c = dot(direction, v);
+        let d = dot(direction, w);
+        let e = dot(v, w);
+        let den = aa * bb - c * c;
+        let mut s = if den.abs() > 1e-12 {
+            ((aa * e - c * d) / den).clamp(0., 1.)
+        } else {
+            (e / bb).clamp(0., 1.)
+        };
+        let mut t = ((c * s - d) / aa).max(0.);
+        s = ((c * t + e) / bb).clamp(0., 1.);
+        t = ((c * s - d) / aa).max(0.);
+        let distance = (0..3)
+            .map(|i| (origin[i] + t * direction[i] - a[i] - s * v[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        (distance, t)
+    };
+    let limit = tolerance.unwrap_or(1.);
+    let &(a, b, _) = edges
+        .iter()
+        .filter(|e| {
+            let (_, t) = metric(e.0, e.1);
+            face_hit.is_none_or(|hit| t <= hit + limit)
+        })
+        .min_by(|a, b| {
+            let x = metric(a.0, a.1);
+            let y = metric(b.0, b.1);
+            if (x.0 - y.0).abs() < 1e-7 {
+                x.1.total_cmp(&y.1)
+            } else {
+                x.0.total_cmp(&y.0)
+            }
+        })
+        .ok_or("No visible horizontal machining edge here")?;
+    if metric(a, b).0 > limit {
+        return Err("Point at a horizontal edge to select it".into());
+    }
+    let mut adjacent = BTreeMap::<Key, Vec<[f64; 3]>>::new();
+    for (p, q, _) in &edges {
+        if (p[2] - a[2]).abs() < 1e-6 {
+            adjacent.entry(key(*p)).or_default().push(*q);
+            adjacent.entry(key(*q)).or_default().push(*p);
+        }
+    }
+    let mut chain = vec![a, b];
+    let mut closed = false;
+    for end in 0..2 {
+        if end == 1 {
+            chain.reverse();
+        }
+        loop {
+            let current = *chain.last().unwrap();
+            let previous = chain[chain.len() - 2];
+            let nexts = &adjacent[&key(current)];
+            if nexts.len() != 2 {
+                break;
+            }
+            let next = *nexts
+                .iter()
+                .find(|p| key(**p) != key(previous))
+                .ok_or("Ambiguous edge junction")?;
+            if single {
+                let u: [f64; 3] = std::array::from_fn(|i| current[i] - previous[i]);
+                let v: [f64; 3] = std::array::from_fn(|i| next[i] - current[i]);
+                let dot = (0..3).map(|i| u[i] * v[i]).sum::<f64>();
+                let len = u.iter().map(|v| v * v).sum::<f64>().sqrt()
+                    * v.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if dot / len < 1. - 1e-8 {
+                    break;
+                }
+            }
+            if key(next) == key(chain[0]) {
+                closed = true;
+                break;
+            }
+            if chain.iter().any(|p| key(*p) == key(next)) {
+                return Err("Edge chain branches or crosses itself".into());
+            }
+            chain.push(next);
+            if chain.len() > 10000 {
+                return Err("Edge chain exceeds 10,000 points".into());
+            }
+        }
+        if closed {
+            break;
+        }
+    }
+    Ok((chain, closed))
+}
+pub fn join_chain(
+    mut path: Vec<[f64; 3]>,
+    mut edge: Vec<[f64; 3]>,
+) -> Result<(Vec<[f64; 3]>, bool), String> {
+    if path.is_empty() {
+        return Ok((edge, false));
+    }
+    if path.len() + edge.len() > 10000 {
+        return Err("Edge chain exceeds 10,000 points".into());
+    }
+    let same = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+    if same(*path.last().unwrap(), edge[0]) {
+        // Preserve the chosen traversal, including an edge that closes the loop.
+    } else if same(*path.last().unwrap(), *edge.last().unwrap()) {
+        edge.reverse();
+    } else if same(path[0], edge[0]) {
+        path.reverse();
+    } else if same(path[0], *edge.last().unwrap()) {
+        path.reverse();
+        edge.reverse();
+    }
+    if !same(*path.last().unwrap(), edge[0]) {
+        return Err("Add an edge connected to either end of the selected chain".into());
+    }
+    path.extend(edge.into_iter().skip(1));
+    let closed = same(path[0], *path.last().unwrap());
+    if closed {
+        path.pop();
+    }
+    Ok((path, closed))
 }

@@ -281,7 +281,7 @@ impl Builder {
 }
 
 fn positive(value: f64, label: &str, max: f64) -> Result<(), String> {
-    if !value.is_finite() || value < 0.001 || value > max {
+    if !value.is_finite() || value < 0.001 || value > max + EPS {
         Err(format!(
             "{label} must be finite and between 0.001 and {max}"
         ))
@@ -363,6 +363,21 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
             }
             if op.strategy.is_surface() {
                 crate::surface::validate(project, index)?;
+            }
+            if op.strategy == Strategy::StockRough {
+                if let Some(part) = &project.part {
+                    let b = part.bounds();
+                    if op.x > b.min[0] + EPS
+                        || op.y > b.min[1] + EPS
+                        || op.x + op.width < b.max[0] - EPS
+                        || op.y + op.height < b.max[1] - EPS
+                    {
+                        return Err(
+                            "Outside roughing must enclose the complete workpiece silhouette"
+                                .into(),
+                        );
+                    }
+                }
             }
             let tool = project.operation_tool(op)?;
             validate_cutting_tool(&tool)?;
@@ -558,6 +573,47 @@ pub fn generate_with_cancel(
     project: &Project,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Toolpath, String> {
+    if project
+        .operations
+        .iter()
+        .any(|o| o.settings.milling_mode.is_some())
+    {
+        let mut resolved = project.clone();
+        for op in &mut resolved.operations {
+            if let Some(mode) = op.settings.milling_mode.take() {
+                if op.strategy == Strategy::Thread {
+                    continue;
+                }
+                let clockwise = project.library_tool(Some(op))?.is_none_or(|t| t.clockwise);
+                let climb = mode == crate::operation::MillingMode::Climb;
+                let internal = matches!(
+                    op.strategy,
+                    Strategy::Pocket | Strategy::CircularPocket | Strategy::InsideProfile
+                ) || (op.strategy.is_round() && !op.settings.outside)
+                    || (op.strategy == Strategy::Chamfer && !op.settings.outside);
+                let cw = if op.has_chain() && !op.settings.closed {
+                    (climb == clockwise)
+                        == if op.model_link.is_some() {
+                            op.settings.outside
+                        } else {
+                            match op.strategy {
+                                Strategy::OutsideProfile => true,
+                                Strategy::InsideProfile => false,
+                                _ => op.settings.outside,
+                            }
+                        }
+                } else {
+                    internal != (climb == clockwise)
+                };
+                op.settings.direction = if cw {
+                    crate::operation::Direction::Clockwise
+                } else {
+                    crate::operation::Direction::Counterclockwise
+                };
+            }
+        }
+        return generate_with_cancel(&resolved, cancel);
+    }
     validate(project)?;
     let mut surface_budget = crate::surface::Budget::new(cancel);
     let mut b = Builder {

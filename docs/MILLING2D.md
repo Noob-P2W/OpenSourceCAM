@@ -6,33 +6,36 @@ Existing saved operations retain their strategy and raster/plunge defaults.
 New rectangular pockets default to offset clearing. No sketch editor is included;
 geometry comes from imported models or numeric coordinates.
 
-| Command | Choices and behavior |
-| --- | --- |
-| Face | Existing whole-blank facing, limited to the highest target surface |
-| Pocket | Rectangular or circular clearing; a picked hole selects Circular automatically |
-| Roughing | Smooth loops (trochoidal) in a rectangle, or existing outside offset clearing |
-| Contour | Inside/outside rectangle or planar edge chain, with cutter-radius compensation |
-| Slot | Successive depth passes along a centerline, with a cutter matching the slot width |
-| Trace | Tool-center XYZ chain, including varying Z, without lateral compensation |
-| Hole milling | Helical bore, separate circular wall passes, or thread milling; internal bore or external boss |
-| Engrave | XYZ centerline with a measured V/chamfer cutter; penetration sets groove width |
-| Chamfer | Flat edge centerline with a measured V/chamfer cutter; penetration sets chamfer width |
+| Section | Command | Behavior |
+| --- | --- | --- |
+| Roughing | Face | Whole-blank facing down to the highest target surface |
+| Roughing | Pocket roughing | Rectangular/circular clearing with offset or raster passes |
+| Roughing | Outside roughing | Offset passes outside the full retained workpiece envelope |
+| Roughing | Slot | Cutter-width centerline passes; a capsule slot's entry chamfer is a separate operation |
+| Finishing | Pocket contour / Outside contour | Compensated wall finishing on picked edge chains or numeric boundaries |
+| Finishing | Surface smoothing | Raster finish a selected horizontal planar face, respecting its boundary and islands |
+| Finishing | Hole milling | Helical bore, circular wall passes or thread milling |
+| Finishing | Chamfer | Measured V-cutter finishing, with separate width, angle and tip penetration |
+| Other | Engrave | V-cutter centerline machining |
 
+Trace and the previous smooth-loop roughing cycle remain loadable for saved jobs.
+They are removed from operation creation.
 Drilling remains its own ribbon category, with continuous and peck cycles.
 
 ## Geometry and heights
 
 Use **Pick on model** before choosing a cutter, or enter numeric geometry.
 Pocket and roughing picks use supported circular/rectangular recognition. Slot
-picks derive a straight centerline from a rectangular feature. Trace, Contour,
-Engrave and Chamfer picks select a boundary loop of the clicked model face,
-choosing the loop nearest the click. These are tessellated face boundaries, not
-analytic CAD curves or an automatic arbitrary-edge chain solver. Preview and
+picks derive a straight centerline from a rectangular feature. Contour and Chamfer pick machining edges, with single, boundary-chain and
+connected-edge modes. Engrave follows face-boundary centerlines. Surface smoothing
+selects a horizontal planar face with its boundary and islands. These selections
+use imported tessellation rather than a general analytic CAD edge network. Preview and
 review the resulting chain. Geometry links become stale after model placement or
 orientation changes; unlinking permits manual editing.
 
-Numeric chains use one `X Y Z` point per line in work coordinates. The penetration
-value is subtracted from each point's Z. Leave Top depth at zero for model-height
+Numeric chains use one `X Y Z` point per line in work coordinates. Engrave and
+Chamfer subtract tip penetration from each point's Z. Contours use tool-tip height
+offset; Slot uses depth below stock top. Leave Top depth at zero for model-height
 chains. Slot chains must be at Z=0; Chamfer and compensated Contour chains must be
 flat. Trace and Engrave permit varying Z. Open chains do not acquire a closing
 segment; Closed chain explicitly adds it.
@@ -40,8 +43,9 @@ segment; Closed chain explicitly adds it.
 Contour compensation is bounded to 2,000 vertices, uses mitered corners and
 rejects collapsed, crossing, reversing or excessively sharp offsets. Closed-chain
 Inside/Outside is independent of winding. For an open chain, Inside means the left
-side and Outside means the right side in the chosen travel direction. Reversing
-an open chain therefore also changes that side. This is not a general polygon
+side and Outside means the right side of the selected chain. Milling direction
+changes travel order while preserving the compensated side; picked material
+boundaries also supply their retained side. This is not a general polygon
 boolean/offset engine. Use a smaller cutter or prepared simpler geometry when an
 offset is rejected. Pockets remain rectangular/circular; arbitrary pockets,
 islands and freeform stock clearing use the existing 3D strategies.
@@ -56,13 +60,12 @@ is limited to three degrees, remains inside the compensated region, and respects
 the axial plunge-feed limit. A sufficiently large region is required. These entry
 choices do not authorize using a non-center-cutting cutter.
 
-Smooth roughing uses translating circular trochoidal rows and a boundary pass at
-each depth. It requires a rectangle at least two tool diameters wide and at most
-40% forward advance. This is **not constant-engagement adaptive clearing**: stock
-engagement is not solved, and entries, links and boundary passes can encounter
-full cutter width. It does not clear around islands or implement tapered walls.
-Pocket and Slot clearing account for stock above the selected opening; a hole in
-the target model does not establish already removed stock.
+Outside roughing uses a retained envelope enclosing the complete imported part,
+including models with internal features. It clears outside that envelope and
+leaves internal pockets alone. It does not silently substitute a smaller numeric
+rectangle when a complex model lacks a recognized rectangular exterior. Curved
+outside corners can retain stock within the envelope for a subsequent finishing
+operation; this is not silhouette-following adaptive roughing.
 
 ## Bore, circular and thread cycles
 
@@ -110,15 +113,36 @@ entries. Browser tests exercise the grouped controls, all new cycle saves and pa
 generation, V/thread cutter assignments and circular shape inference.
 
 
-The 2D ribbon is now ordered Roughing, Finishing, Other. Pocket roughing and
-Smooth pocket roughing are separate from Pocket contour; Outside contour opens
-an outside finishing operation. Model edge selection offers a single boundary
-segment or its boundary loop. Chamfer width and tip depth are separate: the Rust
-engine offsets the tip so its measured cone intersects the edge by the requested
-width, rejecting insufficient penetration. Cutter side is inferred from the picked
-face and remains editable. Trace uses wall compensation for picked flat boundaries;
-intentional tool-center and varying-Z traces require Offset cutter from wall off.
-The edge picker follows tessellated boundaries of the hit face, not an analytic CAD
-edge network across multiple faces. Inspect the chain before generating.
-Nonrectangular straight-wall cavities are labelled Pocket and remain inspection
-candidates; rectangular Pocket clearing is not authorized to erase their shape.
+## Finishing height and milling terms
+
+Wall finishing uses a tool-tip offset from the selected edge. Zero follows its
+height exactly; positive values lift the tip. For an edge at Z=-10 mm, offset
++0.5 mm places the tip at Z=-9.5 mm. Negative offsets deliberately cut deeper.
+Surface smoothing uses the same convention from the selected face, defaults to
+zero and requires confirmation that the face was rough-machined. Its paths are
+limited to regions where the complete cutter footprint fits, including island
+clearance. A matching flat end mill is required. It is not freeform 3D finishing.
+
+Climb/conventional milling controls feed order relative to spindle rotation and
+the retained material. Geometric compensation remains on the selected side when
+feed order reverses. Clockwise/counterclockwise identifies spindle rotation
+(M3/M4); thread hand remains right/left independently. Full-width slots and raster
+face passes use entry and raster-direction controls.
+
+## Picking and chamfered slots
+
+Hover previews the actual available face or machining edge. Edge selection offers
+Single edge, Boundary chain, or Connected edges. Connected edges may be added at
+either end and are committed with Finish selection; disconnected edges are rejected.
+Horizontal machining boundaries are identified from adjacent mesh surfaces rather
+than treating a picked face as an edge. Straight collinear tessellation segments
+are combined. Smooth/freeform CAD curves still depend on imported tessellation.
+
+Straight capsule slots with vertical walls and a planar entry chamfer are split
+into standard Slot and Chamfer geometry. The measured vertical-wall width drives
+slotting; entry width and height supply chamfer width and angle. The chamfer cutter
+must match the measured included angle. For example, the local test object has a
+6 mm slot and a 0.5 mm chamfer at 45 degrees to the face. These do not require a
+3D roughing operation. Curved transitions, genuine taper and overhangs remain
+separate geometry and are not flattened by the slot cycle. Automatic slot fitting
+currently requires its straight axis to align with work X or Y.
