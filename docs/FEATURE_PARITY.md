@@ -374,3 +374,8 @@ Chamfered straight slots have separate slot/chamfer drafts with measured entry
 width and angle. Pocket roughing and outside roughing are distinct; outside clearing
 protects the full workpiece envelope. Trace and smooth-loop roughing are retained
 only for saved operations. See [2D milling](MILLING2D.md) for scope and limits.
+
+Stock setup Apply and Save refit the blank when side, top or backing allowances
+change; unchanged allowances preserve manual dimensions. Fitting margins persist
+with the project and undo history. Incremental simulation strips are retained on
+arrival so coalesced browser paints cannot discard stock-removal updates.

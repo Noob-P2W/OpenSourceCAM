@@ -319,6 +319,12 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
     positive(project.stock.thickness, "Stock thickness", 10_000.0)?;
     project.stock.validate_profile()?;
     if project
+        .stock_fit_margin
+        .is_some_and(|v| !v.is_finite() || !(0. ..=10000.).contains(&v))
+    {
+        return Err("Invalid stock fitting margin".into());
+    }
+    if project
         .stock_fit_allowances
         .is_some_and(|a| a.iter().any(|v| !v.is_finite() || *v < 0. || *v > 10000.))
     {

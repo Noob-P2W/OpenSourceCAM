@@ -297,6 +297,7 @@ impl Session {
                 let fitted = Project::from_part(part)?;
                 candidate.name = fitted.name;
                 candidate.stock_fit_allowances = fitted.stock_fit_allowances;
+                candidate.stock_fit_margin = fitted.stock_fit_margin;
                 candidate.stock = fitted.stock;
                 candidate.part = fitted.part;
                 // Face selections and operations (including model links) belong to

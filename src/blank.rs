@@ -344,6 +344,7 @@ pub fn fit(project: &mut Project, margin: f64, top: f64, backing: f64) -> Result
     }
     project.stock = stock;
     project.stock_fit_allowances = Some([top, backing]);
+    project.stock_fit_margin = Some(margin);
     contains_part(&project.stock, part)
 }
 pub fn mesh_from_boxes(boxes: &[([f64; 3], [f64; 3])]) -> Mesh {

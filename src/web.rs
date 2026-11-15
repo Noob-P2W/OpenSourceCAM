@@ -133,6 +133,7 @@ impl WebSession {
             part_fingerprint: Option<String>,
             part_geometry_key: Option<String>,
             setup_allowances: [f64; 2],
+            setup_margin: f64,
             #[serde(flatten)]
             view: crate::session::View<'a>,
             workspace_preview: Vec<std::sync::Arc<ReferencePreview>>,
@@ -274,6 +275,7 @@ impl WebSession {
                 None
             },
             setup_allowances: self.inner.project().fit_allowances(),
+            setup_margin: self.inner.project().stock_fit_margin.unwrap_or(5.),
             part_fingerprint: self.cached_part_key(),
             part_geometry_key: self
                 .inner

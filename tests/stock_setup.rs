@@ -333,11 +333,29 @@ fn rotation_does_not_convert_empty_stock_space_into_fitting_allowances() {
             Project::from_json(serde_json::to_string(session.project()).unwrap().as_bytes())
                 .unwrap();
         assert_eq!(saved.fit_allowances(), [1., 3.]);
+        assert_eq!(saved.stock_fit_margin, Some(2.));
         let mut recovered = Session::new(saved);
         recovered
             .restore_history(&session.history_checkpoint().unwrap())
             .unwrap();
         recovered.apply(Edit::Undo).unwrap();
         assert_eq!(recovered.project().fit_allowances(), [1., 3.]);
+        assert_eq!(recovered.project().stock_fit_margin, Some(2.));
     }
+}
+
+#[test]
+fn fitted_margin_survives_cancellation_checkpoint_and_history() {
+    let mut session = Session::new(part_project());
+    session.apply(Edit::FitStock { margin: 2. }).unwrap();
+    session.apply(Edit::FitStock { margin: 4. }).unwrap();
+    let mut recovered = Session::new(session.project().clone());
+    recovered
+        .restore_history(&session.history_checkpoint().unwrap())
+        .unwrap();
+    assert_eq!(recovered.project().stock_fit_margin, Some(4.));
+    recovered.apply(Edit::Undo).unwrap();
+    assert_eq!(recovered.project().stock_fit_margin, Some(2.));
+    recovered.apply(Edit::Redo).unwrap();
+    assert_eq!(recovered.project().stock_fit_margin, Some(4.));
 }

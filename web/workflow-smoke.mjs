@@ -4,6 +4,17 @@ let activePage;
 try{
  const context=await browser.newContext({viewport:{width:1024,height:768}}),page=await context.newPage(),errors=[];activePage=page;page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.PWA_URL||'http://127.0.0.1:8081');await ready(page);
  assert.equal(await page.locator('[data-pane-target]').count(),0);const mount=new URL('../examples/models/mount.stl',import.meta.url).pathname;await importModel(page,mount);await section(page,'setup');await page.getByLabel('Stock X · mm',{exact:true}).fill('200');await page.locator('#fit-stock').click();await page.locator('#status').filter({hasText:'Stock fitted'}).waitFor();assert.equal(await page.getByLabel('Stock X · mm',{exact:true}).inputValue(),'90');
+ // Apply and Save must fit changed allowances without a separate Fit click.
+ const originalStock=(await state(page)).stock;
+ await page.locator('#stock-margin').fill('3');await page.locator('#fit-top').fill('1');await page.locator('#fit-backing').fill('2');await page.locator('#apply-stock').click();
+ let allowanceState=await state(page);assert.equal(allowanceState.stock.width,originalStock.width-4);assert.equal(allowanceState.stock.thickness,originalStock.thickness+3);assert.deepEqual(allowanceState.stock_fit_allowances,[1,2]);assert.equal(allowanceState.stock_fit_margin,3);
+ await page.locator('#stock-margin').fill('4');await page.locator('#fit-top').fill('2');await page.locator('#fit-backing').fill('3');await page.locator('[data-go-pane=operations]').click();await page.locator('#setup-dialog').waitFor({state:'hidden'});
+ allowanceState=await state(page);assert.equal(allowanceState.stock.thickness,originalStock.thickness+5);assert.deepEqual(allowanceState.stock_fit_allowances,[2,3]);assert.equal(allowanceState.stock_fit_margin,4);
+ await page.reload();await ready(page);await section(page,'setup');for(const [id,value] of [['stock-margin','4'],['fit-top','2'],['fit-backing','3']])assert.equal(await page.locator('#'+id).inputValue(),value,'Allowances survive reload');
+ // Unchanged allowances must preserve manual blank dimensions.
+ await page.getByLabel('Stock X · mm',{exact:true}).fill('120');await page.locator('#apply-stock').click();assert.equal((await state(page)).stock.width,120);
+ await page.locator('#stock-margin').fill('5');await page.locator('#fit-top').fill('0');await page.locator('#fit-backing').fill('0');await page.locator('#apply-stock').click();assert.equal((await state(page)).stock.thickness,originalStock.thickness);
+ console.log('PASS: Apply/Save fit changed side/top/backing allowances, persist after reload, accept zero and preserve manual dimensions');
  // Stock and machining orientation are real shared-engine state, independent of camera projection.
  await page.getByLabel('Stock shape',{exact:true}).selectOption('cylinder');await page.getByLabel('Stock rotation Z · °',{exact:true}).fill('20');await page.getByLabel('Part rotation Z · °',{exact:true}).fill('30');await page.locator('#fit-stock').click();await page.locator('#status').filter({hasText:'Stock fitted'}).waitFor();let p=await state(page);assert.equal(p.stock.profile.kind,'cylinder');assert.equal(p.stock.profile.rotation[2],20);assert.equal(p.part.rotation[2],30);await closeDialogs(page);await page.locator('[data-view="front"]').click();assert.equal((await state(page)).part.rotation[2],30);
  // Return to the stock orientation used by this supported feature fixture.

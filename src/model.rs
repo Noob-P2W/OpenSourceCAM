@@ -187,6 +187,8 @@ impl Default for Operation {
 pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock_fit_allowances: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_fit_margin: Option<f64>,
     #[serde(default)]
     pub setup_face: Option<usize>,
     #[serde(default)]
@@ -217,6 +219,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             stock_fit_allowances: None,
+            stock_fit_margin: None,
             setup_face: None,
             workspace: Vec::new(),
             tool_library: Default::default(),

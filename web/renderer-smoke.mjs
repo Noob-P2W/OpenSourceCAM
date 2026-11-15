@@ -18,6 +18,31 @@ try{
  });
  assert.ok(result.emptyFinite);assert.ok(result.shares&&result.originsDiffer,'Translated identical shapes share buffers but keep their own origins');assert.ok(result.orange>=25,'Cursor remains a visible point in top view');assert.ok(result.hidden,'Cursor must disappear when not requested');assert.ok(result.released,'Unused geometry, materials and cursor must be releasable');console.log('PASS: Three.js empty meshes, local origins, shared geometry, visible/hidden cursor and explicit resource eviction');
  for(const software of [false,true]){
+  const stock=await page.evaluate(async software=>{
+   const {Viewport}=await import('./viewport.js'),canvas=document.createElement('canvas');canvas.style.cssText='width:320px;height:320px';document.body.append(canvas);
+   if(software){const get=canvas.getContext.bind(canvas);canvas.getContext=(type,...args)=>type==='webgl'?null:get(type,...args)}
+   const v=new Viewport(canvas,()=>{},()=>{});v.controls={grid:false,axes:false};v.setView('top');
+   const project={stock:{width:8,height:8,thickness:6}},mesh={vertices:[[0,0,0],[8,0,0],[8,8,0],[0,8,0]],triangles:[[0,1,2],[0,2,3]]};
+   const draw=frame=>v.draw(project,[],null,0,frame,null,false,false);
+   const data=(x,z)=>new Float32Array([[x,0,z],[x+4,0,z],[x+4,8,z],[x,0,z],[x+4,8,z],[x,8,z]].flatMap(p=>[...p,0,0,1]));
+   const frame=(strip,z,reset=false)=>({epoch:1,resolution:32,reset,patches:[{strip,offset:0,length:36}],vertices:data(strip*4,z)});
+   const pixels=()=>{if(software)return Array.from(v.ctx.getImageData(0,0,canvas.width,canvas.height).data);const p=new Uint8Array(canvas.width*canvas.height*4);v.gl.readPixels(0,0,canvas.width,canvas.height,v.gl.RGBA,v.gl.UNSIGNED_BYTE,p);return Array.from(p)};
+   try{
+    const initial={mesh},first=frame(0,-2,true),second=frame(1,-4);
+    draw(initial);draw(first);draw(second);const expected=pixels();
+    draw(null);draw(initial);
+    // Two worker results arrive before the coalesced animation-frame paint.
+    v.stageStockFrame?.(first);v.stageStockFrame?.(second);draw(second);
+    const actual=pixels(),triangles=Number(canvas.dataset.stockTriangles),pieces=v.stockPieces.size;
+    const incremental=frame(0,-3);v.stageStockFrame?.(incremental);draw(incremental);
+    const retained=v.stockPieces.size===2&&Number(canvas.dataset.stockTriangles)===4;
+    draw({mesh});draw(first);draw(second);const restarted=v.stockPieces.size===2;
+    return{matches:actual.every((p,i)=>p===expected[i]),triangles,pieces,retained,restarted};
+   }finally{v.three?.dispose();canvas.remove()}
+  },software);
+  assert.ok(stock.matches&&stock.triangles===4&&stock.pieces===2,`First stock paint must include every coalesced strip, matching sequential renders: ${JSON.stringify(stock)}`);
+  assert.ok(stock.retained&&stock.restarted,'Incremental frames retain untouched strips and restart after full snapshots');
+  console.log(`PASS: ${software?'Canvas':'WebGL'} first stock paint, coalesced updates, incremental strips and snapshot restart`);
   const pose=await page.evaluate(async software=>{
    const {Viewport}=await import('./viewport.js'),host=document.createElement('div'),canvas=document.createElement('canvas');canvas.style.cssText='width:320px;height:320px';host.append(canvas);document.body.append(host);
    if(software){const get=canvas.getContext.bind(canvas);canvas.getContext=(type,...args)=>type==='webgl'?null:get(type,...args)}

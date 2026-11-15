@@ -47,6 +47,8 @@ struct ProjectRef {
     #[serde(default)]
     stock_fit_allowances: Option<[f64; 2]>,
     #[serde(default)]
+    stock_fit_margin: Option<f64>,
+    #[serde(default)]
     setup_face: Option<usize>,
     workspace: Vec<WorkspaceRef>,
     tool_library: ToolLibrary,
@@ -102,6 +104,7 @@ impl Pool {
     fn project(&mut self, p: &Project) -> ProjectRef {
         ProjectRef {
             stock_fit_allowances: p.stock_fit_allowances,
+            stock_fit_margin: p.stock_fit_margin,
             setup_face: p.setup_face,
             workspace: p
                 .workspace
@@ -157,6 +160,7 @@ impl ProjectRef {
         }
         Ok(Project {
             stock_fit_allowances: self.stock_fit_allowances,
+            stock_fit_margin: self.stock_fit_margin,
             setup_face: self.setup_face,
             workspace: self
                 .workspace
