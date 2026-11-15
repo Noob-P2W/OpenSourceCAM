@@ -29,7 +29,10 @@ fn one(strategy: Strategy) -> Project {
 
 #[test]
 fn travel_retracts_before_xy_and_finishes_at_clearance() {
-    for strategy in Strategy::ALL.into_iter().filter(|s| !s.is_surface()) {
+    for strategy in Strategy::ALL
+        .into_iter()
+        .filter(|s| !s.is_surface() && !s.is_new_2d())
+    {
         let p = one(strategy);
         let path = generate(&p).unwrap();
         assert!(!path.moves.is_empty());

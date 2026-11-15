@@ -81,9 +81,20 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
         Strategy::StockRough => 7,
         Strategy::SurfaceRough => 8,
         Strategy::ParallelFinish => 9,
+        Strategy::SmoothRough => 11,
+        Strategy::Slot => 12,
+        Strategy::Trace => 13,
+        Strategy::Bore => 14,
+        Strategy::Circular => 15,
+        Strategy::Thread => 16,
+        Strategy::Engrave => 17,
+        Strategy::Chamfer => 18,
     }]);
-    for v in [op.x, op.y, op.width, op.height, op.depth] {
+    for v in [op.x, op.y, op.width, op.height] {
         hash.number(v);
+    }
+    if !op.has_chain() || op.strategy == Strategy::Slot {
+        hash.number(op.depth);
     }
     if let Some(face) = op.settings.machining_face {
         hash.bytes(b"machining-face");
@@ -92,6 +103,14 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
     if let Some(depth) = op.settings.start_depth {
         hash.bytes(b"opening-depth");
         hash.number(depth);
+    }
+    if op.has_chain() {
+        for point in &op.settings.path {
+            for v in point {
+                hash.number(*v);
+            }
+        }
+        hash.bytes(&[u8::from(op.settings.closed)]);
     }
     hash.finish()
 }

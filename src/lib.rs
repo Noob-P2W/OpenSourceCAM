@@ -3,6 +3,7 @@ pub mod blank;
 pub mod cam;
 pub mod collision;
 pub mod commands;
+pub mod contour;
 pub mod faces;
 pub mod features;
 pub mod files;

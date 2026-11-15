@@ -13,7 +13,7 @@ This is an implementation inventory, not a release promise or certification.
 | Project JSON and migrations | Supported | Shared loader |
 | Bounded STL/OBJ import | Supported | Shared parsers; new fitted project |
 | STEP/IGES import | Bundled runtime | Bundled OCCT WASM; tessellated mesh, source retained |
-| Supported milling toolpaths and export preflight | Supported | Shared Rust core |
+| Supported milling toolpaths and export preflight | Shared generators; native UI development paused | Shared Rust core; grouped 2D operations, model/numeric chains and checked export; see [2D milling limits](MILLING2D.md) |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
 | Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, 32–1024-cell incremental playback with changed-strip transfers, selectable calculation budget, synchronized library tool assembly, and OBJ download |
 | Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
@@ -347,3 +347,12 @@ This display query leaves recognized feature dimensions and machining geometry
 unchanged. Results from a superseded selection are ignored.
 
 Floating feature markers are visible only while Inspect → Part features is checked.
+
+Grouped browser 2D operations now include rectangular/circular Pocket, planar chain
+Contour, smooth trochoidal Roughing, cutter-width Slot, varying-Z Trace,
+Bore/Circular/Thread wall milling, Engrave and Chamfer. These use shared Rust
+generators. Smooth roughing is not constant-engagement adaptive clearing. Thread
+operations require measured matching-pitch cutters and precleared stock; sampled
+stock simulation is unavailable for enabled thread operations, while checked
+paths and NC remain available. See [2D milling](MILLING2D.md) for geometry, entry
+and safety limits. No sketch editor or arbitrary pocket/island solver is added.

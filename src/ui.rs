@@ -390,6 +390,7 @@ impl Workbench {
             Strategy::StockRough => "Outside clearing",
             Strategy::SurfaceRough => "3D roughing",
             Strategy::ParallelFinish => "3D finishing",
+            _ => strategy.label(),
         };
         self.project.operations.push(Operation {
             model_link: None,

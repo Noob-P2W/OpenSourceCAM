@@ -50,6 +50,7 @@ def web():
         run('node', 'web/layout-smoke.mjs', env=env)
         run('node', 'web/workflow-smoke.mjs', env=env)
         run('node', 'web/ui-cleanup-smoke.mjs', env=env)
+        run('node', 'web/milling2d-smoke.mjs', env=env)
         run('node', 'web/inspection-smoke.mjs', env=env)
         run('node', 'web/feature-markers-smoke.mjs', env=env)
         run('node', 'web/fixture-preview-smoke.mjs', env=env)

@@ -178,7 +178,12 @@ pub fn operation_template(
         ..Operation::default()
     };
     match strategy {
-        Strategy::Drill | Strategy::DrillOnce | Strategy::CircularPocket => {
+        Strategy::Drill
+        | Strategy::DrillOnce
+        | Strategy::CircularPocket
+        | Strategy::Bore
+        | Strategy::Circular
+        | Strategy::Thread => {
             op.x = s.width / 2.;
             op.y = s.height / 2.;
             op.width = s.width.min(s.height) * 0.5;
@@ -218,9 +223,31 @@ pub fn operation_template(
                 }
             }
         }
+        Strategy::Slot | Strategy::Trace | Strategy::Engrave | Strategy::Chamfer => {
+            op.x = s.width * 0.25;
+            op.y = s.height * 0.5;
+            op.width = s.width * 0.5;
+            op.height = p
+                .library_tool(None)
+                .ok()
+                .flatten()
+                .map_or(p.tool.diameter, |t| t.dimension("diameter"));
+            op.depth = 1.;
+        }
+        Strategy::SmoothRough => {
+            op.settings.step_over_percent = Some(20.);
+        }
         _ => {}
     }
-    if !strategy.is_surface() && strategy != Strategy::Facing {
+    if strategy == Strategy::Thread {
+        op.settings.direction = crate::operation::Direction::Clockwise;
+        op.settings.pitch = None;
+        op.settings.thread_depth = Some(0.3);
+    }
+    if !strategy.is_surface()
+        && strategy != Strategy::Facing
+        && (!strategy.is_curve() || strategy == Strategy::Slot)
+    {
         if let Ok(Some(level)) = crate::faces::level(p) {
             if level < -0.002 {
                 op.settings.start_depth = Some(-level);
@@ -235,6 +262,11 @@ pub fn operation_template(
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeometryQuery {
     Faces,
+    ChainDraft {
+        origin: [f64; 3],
+        direction: [f64; 3],
+        strategy: crate::model::Strategy,
+    },
     Survey,
     Selection {
         triangles: Vec<usize>,
@@ -291,6 +323,30 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                 })
                 .ok_or("Selected feature changed; recognize the model again")?;
             Ok(json!(crate::features::draft(project, found, strategy)?))
+        }
+        GeometryQuery::ChainDraft {
+            origin,
+            direction,
+            strategy,
+        } => {
+            if !matches!(
+                strategy,
+                crate::model::Strategy::Trace
+                    | crate::model::Strategy::Engrave
+                    | crate::model::Strategy::Chamfer
+                    | crate::model::Strategy::InsideProfile
+                    | crate::model::Strategy::OutsideProfile
+            ) {
+                return Err("This operation does not use an edge chain".into());
+            }
+            let points = crate::faces::pick_chain(part, origin, direction)?;
+            let mut op = operation_template(project, strategy);
+            op.settings.path = points;
+            op.settings.closed = true;
+            op.settings.start_depth = None;
+            op.depth = 0.5;
+            crate::machining::link(&mut op, part);
+            Ok(json!(op))
         }
         GeometryQuery::Faces => Ok(json!(crate::faces::list(part)?)),
         GeometryQuery::Face { triangle } => Ok(json!(crate::faces::face(part, triangle)?)),
@@ -451,7 +507,7 @@ pub fn operation_defaults(
         .map_or(tool.plunge, |t| t.plunge);
     let clearance = op.settings.clearance.unwrap_or(project.clearance);
     Ok(
-        json!({"feed":inherited_feed,"plunge":inherited_plunge,"spindle_rpm":tool.spindle_rpm,"step_down":tool.step_down,"step_over_percent":tool.step_over*100.,"finish_feed":op.settings.feed.unwrap_or(inherited_feed),"clearance":project.clearance,"retract":clearance,"start_depth":0.,"surface_step":0.5,"path_tolerance":0.01,"peck_clearance":0.254,"tool_name":tool.name,"preset_name":record.and_then(|r|r.preset(op.preset_id).ok()).map(|p|p.name.clone())}),
+        json!({"feed":inherited_feed,"plunge":inherited_plunge,"spindle_rpm":tool.spindle_rpm,"step_down":tool.step_down,"step_over_percent":tool.step_over*100.,"finish_feed":op.settings.feed.unwrap_or(inherited_feed),"clearance":project.clearance,"retract":clearance,"start_depth":0.,"surface_step":0.5,"path_tolerance":0.01,"peck_clearance":0.254,"pitch":record.filter(|r|r.kind==crate::tool_library::ToolKind::ThreadMill).map(|r|r.dimension("thread_pitch")),"thread_depth":0.3,"taper_angle":0.,"v_width":record.filter(|r|r.kind==crate::tool_library::ToolKind::ChamferMill).map(|r|r.dimension("tip_diameter")+2.*(op.depth-op.settings.axial_allowance)*(r.dimension("included_angle").to_radians()/2.).tan()),"tool_name":tool.name,"preset_name":record.and_then(|r|r.preset(op.preset_id).ok()).map(|p|p.name.clone())}),
     )
 }
 

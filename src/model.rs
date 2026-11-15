@@ -43,10 +43,18 @@ pub enum Strategy {
     StockRough,
     SurfaceRough,
     ParallelFinish,
+    SmoothRough,
+    Slot,
+    Trace,
+    Bore,
+    Circular,
+    Thread,
+    Engrave,
+    Chamfer,
 }
 
 impl Strategy {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 18] = [
         Self::Pocket,
         Self::OutsideProfile,
         Self::InsideProfile,
@@ -57,6 +65,14 @@ impl Strategy {
         Self::StockRough,
         Self::SurfaceRough,
         Self::ParallelFinish,
+        Self::SmoothRough,
+        Self::Slot,
+        Self::Trace,
+        Self::Bore,
+        Self::Circular,
+        Self::Thread,
+        Self::Engrave,
+        Self::Chamfer,
     ];
 
     pub fn label(self) -> &'static str {
@@ -71,7 +87,34 @@ impl Strategy {
             Self::StockRough => "Clear stock outside part",
             Self::SurfaceRough => "3D raster roughing",
             Self::ParallelFinish => "3D parallel finishing",
+            Self::SmoothRough => "Smooth 2D roughing",
+            Self::Slot => "Slot",
+            Self::Trace => "Trace",
+            Self::Bore => "Helical bore",
+            Self::Circular => "Circular wall",
+            Self::Thread => "Thread milling",
+            Self::Engrave => "Engrave",
+            Self::Chamfer => "2D chamfer",
         }
+    }
+    pub fn is_curve(self) -> bool {
+        matches!(
+            self,
+            Self::Slot | Self::Trace | Self::Engrave | Self::Chamfer
+        )
+    }
+    pub fn is_round(self) -> bool {
+        matches!(
+            self,
+            Self::CircularPocket | Self::Bore | Self::Circular | Self::Thread
+        )
+    }
+    pub fn is_new_2d(self) -> bool {
+        self.is_curve()
+            || matches!(
+                self,
+                Self::Bore | Self::Circular | Self::Thread | Self::SmoothRough
+            )
     }
     pub fn is_drilling(self) -> bool {
         matches!(self, Self::Drill | Self::DrillOnce)
@@ -104,6 +147,15 @@ pub struct Operation {
     pub depth: f64,
 }
 
+impl Operation {
+    pub fn has_chain(&self) -> bool {
+        self.strategy.is_curve()
+            || (matches!(
+                self.strategy,
+                Strategy::InsideProfile | Strategy::OutsideProfile
+            ) && !self.settings.path.is_empty())
+    }
+}
 impl Default for Operation {
     fn default() -> Self {
         Self {
@@ -238,11 +290,26 @@ impl Project {
                     | ToolKind::Drill
                     | ToolKind::FaceMill
                     | ToolKind::BallEndMill
+                    | ToolKind::ChamferMill
+                    | ToolKind::ThreadMill
             ) {
                 return Err(format!(
                     "{} toolpaths are not implemented; the definition can be stored in the library",
                     tool.kind.label()
                 ));
+            }
+            if tool.kind == ToolKind::ChamferMill
+                && !matches!(op.strategy, Strategy::Engrave | Strategy::Chamfer)
+            {
+                return Err("Select Engrave or 2D chamfer for a chamfer mill".into());
+            }
+            if matches!(op.strategy, Strategy::Engrave | Strategy::Chamfer)
+                && tool.kind != ToolKind::ChamferMill
+            {
+                return Err("Engrave and chamfer operations require a chamfer mill".into());
+            }
+            if (tool.kind == ToolKind::ThreadMill) != (op.strategy == Strategy::Thread) {
+                return Err("Thread milling requires a thread mill and a matching pitch".into());
             }
             if op.strategy.is_drilling() && tool.kind != ToolKind::Drill {
                 return Err("Select a drill tool definition for drilling operations".into());
@@ -268,7 +335,14 @@ impl Project {
                 return Err("Model-linked machining depth exceeds the tool's defined flute length or stickout; select a suitable measured tool".into());
             }
             if !tool.center_cutting
-                && !matches!(op.strategy, Strategy::Facing | Strategy::StockRough)
+                && !matches!(
+                    op.strategy,
+                    Strategy::Facing
+                        | Strategy::StockRough
+                        | Strategy::Thread
+                        | Strategy::Bore
+                        | Strategy::Circular
+                )
             {
                 return Err("Vertical entry requires a center-cutting tool".into());
             }

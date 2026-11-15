@@ -1,3 +1,4 @@
+mod milling2d;
 use crate::model::{Project, Strategy, FORMAT_VERSION};
 
 const MAX_MOVES: usize = 200_000;
@@ -127,6 +128,82 @@ impl Builder {
 
     fn cut(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
         self.go(Point3 { x, y, z }, Motion::Cut)
+    }
+    fn feed_cut(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
+        let feed = self.feed;
+        let dz = self.position.z - z;
+        if dz > EPS {
+            let distance = self.position.distance(Point3 { x, y, z });
+            self.feed = self.feed.min(self.plunge * distance / dz);
+        }
+        let result = self.cut(x, y, z);
+        self.feed = feed;
+        result
+    }
+    fn pocket_entry(
+        &mut self,
+        bounds: [f64; 4],
+        previous: f64,
+        z: f64,
+        entry: crate::operation::Entry,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        let [x0, y0, x1, y1] = bounds;
+        if entry == crate::operation::Entry::Plunge {
+            return self.enter(x0, y0, z);
+        }
+        if entry == crate::operation::Entry::Ramp {
+            let length = x1 - x0;
+            if length <= EPS {
+                return Err("Ramp entry needs room along X".into());
+            }
+            let passes = ((previous - z).abs() / (length * 3_f64.to_radians().tan()))
+                .ceil()
+                .max(1.) as usize;
+            if passes > MAX_LAYERS {
+                return Err("Ramp entry exceeds its pass budget".into());
+            }
+            self.enter(x0, y0, previous)?;
+            for i in 1..=passes {
+                self.feed_cut(
+                    if i % 2 == 1 { x1 } else { x0 },
+                    y0,
+                    previous + (z - previous) * i as f64 / passes as f64,
+                )?
+            }
+            return self.feed_cut(x0, y0, z);
+        }
+        let radius = ((x1 - x0).min(y1 - y0) / 4.).min(1.);
+        if radius <= EPS {
+            return Err("Helix entry needs a wider pocket".into());
+        }
+        let cx = x0 + radius;
+        let cy = y0 + radius;
+        let segments = (std::f64::consts::TAU / (2. * (1. - (tolerance / radius).min(1.)).acos()))
+            .ceil()
+            .max(48.) as usize;
+        if segments > 4096 {
+            return Err("Helix entry exceeds its segment budget".into());
+        }
+        let circumference =
+            2. * radius * (std::f64::consts::PI / segments as f64).sin() * segments as f64;
+        let turns = ((previous - z).abs() / (circumference * 3_f64.to_radians().tan()))
+            .ceil()
+            .max(1.) as usize;
+        if turns > MAX_LAYERS {
+            return Err("Helix entry exceeds its turn budget".into());
+        }
+        self.enter(cx + radius, cy, previous)?;
+        for i in 1..=turns * segments {
+            let t = i as f64 / (turns * segments) as f64;
+            let a = std::f64::consts::TAU * turns as f64 * t;
+            self.feed_cut(
+                cx + radius * a.cos(),
+                cy + radius * a.sin(),
+                previous + (z - previous) * t,
+            )?
+        }
+        self.feed_cut(x0, y0, z)
     }
     fn outside_contour(
         &mut self,
@@ -274,6 +351,10 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
         .filter(|(_, op)| op.enabled)
     {
         let check = || -> Result<(), String> {
+            if op.strategy.is_new_2d() || op.has_chain() {
+                milling2d::validate(project, op, index)?;
+                return Ok(());
+            }
             if op.strategy.is_surface() {
                 crate::surface::validate(project, index)?;
             }
@@ -504,6 +585,12 @@ pub fn generate_with_cancel(
         b.plunge = tool.plunge;
         let r = tool.diameter / 2.0;
         b.operation = index;
+        if op.strategy.is_new_2d() || op.has_chain() {
+            milling2d::generate(project, op, index, &mut b, cancel)?;
+            b.clearance = project.travel_clearance();
+            b.retract()?;
+            continue;
+        }
         let depth = op.depth - op.settings.axial_allowance;
         let top = material_top(project, index);
         let layers = ((depth - top) / tool.step_down).ceil() as usize;
@@ -741,7 +828,19 @@ pub fn generate_with_cancel(
             if op.strategy == Strategy::CircularPocket {
                 let radius =
                     ((op.width - tool.diameter) / 2.0 - op.settings.radial_allowance).max(0.0);
-                b.enter(op.x, op.y, z)?;
+                if op.settings.entry == crate::operation::Entry::Plunge {
+                    b.enter(op.x, op.y, z)?
+                } else {
+                    let h = (radius / 2_f64.sqrt()).min(r / 2.);
+                    b.pocket_entry(
+                        [op.x - h, op.y - h, op.x + h, op.y + h],
+                        -(top + (layer - 1) as f64 * tool.step_down),
+                        z,
+                        op.settings.entry,
+                        op.settings.path_tolerance.unwrap_or(0.01),
+                    )?;
+                    b.cut(op.x, op.y, z)?;
+                }
                 if radius > EPS {
                     let rings =
                         (radius / (tool.diameter * tool.step_over)).ceil().max(1.0) as usize;
@@ -809,18 +908,57 @@ pub fn generate_with_cancel(
             let y0 = op.y + offset;
             let x1 = op.x + op.width - offset;
             let y1 = op.y + op.height - offset;
-            b.enter(
-                if op.strategy == Strategy::Pocket
-                    && op.settings.raster == crate::operation::Raster::NegativeX
-                {
-                    x1
-                } else {
-                    x0
-                },
-                y0,
-                z,
-            )?;
-            if op.strategy == Strategy::Pocket {
+            if op.strategy == Strategy::Pocket
+                && op.settings.entry == crate::operation::Entry::Plunge
+                && op.settings.pocket_pattern == crate::operation::PocketPattern::Raster
+                && op.settings.raster == crate::operation::Raster::NegativeX
+            {
+                b.enter(x1, y0, z)?;
+            } else if op.strategy == Strategy::Pocket {
+                b.pocket_entry(
+                    [x0, y0, x1, y1],
+                    -(top + (layer - 1) as f64 * tool.step_down),
+                    z,
+                    op.settings.entry,
+                    op.settings.path_tolerance.unwrap_or(0.01),
+                )?;
+            } else {
+                b.enter(x0, y0, z)?;
+            }
+            if op.strategy == Strategy::Pocket
+                && op.settings.pocket_pattern == crate::operation::PocketPattern::Offset
+            {
+                let cx = (x0 + x1) / 2.;
+                let cy = (y0 + y1) / 2.;
+                let hx = (x1 - x0) / 2.;
+                let hy = (y1 - y0) / 2.;
+                let rings = (hx.hypot(hy) / (tool.diameter * tool.step_over))
+                    .ceil()
+                    .max(1.) as usize;
+                if rings > MAX_ROWS {
+                    return Err("Offset pocket exceeds 10,000 contours".into());
+                }
+                b.cut(cx, cy, z)?;
+                for ring in 1..=rings {
+                    let k = ring as f64 / rings as f64;
+                    let a = cx - hx * k;
+                    let c = cx + hx * k;
+                    let d = cy - hy * k;
+                    let e = cy + hy * k;
+                    let points = if op.settings.direction == crate::operation::Direction::Clockwise
+                    {
+                        [(a, d), (a, e), (c, e), (c, d), (a, d)]
+                    } else {
+                        [(a, d), (c, d), (c, e), (a, e), (a, d)]
+                    };
+                    for (x, y) in points {
+                        b.cut(x, y, z)?
+                    }
+                }
+            }
+            if op.strategy == Strategy::Pocket
+                && op.settings.pocket_pattern == crate::operation::PocketPattern::Raster
+            {
                 let rows = ((y1 - y0) / (tool.diameter * tool.step_over)).ceil() as usize;
                 for row in 0..=rows {
                     let y = y0 + (y1 - y0) * row as f64 / rows as f64;

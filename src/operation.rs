@@ -15,10 +15,35 @@ pub enum Direction {
     Counterclockwise,
     Clockwise,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PocketPattern {
+    #[default]
+    Raster,
+    Offset,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Entry {
+    #[default]
+    Plunge,
+    Ramp,
+    Helix,
+}
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub machining_face: Option<usize>,
+    pub pocket_pattern: PocketPattern,
+    pub entry: Entry,
+    /// Tool-center or contour-boundary chain in work coordinates; depth is subtracted from Z.
+    pub path: Vec<[f64; 3]>,
+    pub closed: bool,
+    pub precleared: bool,
+    pub outside: bool,
+    pub pitch: Option<f64>,
+    pub thread_depth: Option<f64>,
+    pub taper_angle: Option<f64>,
     pub start_depth: Option<f64>,
     pub surface_step: Option<f64>,
     pub path_tolerance: Option<f64>,
@@ -39,6 +64,24 @@ pub struct Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if self.path.len() > 10000
+            || self
+                .path
+                .iter()
+                .flatten()
+                .any(|v| !v.is_finite() || v.abs() > 100000.)
+        {
+            return Err("A contour needs at most 10,000 finite work-coordinate points".into());
+        }
+        for (name, value, min, max) in [
+            ("Pitch", self.pitch, 0.01, 100.),
+            ("Thread depth", self.thread_depth, 0.001, 100.),
+            ("Taper angle", self.taper_angle, -45., 45.),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v < min || v > max) {
+                return Err(format!("{name} is outside its supported range"));
+            }
+        }
         if self
             .start_depth
             .is_some_and(|v| !v.is_finite() || !(0.0..=10000.).contains(&v))

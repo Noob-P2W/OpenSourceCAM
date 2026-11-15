@@ -433,3 +433,82 @@ pub fn facing(project: &Project, triangle: usize) -> Result<Operation, String> {
     crate::machining::link(&mut op, part);
     Ok(op)
 }
+
+/// Pick the nearest boundary loop of the hit face. Original edge vertices are retained.
+pub fn pick_chain(
+    part: &Part,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<Vec<[f64; 3]>, String> {
+    let (id, t) = ray_hit(part, origin, direction)?;
+    let face = face(part, id)?;
+    let hit: [f64; 3] = std::array::from_fn(|i| origin[i] + t * direction[i]);
+    let edges = face.segments.as_chunks::<2>().0;
+    if edges.len() > 10000 {
+        return Err("Selected face boundary exceeds 10,000 edges".into());
+    }
+    // Use the same welding keys as face extraction. Indexed adjacency avoids a
+    // repeated scan of the entire edge list for every point on a detailed loop.
+    let key = |p: [f64; 3]| p.map(|v| (v / 0.00001).round() as i64);
+    let mut adjacent = BTreeMap::<_, Vec<_>>::new();
+    for (i, &[a, b]) in edges.iter().enumerate() {
+        adjacent.entry(key(a)).or_default().push((i, b));
+        adjacent.entry(key(b)).or_default().push((i, a));
+    }
+    if adjacent.values().any(|v| v.len() != 2) {
+        return Err("Selected face has an open or branching boundary".into());
+    }
+    let mut used = vec![false; edges.len()];
+    let mut loops = Vec::new();
+    for (seed, &[a, b]) in edges.iter().enumerate() {
+        if used[seed] {
+            continue;
+        }
+        used[seed] = true;
+        let mut chain = vec![a, b];
+        while key(*chain.last().unwrap()) != key(a) {
+            let (i, next) = adjacent[&key(*chain.last().unwrap())]
+                .iter()
+                .find(|(i, _)| !used[*i])
+                .ok_or("Selected face boundary does not form separate loops")?;
+            used[*i] = true;
+            chain.push(*next);
+        }
+        chain.pop();
+        if chain.len() < 3 {
+            return Err("Selected boundary has fewer than three vertices".into());
+        }
+        loops.push(chain);
+    }
+    let distance = |chain: &Vec<[f64; 3]>| {
+        chain
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let b = chain[(i + 1) % chain.len()];
+                let v: [f64; 3] = std::array::from_fn(|j| b[j] - a[j]);
+                let len = v.iter().map(|v| v * v).sum::<f64>();
+                let t = ((0..3).map(|j| (hit[j] - a[j]) * v[j]).sum::<f64>() / len.max(1e-20))
+                    .clamp(0., 1.);
+                (0..3)
+                    .map(|j| (hit[j] - a[j] - t * v[j]).powi(2))
+                    .sum::<f64>()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let mut chain = loops
+        .into_iter()
+        .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+        .ok_or("No boundary chain at this point")?;
+    let first = chain
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let d = |p: &&[f64; 3]| (0..3).map(|i| (p[i] - hit[i]).powi(2)).sum::<f64>();
+            d(a).total_cmp(&d(b))
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    chain.rotate_left(first);
+    Ok(chain)
+}

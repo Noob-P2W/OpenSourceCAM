@@ -898,9 +898,12 @@ pub fn draft(
     }
     let compatible = match feature.kind {
         FeatureKind::RectangularPocket => {
-            matches!(strategy, Strategy::Pocket | Strategy::InsideProfile)
+            matches!(
+                strategy,
+                Strategy::Pocket | Strategy::InsideProfile | Strategy::Slot | Strategy::SmoothRough
+            )
         }
-        FeatureKind::CircularHole => strategy == Strategy::CircularPocket || strategy.is_drilling(),
+        FeatureKind::CircularHole => strategy.is_round() || strategy.is_drilling(),
     };
     if !compatible {
         return Err("Choose a strategy compatible with this feature".into());
@@ -920,12 +923,12 @@ pub fn draft(
         ),
         enabled: true,
         strategy,
-        x: if strategy.is_drilling() || strategy == Strategy::CircularPocket {
+        x: if strategy.is_drilling() || strategy.is_round() {
             feature.center[0]
         } else {
             feature.min[0]
         },
-        y: if strategy.is_drilling() || strategy == Strategy::CircularPocket {
+        y: if strategy.is_drilling() || strategy.is_round() {
             feature.center[1]
         } else {
             feature.min[1]
@@ -934,6 +937,27 @@ pub fn draft(
         height: feature.diameter.unwrap_or(feature.max[1] - feature.min[1]),
         depth: -feature.bottom_z,
     };
+    if strategy == Strategy::Slot {
+        let dx = feature.max[0] - feature.min[0];
+        let dy = feature.max[1] - feature.min[1];
+        let r = dx.min(dy) / 2.;
+        op.height = 2. * r;
+        op.width = dx.max(dy);
+        op.settings.path = if dx >= dy {
+            vec![
+                [feature.min[0] + r, feature.center[1], 0.],
+                [feature.max[0] - r, feature.center[1], 0.],
+            ]
+        } else {
+            vec![
+                [feature.center[0], feature.min[1] + r, 0.],
+                [feature.center[0], feature.max[1] - r, 0.],
+            ]
+        };
+    }
+    if strategy == Strategy::SmoothRough {
+        op.settings.step_over_percent = Some(20.);
+    }
     if let Some(part) = &project.part {
         crate::machining::link(&mut op, part);
     }

@@ -60,6 +60,10 @@ the release rather than requiring users to install another CAD application.
    entry now. Custom process chains, machine setup, tooling and motion generation
    will be implemented after the standard process families.
 
-Further work: arbitrary 2D contours, robust analytic CAD recognition, ramps/helixes,
-adaptive clearing, general 3D finishing, second setups, articulated kinematics,
+Bounded planar 2D contour chains, pocket ramp/helix entries, smooth trochoidal
+roughing and measured-tool finishing cycles are available in the browser; see
+[2D milling](MILLING2D.md).
+
+Further work: general pocket/island offsets, robust analytic CAD recognition,
+constant-engagement adaptive clearing, broader 3D finishing, second setups, articulated kinematics,
 and the remaining process motion engines. Do not imply physical production verification.

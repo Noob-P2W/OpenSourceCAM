@@ -576,9 +576,10 @@ impl WebSession {
             let preview = crate::commands::PlaybackPreview::new(self.inner.project())
                 .map_err(|e| JsValue::from_str(&e))?;
             let mut value = crate::commands::path_value(&preview.path);
-            value["initial_stock"] = preview
-                .snapshot(self.inner.project(), 0., 32)
-                .map_err(|e| JsValue::from_str(&e))?;
+            match preview.snapshot(self.inner.project(), 0., 32) {
+                Ok(stock) => value["initial_stock"] = stock,
+                Err(error) => value["stock_preview_error"] = error.into(),
+            }
             self.playback = Some(preview);
             Ok(value)
         } else {

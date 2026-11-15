@@ -34,6 +34,15 @@ facing through higher geometry. If the model already touches stock top, add a to
 allowance under **Setup → Stock → Top allowance**, then **Fit stock to part**, before facing. Backing allowance is set alongside it. Manual work without an imported target retains its
 explicit facing depth.
 
+## Grouped 2D operations
+
+Pocket groups rectangular and circular clearing, with optional bounded ramp/helix
+entries. Contour accepts planar model/numeric chains; Slot, Trace, hole-wall
+milling and V-cutter finishing share the operation editor. Read [2D milling](MILLING2D.md)
+for implemented behavior and limits, especially precleared bore/boss stock,
+thread cutter requirements and the distinction between smooth trochoidal
+roughing and constant-engagement adaptive clearing.
+
 ## 3D offset roughing
 
 Roughing descends at the tool/preset step-down and clears constant-Z offset contours

@@ -266,7 +266,7 @@ fn swept_height(
     b: Point3,
     r: f64,
     ball: bool,
-    cone: Option<f64>,
+    cone: Option<(f64, f64)>,
 ) -> Option<f64> {
     let vx = b.x - a.x;
     let vy = b.y - a.y;
@@ -275,7 +275,7 @@ fn swept_height(
         if ball {
             r - (r * r - d * d).max(0.0).sqrt()
         } else {
-            cone.map_or(0.0, |k| d / k)
+            cone.map_or(0.0, |(k, tip)| (d - tip).max(0.) / k)
         }
     };
     if l2 < 1e-20 {
@@ -302,7 +302,7 @@ fn swept_height(
     let t = if ball {
         (t0 - slope * ((r * r - perpendicular) / (1.0 + slope * slope)).sqrt() / length)
             .clamp(lo, hi)
-    } else if let Some(k) = cone {
+    } else if let Some((k, _)) = cone {
         let s = slope * k;
         if s >= 1.0 {
             lo
@@ -317,7 +317,17 @@ fn swept_height(
         hi
     };
     let d = (perpendicular + l2 * (t - t0).powi(2)).sqrt();
-    Some(a.z + dz * t + profile(d))
+    let mut height = a.z + dz * t + profile(d);
+    if let Some((_, tip)) = cone {
+        if perpendicular <= tip * tip {
+            let half = ((tip * tip - perpendicular) / l2).sqrt();
+            for q in [(t0 - half).clamp(lo, hi), (t0 + half).clamp(lo, hi)] {
+                let d = (perpendicular + l2 * (q - t0).powi(2)).sqrt();
+                height = height.min(a.z + dz * q + profile(d));
+            }
+        }
+    }
+    Some(height)
 }
 
 fn write_obj(mesh: &Mesh, out: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -349,7 +359,7 @@ pub fn export_obj(simulation: &Simulation, file: &Path) -> Result<(), String> {
 struct Footprint {
     radius: f64,
     ball: bool,
-    cone: Option<f64>,
+    cone: Option<(f64, f64)>,
 }
 pub(crate) struct Grid {
     pub nx: usize,
@@ -401,6 +411,9 @@ impl Grid {
                 });
                 continue;
             }
+            if op.strategy == crate::model::Strategy::Thread {
+                return Err("Sampled stock cannot represent thread grooves; use toolpath preview for thread milling".into());
+            }
             let tool = project.operation_tool(op)?;
             let record = project.library_tool(Some(op))?;
             if record.is_none()
@@ -418,8 +431,17 @@ impl Grid {
                 radius: tool.diameter / 2.,
                 ball: record.is_some_and(|r| r.kind == ToolKind::BallEndMill),
                 cone: record
-                    .filter(|r| r.kind == ToolKind::Drill)
-                    .map(|r| (r.dimension("point_angle").to_radians() / 2.).tan()),
+                    .filter(|r| matches!(r.kind, ToolKind::Drill | ToolKind::ChamferMill))
+                    .map(|r| {
+                        if r.kind == ToolKind::Drill {
+                            ((r.dimension("point_angle").to_radians() / 2.).tan(), 0.)
+                        } else {
+                            (
+                                (r.dimension("included_angle").to_radians() / 2.).tan(),
+                                r.dimension("tip_diameter") / 2.,
+                            )
+                        }
+                    }),
             });
         }
         Ok(Self {
@@ -796,7 +818,12 @@ mod sweep_tests {
     }
     #[test]
     fn sloping_cutter_sweeps_match_dense_reference() {
-        for (ball, cone) in [(false, None), (true, None), (false, Some(1.2))] {
+        for (ball, cone) in [
+            (false, None),
+            (true, None),
+            (false, Some((1.2, 0.))),
+            (false, Some((1.2, 0.3))),
+        ] {
             for dz in [-6.0, 0.0, 6.0] {
                 let a = Point3 {
                     x: 0.,
@@ -822,7 +849,7 @@ mod sweep_tests {
                                 let profile = if ball {
                                     r - (r * r - d * d).max(0.).sqrt()
                                 } else {
-                                    cone.map_or(0., |k| d / k)
+                                    cone.map_or(0., |(k, tip)| (d - tip).max(0.) / k)
                                 };
                                 sampled = sampled.min(a.z + t * dz + profile);
                             }
