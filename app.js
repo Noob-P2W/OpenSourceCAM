@@ -243,10 +243,10 @@ async function geometryDraft(strategy,index){
  if(strategy==='facing'&&geometryState.face)return call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}});
  return null;
 }
-async function pickOperation(strategy,commit){
+async function pickOperation(strategy,commit,singleEdge=false){
  pendingFeaturePick={strategy,commit};
  beginPick(async ray=>{
-  if(['trace','engrave','chamfer','inside_profile','outside_profile'].includes(strategy)){const draft=await call('geometry',{data:{action:'chain_draft',...ray,strategy}});highlight={outline:draft.settings.path,fill:[]};draw();await commit(draft)}else if(strategy==='facing'){
+  if(['trace','engrave','chamfer','inside_profile','outside_profile'].includes(strategy)){const draft=await call('geometry',{data:{action:'chain_draft',...ray,strategy,single_edge:singleEdge}});highlight={outline:draft.settings.path,fill:[]};draw();await commit(draft)}else if(strategy==='facing'){
    const face=await call('geometry',{data:{action:'pick',...ray}});highlight=face;geometryState.face=face;draw();
    const draft=await call('geometry',{data:{action:'facing_draft',triangle:face.id}});await commit(draft);
   }else{
