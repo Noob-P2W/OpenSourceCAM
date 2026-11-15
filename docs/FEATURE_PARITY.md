@@ -16,7 +16,7 @@ This is an implementation inventory, not a release promise or certification.
 | Supported milling toolpaths and export preflight | Shared generators; native UI development paused | Shared Rust core; grouped 2D operations, model/numeric chains and checked export; see [2D milling limits](MILLING2D.md) |
 | Generate/export/simulate/plan command boundary | CLI --command | WASM worker |
 | Stock simulation | Numeric and rendered | Shared sampled mesh and numeric report, 32–1024-cell incremental playback with changed-strip transfers, selectable calculation budget, synchronized library tool assembly, and OBJ download |
-| Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; sampled software fallback |
+| Geometry display | Native solid/mesh renderer | Depth-tested WebGL solids, stock volume, feature outlines, orbit/pan/zoom, axonometric default, top/front/right/isometric, grid/axes controls and fit; complete-triangle software solid fallback |
 | Machine/tool setup | Detailed native editors | Searchable machine/tool tables, persistent portable machine+post records, Generic/GRBL/Mach3/LinuxCNC templates, CNC profile import/export, configuration/tool changer, tool geometry/presets and assembly settings |
 | Process opening menu | Nine process workspaces | Same Rust catalog and saved process identity; planned engines remain disabled |
 | Tool library | 37 kinds and assembly preview | Same catalog, assembly geometry and focused dimension arrows (mm/in); separate tool creation, search and type filtering, editing, duplication, guarded removal, preset duplication/removal, inch display/editing, merge/replace import and JSON export |
@@ -379,3 +379,10 @@ Stock setup Apply and Save refit the blank when side, top or backing allowances
 change; unchanged allowances preserve manual dimensions. Fitting margins persist
 with the project and undo history. Incremental simulation strips are retained on
 arrival so coalesced browser paints cannot discard stock-removal updates.
+
+The 2.5D Roughing group includes Area roughing: pick a horizontal target face
+(or enter a numeric region/depth), clear from stock top in stepdowns, and preserve
+face islands and raised model geometry. Radial and axial stock allowances apply;
+negative offsets below the target face are rejected. The conservative raised-feature
+projection can leave additional stock near sloping walls. Slot has its own through-slot
+illustration. Software solid rendering no longer skips imported workpiece facets.

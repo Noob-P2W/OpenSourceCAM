@@ -223,6 +223,9 @@ pub fn operation_template(
                 crate::machining::link(&mut op, part);
             }
         }
+        Strategy::AreaRough => {
+            op.settings.height_offset = Some(0.);
+        }
         Strategy::SurfaceSmooth => {
             op.depth = 0.;
             op.settings.height_offset = Some(0.);
@@ -249,7 +252,7 @@ pub fn operation_template(
         op.settings.thread_depth = Some(0.3);
     }
     if !strategy.is_surface()
-        && strategy != Strategy::SurfaceSmooth
+        && !matches!(strategy, Strategy::SurfaceSmooth | Strategy::AreaRough)
         && strategy != Strategy::Facing
         && (!strategy.is_curve() || strategy == Strategy::Slot)
     {
@@ -279,6 +282,8 @@ pub enum GeometryQuery {
         edge_tolerance: Option<f64>,
     },
     SmoothFaceDraft {
+        #[serde(default)]
+        roughing: bool,
         origin: [f64; 3],
         direction: [f64; 3],
     },
@@ -392,10 +397,14 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             crate::machining::link(&mut op, part);
             Ok(json!(op))
         }
-        GeometryQuery::SmoothFaceDraft { origin, direction } => {
+        GeometryQuery::SmoothFaceDraft {
+            origin,
+            direction,
+            roughing,
+        } => {
             let face = crate::faces::pick(part, origin, direction)?;
             if !face.horizontal {
-                return Err("Select an upward horizontal planar face to smooth".into());
+                return Err("Select an upward horizontal planar target face".into());
             }
             let mut loops = crate::faces::boundary_loops(&face)?;
             let area = |ring: &Vec<[f64; 3]>| {
@@ -409,7 +418,14 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                     .abs()
             };
             loops.sort_by(|a, b| area(b).total_cmp(&area(a)));
-            let mut op = operation_template(project, crate::model::Strategy::SurfaceSmooth);
+            let mut op = operation_template(
+                project,
+                if roughing {
+                    crate::model::Strategy::AreaRough
+                } else {
+                    crate::model::Strategy::SurfaceSmooth
+                },
+            );
             op.settings.path = loops.remove(0);
             op.settings.islands = loops;
             op.settings.closed = true;

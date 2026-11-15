@@ -21,12 +21,17 @@ fn curve(op: &Operation) -> Vec<[f64; 3]> {
 }
 type FaceRegion = (Vec<Vec<[f64; 3]>>, f64);
 fn face_region(op: &Operation) -> Result<FaceRegion, String> {
+    let numeric_z = if op.strategy == Strategy::AreaRough {
+        -op.depth
+    } else {
+        0.
+    };
     let outer = if op.settings.path.is_empty() {
         vec![
-            [op.x, op.y, 0.],
-            [op.x + op.width, op.y, 0.],
-            [op.x + op.width, op.y + op.height, 0.],
-            [op.x, op.y + op.height, 0.],
+            [op.x, op.y, numeric_z],
+            [op.x + op.width, op.y, numeric_z],
+            [op.x + op.width, op.y + op.height, numeric_z],
+            [op.x, op.y + op.height, numeric_z],
         ]
     } else {
         op.settings.path.clone()
@@ -39,12 +44,55 @@ fn face_region(op: &Operation) -> Result<FaceRegion, String> {
         .flatten()
         .any(|p| !p.iter().all(|v| v.is_finite()) || (p[2] - level).abs() > 1e-6)
     {
-        return Err("Select a horizontal planar face for surface smoothing".into());
+        return Err("Select a horizontal planar target face".into());
     }
     Ok((
         rings,
         level + op.settings.height_offset.unwrap_or(0.) + op.settings.axial_allowance,
     ))
+}
+// Project all geometry above the target plane, including tapered/overhanging walls.
+// Keeping this envelope at every layer is conservative and protects raised features.
+fn area_paths(p: &Project, op: &Operation) -> Result<Vec<[[f64; 2]; 2]>, String> {
+    let (rings, z) = face_region(op)?;
+    let tool = p.operation_tool(op)?;
+    let mut obstacles = Vec::new();
+    if let Some(part) = &p.part {
+        for triangle in &part.geometry.mesh.triangles {
+            let points: Vec<_> = triangle
+                .iter()
+                .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
+                .collect();
+            let floor = rings[0][0][2];
+            if points.iter().all(|q| q[2] <= floor + 1e-6) {
+                continue;
+            }
+            let mut clipped = Vec::new();
+            for i in 0..3 {
+                let a = points[i];
+                let b = points[(i + 1) % 3];
+                if a[2] > floor {
+                    clipped.push(a);
+                }
+                if (a[2] > floor) != (b[2] > floor) {
+                    let t = (floor - a[2]) / (b[2] - a[2]);
+                    clipped.push(std::array::from_fn(|k| a[k] + t * (b[k] - a[k])));
+                }
+            }
+            if !clipped.is_empty() {
+                obstacles.push(clipped);
+            }
+        }
+    }
+    if z > 1e-7 {
+        return Err("Area roughing bottom must be at or below stock top".into());
+    }
+    crate::planar::raster_obstacles(
+        &rings,
+        tool.diameter / 2. + op.settings.radial_allowance,
+        tool.diameter * tool.step_over,
+        &obstacles,
+    )
 }
 fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
     let points = curve(op);
@@ -85,8 +133,8 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
     } else {
         op.depth - op.settings.axial_allowance
     };
-    if op.strategy == Strategy::SurfaceSmooth {
-        if !op.settings.precleared {
+    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
+        if op.strategy == Strategy::SurfaceSmooth && !op.settings.precleared {
             return Err(
                 "Confirm the selected face is already rough-machined before surface smoothing"
                     .into(),
@@ -106,13 +154,23 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
                     .min(record.dimension("flute_length"))
                     + EPS
             {
-                return Err("Face smoothing exceeds measured cutter reach".into());
+                return Err("Planar machining exceeds measured cutter reach".into());
             }
         }
         if z > op.settings.clearance.unwrap_or(p.clearance) || z < -p.stock.thickness - EPS {
-            return Err("Face smoothing height is outside stock/clearance limits".into());
+            return Err("Planar machining height is outside stock/clearance limits".into());
         }
-        crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
+        if op.strategy == Strategy::AreaRough {
+            if op.settings.height_offset.unwrap_or(0.) < 0. {
+                return Err("Area roughing cannot cut below the selected face".into());
+            }
+            if (-z / tool.step_down).ceil() > MAX_LAYERS as f64 {
+                return Err("Too many area roughing depth passes".into());
+            }
+            area_paths(p, op)?;
+        } else {
+            crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
+        }
         return Ok(());
     }
     if !(op.has_chain()
@@ -398,20 +456,35 @@ pub(super) fn generate(
     } else {
         start(op)
     };
-    if op.strategy == Strategy::SurfaceSmooth {
+    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
         let (rings, z) = face_region(op)?;
-        for [mut a, mut c] in
+        let paths = if op.strategy == Strategy::AreaRough {
+            area_paths(p, op)?
+        } else {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?
-        {
-            cancelled(cancel)?;
-            if (op.settings.raster == crate::operation::Raster::PositiveX && a[0] > c[0])
-                || (op.settings.raster == crate::operation::Raster::NegativeX && a[0] < c[0])
-            {
-                std::mem::swap(&mut a, &mut c);
+        };
+        let layers = if op.strategy == Strategy::AreaRough {
+            ((-z / tool.step_down).ceil() as usize).max(1)
+        } else {
+            1
+        };
+        for layer in 1..=layers {
+            let level = if op.strategy == Strategy::AreaRough {
+                -(layer as f64 * tool.step_down).min(-z)
+            } else {
+                z
+            };
+            for &[mut a, mut c] in &paths {
+                cancelled(cancel)?;
+                if (op.settings.raster == crate::operation::Raster::PositiveX && a[0] > c[0])
+                    || (op.settings.raster == crate::operation::Raster::NegativeX && a[0] < c[0])
+                {
+                    std::mem::swap(&mut a, &mut c);
+                }
+                b.enter(a[0], a[1], level)?;
+                b.feed_cut(c[0], c[1], level)?;
+                b.retract()?;
             }
-            b.enter(a[0], a[1], z)?;
-            b.feed_cut(c[0], c[1], z)?;
-            b.retract()?;
         }
         return Ok(());
     }

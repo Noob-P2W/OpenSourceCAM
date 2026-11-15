@@ -306,6 +306,7 @@ fn face_finishing_has_no_hidden_penetration_depth_from_setup_defaults() {
         commands::geometry_query(
             &p,
             GeometryQuery::SmoothFaceDraft {
+                roughing: false,
                 origin: [6., 6., 10.],
                 direction: [0., 0., -1.],
             },
@@ -328,4 +329,129 @@ fn saved_cut_direction_is_named_without_rewriting_the_operation() {
     let refs = commands::operation_defaults(&p, &op).unwrap();
     assert_eq!(refs["milling_mode"], "conventional");
     assert_eq!(op, before);
+}
+
+#[test]
+fn area_roughing_steps_down_without_cutting_islands_or_floor() {
+    let mut p = job();
+    let mut op = commands::operation_template(&p, Strategy::AreaRough);
+    op.settings.path = vec![
+        [10., 10., -5.],
+        [80., 10., -5.],
+        [80., 60., -5.],
+        [10., 60., -5.],
+    ];
+    op.settings.islands = vec![vec![
+        [35., 25., -5.],
+        [50., 25., -5.],
+        [50., 45., -5.],
+        [35., 45., -5.],
+    ]];
+    op.settings.step_down = Some(2.);
+    op.settings.axial_allowance = 0.5;
+    op.settings.radial_allowance = 0.25;
+    p.operations.push(op);
+    let path = cam::generate(&p).unwrap();
+    let mut levels = Vec::new();
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2. + 0.25;
+    let island = &p.operations[0].settings.islands[0];
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!(m.to.z >= -4.5 - 1e-8);
+        if !levels.contains(&m.to.z) {
+            levels.push(m.to.z);
+        }
+        for i in 0..=40 {
+            let t = i as f64 / 40.;
+            let q = [
+                m.from.x + (m.to.x - m.from.x) * t,
+                m.from.y + (m.to.y - m.from.y) * t,
+            ];
+            assert!(!opensourcecam::planar::inside(q, island));
+            for j in 0..island.len() {
+                assert!(
+                    opensourcecam::planar::distance(q, island[j], island[(j + 1) % island.len()])
+                        >= radius - 1e-6
+                );
+            }
+        }
+    }
+    levels.sort_by(f64::total_cmp);
+    assert_eq!(levels, vec![-4.5, -4., -2.]);
+    p.operations[0].settings.height_offset = Some(-0.1);
+    assert!(cam::generate(&p)
+        .unwrap_err()
+        .contains("below the selected face"));
+}
+
+#[test]
+fn area_roughing_projects_sloping_geometry_as_protected_obstacles() {
+    let rings = vec![vec![
+        [0., 0., -5.],
+        [30., 0., -5.],
+        [30., 30., -5.],
+        [0., 30., -5.],
+    ]];
+    let triangle = vec![[8., 8., 0.], [22., 8., -3.], [15., 22., -5.]];
+    let paths =
+        opensourcecam::planar::raster_obstacles(&rings, 2., 1., std::slice::from_ref(&triangle))
+            .unwrap();
+    for [a, b] in paths {
+        for i in 0..=100 {
+            let t = i as f64 / 100.;
+            let q = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+            assert!(!opensourcecam::planar::inside(q, &triangle));
+            for j in 0..3 {
+                assert!(
+                    opensourcecam::planar::distance(q, triangle[j], triangle[(j + 1) % 3])
+                        >= 2. - 1e-6
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn area_roughing_automatically_protects_imported_raised_geometry() {
+    use opensourcecam::import::{self, Units};
+    let mut p = job();
+    let mut part = import::import_file(
+        std::path::Path::new("examples/models/mount.stl"),
+        Units::Millimetres,
+    )
+    .unwrap();
+    let triangle = vec![[30., 20., -1.], [50., 20., -1.], [40., 40., -5.]];
+    let geometry = std::sync::Arc::make_mut(&mut part.geometry);
+    geometry.mesh = import::Mesh {
+        vertices: triangle.clone(),
+        triangles: vec![[0, 1, 2]],
+    };
+    geometry.bodies.clear();
+    part.offset = [0.; 3];
+    p.part = Some(part);
+    let mut op = commands::operation_template(&p, Strategy::AreaRough);
+    op.x = 10.;
+    op.y = 10.;
+    op.width = 70.;
+    op.height = 50.;
+    op.depth = 5.;
+    op.settings.step_down = Some(2.);
+    p.operations.push(op);
+    let path = cam::generate(&p).unwrap();
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        for i in 0..=40 {
+            let t = i as f64 / 40.;
+            let q = [
+                m.from.x + (m.to.x - m.from.x) * t,
+                m.from.y + (m.to.y - m.from.y) * t,
+            ];
+            assert!(!opensourcecam::planar::inside(q, &triangle));
+            for j in 0..3 {
+                assert!(
+                    opensourcecam::planar::distance(q, triangle[j], triangle[(j + 1) % 3])
+                        >= radius - 1e-6
+                );
+            }
+        }
+    }
 }

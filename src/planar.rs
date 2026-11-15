@@ -66,6 +66,14 @@ pub fn raster(
     radius: f64,
     step: f64,
 ) -> Result<Vec<[[f64; 2]; 2]>, String> {
+    raster_obstacles(rings, radius, step, &[])
+}
+pub fn raster_obstacles(
+    rings: &[Vec<[f64; 3]>],
+    radius: f64,
+    step: f64,
+    obstacles: &[Vec<[f64; 3]>],
+) -> Result<Vec<[[f64; 2]; 2]>, String> {
     let n = rings.iter().map(Vec::len).sum::<usize>();
     if rings.is_empty()
         || rings.iter().any(|r| r.len() < 3)
@@ -124,8 +132,8 @@ pub fn raster(
         return Err("The selected face is narrower than the cutter".into());
     }
     let rows = ((hi - lo) / step).ceil().max(1.) as usize;
-    if rows > 10000 || rows * rings.iter().map(Vec::len).sum::<usize>() > 50_000_000 {
-        return Err("Face smoothing exceeds its calculation budget".into());
+    if rows > 10000 || rows * (n + obstacles.iter().map(Vec::len).sum::<usize>()) > 50_000_000 {
+        return Err("Planar machining exceeds its calculation budget".into());
     }
     let mut paths = Vec::new();
     for row in 0..=rows {
@@ -144,6 +152,25 @@ pub fn raster(
                 }
             }
         }
+        for ring in obstacles {
+            let mut hits = Vec::new();
+            for i in 0..ring.len() {
+                let a = ring[i];
+                let b = ring[(i + 1) % ring.len()];
+                if (a[1] > y) != (b[1] > y) {
+                    hits.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+                }
+                if let Some(span) = capsule(y, a, b, radius) {
+                    blocked.push(span);
+                }
+            }
+            if hits.len() >= 2 {
+                blocked.push([
+                    hits.iter().copied().fold(f64::INFINITY, f64::min),
+                    hits.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                ]);
+            }
+        }
         crossings.sort_by(f64::total_cmp);
         let mut spans: Vec<_> = crossings
             .as_chunks::<2>()
@@ -151,7 +178,18 @@ pub fn raster(
             .iter()
             .map(|c| [c[0], c[1]])
             .collect();
-        for cut in blocked {
+        blocked.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for span in blocked {
+            if let Some(last) = merged.last_mut() {
+                if span[0] <= last[1] {
+                    last[1] = last[1].max(span[1]);
+                    continue;
+                }
+            }
+            merged.push(span);
+        }
+        for cut in merged {
             let mut next = Vec::new();
             for [a, b] in spans {
                 if cut[1] <= a || cut[0] >= b {

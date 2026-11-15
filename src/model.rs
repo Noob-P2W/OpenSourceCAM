@@ -52,10 +52,11 @@ pub enum Strategy {
     Engrave,
     Chamfer,
     SurfaceSmooth,
+    AreaRough,
 }
 
 impl Strategy {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Pocket,
         Self::OutsideProfile,
         Self::InsideProfile,
@@ -75,6 +76,7 @@ impl Strategy {
         Self::Engrave,
         Self::Chamfer,
         Self::SurfaceSmooth,
+        Self::AreaRough,
     ];
 
     pub fn label(self) -> &'static str {
@@ -98,6 +100,7 @@ impl Strategy {
             Self::Engrave => "Engrave",
             Self::Chamfer => "2D chamfer",
             Self::SurfaceSmooth => "Surface smoothing",
+            Self::AreaRough => "Area roughing",
         }
     }
     pub fn is_curve(self) -> bool {
@@ -121,6 +124,7 @@ impl Strategy {
                     | Self::Thread
                     | Self::SmoothRough
                     | Self::SurfaceSmooth
+                    | Self::AreaRough
             )
     }
     pub fn is_drilling(self) -> bool {

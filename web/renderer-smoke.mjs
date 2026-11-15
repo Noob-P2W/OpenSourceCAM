@@ -17,6 +17,16 @@ try{
   viewer.remove(a);viewer.remove(b);viewer.remove(marker);viewer.limit=0;viewer.prune();const released=viewer.cacheBytes===0&&viewer.entries.size===0;viewer.dispose();canvas.remove();return{emptyFinite,shares,originsDiffer,orange,hidden,released};
  });
  assert.ok(result.emptyFinite);assert.ok(result.shares&&result.originsDiffer,'Translated identical shapes share buffers but keep their own origins');assert.ok(result.orange>=25,'Cursor remains a visible point in top view');assert.ok(result.hidden,'Cursor must disappear when not requested');assert.ok(result.released,'Unused geometry, materials and cursor must be releasable');console.log('PASS: Three.js empty meshes, local origins, shared geometry, visible/hidden cursor and explicit resource eviction');
+ const curved=await page.evaluate(async()=>{
+  const {Viewport}=await import('./viewport.js'),canvas=document.createElement('canvas');canvas.style.cssText='width:320px;height:320px';document.body.append(canvas);const get=canvas.getContext.bind(canvas);canvas.getContext=(type,...args)=>type==='webgl'?null:get(type,...args);
+  const v=new Viewport(canvas,()=>{},()=>{});v.controls={grid:false,axes:false};
+  const mesh={vertices:[],triangles:[]};for(let y=0;y<=100;y++)for(let x=0;x<=100;x++)mesh.vertices.push([x*.2,10+5*Math.cos(y*Math.PI/200),-5+5*Math.sin(y*Math.PI/200)]);
+  for(let y=0;y<100;y++)for(let x=0;x<100;x++){const a=y*101+x;mesh.triangles.push([a,a+1,a+102],[a,a+102,a+101])}
+  let fills=0;const fill=v.ctx.fill.bind(v.ctx);v.ctx.fill=(...args)=>{fills++;fill(...args)};
+  try{v.draw({stock:{width:25,height:25,thickness:10},part:{visible:true,units:'millimetres',offset:[0,0,0],geometry:{mesh}}},[],null,0,null,null,false,false);return{fills,triangles:mesh.triangles.length}}finally{canvas.remove()}
+ });
+ assert.equal(curved.fills,curved.triangles,'Software rendering must preserve every imported fillet triangle rather than skip facets in dense curved faces');
+ console.log('PASS: Software rendering preserves every face of a 20,000-triangle curved fillet');
  for(const software of [false,true]){
   const stock=await page.evaluate(async software=>{
    const {Viewport}=await import('./viewport.js'),canvas=document.createElement('canvas');canvas.style.cssText='width:320px;height:320px';document.body.append(canvas);

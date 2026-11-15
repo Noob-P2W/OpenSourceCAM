@@ -97,10 +97,12 @@ after transaction completion, and service-worker updates await the pending save.
 The page caches compact project JSON per committed revision; the advanced editor
 is populated lazily for large projects. Canvas redraws are coalesced, geometry
 paths cached/batched, backing buffers bounded to 4 million pixels and DPR 2, and
-main workpiece solids rendered at full resolution in WebGL. Wireframe/software
-fallback previews sample large meshes; reference model previews preserve every face and shared vertex within the existing
+main workpiece solids rendered at full resolution in WebGL. Wireframe previews
+may sample large meshes; software solid rendering retains every triangle. Reference
+model previews preserve every face and shared vertex within the existing
 16-model / 300,000-reference-triangle workspace limits. Software fallback also
-retains complete fixture surfaces; its workpiece/stock display remains sampled. The camera fits the complete stock/part volume,
+retains complete fixture and workpiece surfaces; stock simulation retains its grid
+approximation. The camera fits the complete stock/part volume,
 including negative Z; orbit, zoom and pan are display state only.
 This limit is presentation-only and is disclosed in the preview; full geometry
 remains available to validation, planning, simulation and project downloads.
@@ -356,3 +358,9 @@ only dirty strips and retains model/tool buffers; line geometry drops unused nor
 fields on the WebGL path. The axis widget and drawing surface resize only when
 the relevant view state changes. These are scoped optimizations, not a claim that
 every CAM algorithm has been replaced or that arbitrary assemblies are certified.
+
+Area roughing uses bounded planar raster regions at multiple depth levels, with
+selected face holes and projected above-floor model triangles excluded by cutter
+radius plus radial allowance. Overlapping blocked scanline intervals are merged
+before clipping cuts. Projection protects sloped/overhanging walls conservatively
+at all depths; it does not promise constant cutter engagement.
