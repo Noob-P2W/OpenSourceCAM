@@ -30,7 +30,7 @@ fn job(strategy: Strategy) -> Project {
     op.height = 6.;
     op.settings.step_down = Some(1.);
     op.settings.precleared = true;
-    if strategy == Strategy::SmoothRough {
+    if matches!(strategy, Strategy::SmoothRough | Strategy::AreaRough) {
         op.width = 30.;
         op.height = 25.;
     }

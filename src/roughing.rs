@@ -14,7 +14,7 @@ pub(crate) struct Clearing {
     ny: usize,
     dx: f64,
     dy: f64,
-    origin: f64,
+    origin: [f64; 2],
     spacing: usize,
 }
 impl Clearing {
@@ -53,14 +53,78 @@ impl Clearing {
             ny,
             dx,
             dy,
-            origin: -margin,
+            origin: [-margin; 2],
             spacing,
+        })
+    }
+    /// Reuse bounded offset loops and safe within-region links for planar clearing.
+    pub(crate) fn planar(
+        rings: &[Vec<[f64; 3]>],
+        obstacles: &[Vec<[f64; 3]>],
+        radius: f64,
+        stepover: f64,
+        resolution: f64,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Self, String> {
+        let outer = rings.first().ok_or("Select a machining boundary")?;
+        let lo: [f64; 2] =
+            std::array::from_fn(|a| outer.iter().map(|p| p[a]).fold(f64::INFINITY, f64::min));
+        let hi: [f64; 2] =
+            std::array::from_fn(|a| outer.iter().map(|p| p[a]).fold(f64::NEG_INFINITY, f64::max));
+        let step = resolution.min(stepover / (2. * 2_f64.sqrt()));
+        if !step.is_finite() || step <= 0. {
+            return Err("Choose a positive roughing resolution".into());
+        }
+        let nx = ((hi[0] - lo[0]) / step).ceil() as usize;
+        let ny = ((hi[1] - lo[1]) / step).ceil() as usize;
+        if nx == 0
+            || ny == 0
+            || nx > 2048
+            || ny > 2048
+            || nx.checked_mul(ny).is_none_or(|n| n > 262144)
+        {
+            return Err(
+                "2D offset grid exceeds 262,144 cells; increase toolpath resolution or stepover"
+                    .into(),
+            );
+        }
+        let dx = (hi[0] - lo[0]) / nx as f64;
+        let dy = (hi[1] - lo[1]) / ny as f64;
+        // Extra cell diagonal protects corners and the distance from a raster sample
+        // to the nearest grid-row centre. Every graph edge stays in free cells.
+        let spans = crate::planar::raster_obstacles(rings, radius + dx.hypot(dy), dy, obstacles)?;
+        let mut heights = vec![f64::INFINITY; nx * ny];
+        for [a, b] in spans {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("Machining cancelled".into());
+            }
+            let y = (((a[1] - lo[1]) / dy).floor() as usize).min(ny - 1);
+            let left = a[0].min(b[0]);
+            let right = a[0].max(b[0]);
+            for x in 0..nx {
+                let cx = lo[0] + (x as f64 + 0.5) * dx;
+                if cx >= left && cx <= right {
+                    heights[y * nx + x] = f64::NEG_INFINITY;
+                }
+            }
+        }
+        if heights.iter().all(|v| *v == f64::INFINITY) {
+            return Err("No cutter-sized clearing region remains at this depth".into());
+        }
+        Ok(Self {
+            heights,
+            nx,
+            ny,
+            dx,
+            dy,
+            origin: lo,
+            spacing: (stepover / (dx.max(dy) * 2_f64.sqrt())).floor().max(1.) as usize,
         })
     }
     fn point(&self, node: usize, z: f64) -> Point3 {
         Point3 {
-            x: self.origin + (node % (self.nx + 1)) as f64 * self.dx,
-            y: self.origin + (node / (self.nx + 1)) as f64 * self.dy,
+            x: self.origin[0] + (node % (self.nx + 1)) as f64 * self.dx,
+            y: self.origin[1] + (node / (self.nx + 1)) as f64 * self.dy,
             z,
         }
     }

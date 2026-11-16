@@ -380,9 +380,23 @@ change; unchanged allowances preserve manual dimensions. Fitting margins persist
 with the project and undo history. Incremental simulation strips are retained on
 arrival so coalesced browser paints cannot discard stock-removal updates.
 
-The 2.5D Roughing group includes Area roughing: pick a horizontal target face
-(or enter a numeric region/depth), clear from stock top in stepdowns, and preserve
-face islands and raised model geometry. Radial and axial stock allowances apply;
-negative offsets below the target face are rejected. The conservative raised-feature
-projection can leave additional stock near sloping walls. Slot has its own through-slot
-illustration. Software solid rendering no longer skips imported workpiece facets.
+The 2.5D Roughing group includes **2D offset clearing**. Select a horizontal target
+face or enter a numeric region/depth. Each stepdown recomputes raised-model
+obstacles, generates nested offset contours, and links contours within connected
+free regions. Holes below the cut plane do not become solid protected columns.
+Manual exclusion rings and stock allowances remain supported. Effective stepover
+is capped at 50% of cutter diameter for core coverage. Older linked
+`area_rough` operations use the corrected calculation without changing saved IDs.
+Toolpath resolution controls conservative grid residuals; calculation remains
+bounded and is not an adaptive/constant-engagement algorithm.
+
+Operation labels use machining terms consistently: Face milling, 2D pocket
+clearing (rectangular/circular geometry), 2D contour (internal/external), Outside
+clearing, Slot milling, Planar finishing, Bore milling, Circular milling, Thread
+milling, Engraving, Chamfer milling, Drilling, Peck drilling, 3D offset clearing
+and Parallel finishing. Strategy IDs and user-supplied operation names remain
+portable. Legacy trochoidal pocket/trace strategies retain their generators and
+accurate labels, without being added back to the creation ribbon.
+
+Slot retains its own through-slot illustration. Software solid rendering
+preserves all imported workpiece triangles.

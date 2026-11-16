@@ -51,10 +51,18 @@ fn face_region(op: &Operation) -> Result<FaceRegion, String> {
         level + op.settings.height_offset.unwrap_or(0.) + op.settings.axial_allowance,
     ))
 }
-// Project all geometry above the target plane, including tapered/overhanging walls.
-// Keeping this envelope at every layer is conservative and protects raised features.
-fn area_paths(p: &Project, op: &Operation) -> Result<Vec<[[f64; 2]; 2]>, String> {
-    let (rings, z) = face_region(op)?;
+// Project geometry above the current cut plane. Recompute at each stepdown so
+// upper passes clear over lower features while keeping sloped walls protected.
+fn area_paths(
+    p: &Project,
+    op: &Operation,
+    level: f64,
+    cancel: &AtomicBool,
+) -> Result<Vec<Vec<Point3>>, String> {
+    let (mut rings, z) = face_region(op)?;
+    if op.model_link.is_some() {
+        rings.truncate(1);
+    }
     let tool = p.operation_tool(op)?;
     let mut obstacles = Vec::new();
     if let Some(part) = &p.part {
@@ -63,7 +71,7 @@ fn area_paths(p: &Project, op: &Operation) -> Result<Vec<[[f64; 2]; 2]>, String>
                 .iter()
                 .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
                 .collect();
-            let floor = rings[0][0][2];
+            let floor = level - op.settings.axial_allowance;
             if points.iter().all(|q| q[2] <= floor + 1e-6) {
                 continue;
             }
@@ -85,14 +93,19 @@ fn area_paths(p: &Project, op: &Operation) -> Result<Vec<[[f64; 2]; 2]>, String>
         }
     }
     if z > 1e-7 {
-        return Err("Area roughing bottom must be at or below stock top".into());
+        return Err("2D offset clearing bottom must be at or below stock top".into());
     }
-    crate::planar::raster_obstacles(
+    let clearing = crate::roughing::Clearing::planar(
         &rings,
-        tool.diameter / 2. + op.settings.radial_allowance,
-        tool.diameter * tool.step_over,
         &obstacles,
-    )
+        tool.diameter / 2. + op.settings.radial_allowance,
+        tool.diameter * tool.step_over.min(0.5),
+        op.settings.surface_step.unwrap_or(0.25),
+        cancel,
+    )?;
+    let mut budget = crate::surface::Budget::new(cancel);
+    let reverse = op.settings.direction == Direction::Clockwise;
+    clearing.layer(level, reverse, &mut budget)
 }
 fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
     let points = curve(op);
@@ -136,7 +149,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
     if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
         if op.strategy == Strategy::SurfaceSmooth && !op.settings.precleared {
             return Err(
-                "Confirm the selected face is already rough-machined before surface smoothing"
+                "Confirm the selected face is already rough-machined before planar finishing"
                     .into(),
             );
         }
@@ -162,12 +175,12 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         }
         if op.strategy == Strategy::AreaRough {
             if op.settings.height_offset.unwrap_or(0.) < 0. {
-                return Err("Area roughing cannot cut below the selected face".into());
+                return Err("2D offset clearing cannot cut below the selected face".into());
             }
             if (-z / tool.step_down).ceil() > MAX_LAYERS as f64 {
                 return Err("Too many area roughing depth passes".into());
             }
-            area_paths(p, op)?;
+            area_paths(p, op, z, &AtomicBool::new(false))?;
         } else {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
         }
@@ -458,10 +471,10 @@ pub(super) fn generate(
     };
     if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
         let (rings, z) = face_region(op)?;
-        let paths = if op.strategy == Strategy::AreaRough {
-            area_paths(p, op)?
-        } else {
+        let paths = if op.strategy == Strategy::SurfaceSmooth {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?
+        } else {
+            Vec::new()
         };
         let layers = if op.strategy == Strategy::AreaRough {
             ((-z / tool.step_down).ceil() as usize).max(1)
@@ -474,6 +487,19 @@ pub(super) fn generate(
             } else {
                 z
             };
+            if op.strategy == Strategy::AreaRough {
+                for chain in area_paths(p, op, level, cancel)? {
+                    if let Some(first) = chain.first() {
+                        b.enter(first.x, first.y, level)?;
+                        for q in chain.iter().skip(1) {
+                            cancelled(cancel)?;
+                            b.feed_cut(q.x, q.y, level)?;
+                        }
+                        b.retract()?;
+                    }
+                }
+                continue;
+            }
             for &[mut a, mut c] in &paths {
                 cancelled(cancel)?;
                 if (op.settings.raster == crate::operation::Raster::PositiveX && a[0] > c[0])

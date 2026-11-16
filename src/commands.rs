@@ -427,7 +427,7 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                 },
             );
             op.settings.path = loops.remove(0);
-            op.settings.islands = loops;
+            op.settings.islands = if roughing { Vec::new() } else { loops };
             op.settings.closed = true;
             op.settings.height_offset = Some(0.);
             crate::machining::link(&mut op, part);

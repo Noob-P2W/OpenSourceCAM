@@ -375,6 +375,12 @@ fn area_roughing_steps_down_without_cutting_islands_or_floor() {
             }
         }
     }
+    let entries = path
+        .moves
+        .iter()
+        .filter(|m| m.motion == Motion::Plunge)
+        .count();
+    assert!(entries<=6,"Connected offset regions should stay down instead of plunging for every raster strip: {entries}");
     levels.sort_by(f64::total_cmp);
     assert_eq!(levels, vec![-4.5, -4., -2.]);
     p.operations[0].settings.height_offset = Some(-0.1);
@@ -438,20 +444,137 @@ fn area_roughing_automatically_protects_imported_raised_geometry() {
     p.operations.push(op);
     let path = cam::generate(&p).unwrap();
     let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    let mut cleared_above_lower_geometry = false;
     for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        let mut protected = Vec::new();
+        for j in 0..3 {
+            let a = triangle[j];
+            let b = triangle[(j + 1) % 3];
+            if a[2] > m.to.z {
+                protected.push(a);
+            }
+            if (a[2] > m.to.z) != (b[2] > m.to.z) {
+                let t = (m.to.z - a[2]) / (b[2] - a[2]);
+                protected.push(std::array::from_fn(|k| a[k] + t * (b[k] - a[k])));
+            }
+        }
         for i in 0..=40 {
             let t = i as f64 / 40.;
             let q = [
                 m.from.x + (m.to.x - m.from.x) * t,
                 m.from.y + (m.to.y - m.from.y) * t,
             ];
-            assert!(!opensourcecam::planar::inside(q, &triangle));
-            for j in 0..3 {
+            if opensourcecam::planar::inside(q, &triangle) {
+                cleared_above_lower_geometry = true;
+            }
+            assert!(!opensourcecam::planar::inside(q, &protected));
+            for j in 0..protected.len() {
                 assert!(
-                    opensourcecam::planar::distance(q, triangle[j], triangle[(j + 1) % 3])
-                        >= radius - 1e-6
+                    opensourcecam::planar::distance(
+                        q,
+                        protected[j],
+                        protected[(j + 1) % protected.len()]
+                    ) >= radius - 1e-6
                 );
             }
         }
+    }
+    assert!(
+        cleared_above_lower_geometry,
+        "Upper layers must clear over lower model geometry"
+    );
+}
+
+#[test]
+fn strategy_names_describe_methods_without_changing_saved_ids() {
+    for (strategy, label, id) in [
+        (Strategy::AreaRough, "2D offset clearing", "area_rough"),
+        (
+            Strategy::SurfaceRough,
+            "3D offset clearing",
+            "surface_rough",
+        ),
+        (
+            Strategy::SurfaceSmooth,
+            "Planar finishing",
+            "surface_smooth",
+        ),
+        (Strategy::Pocket, "2D pocket clearing", "pocket"),
+        (Strategy::Facing, "Face milling", "facing"),
+        (Strategy::Bore, "Bore milling", "bore"),
+    ] {
+        assert_eq!(strategy.label(), label);
+        assert_eq!(serde_json::to_value(strategy).unwrap(), id);
+    }
+    assert!(Strategy::ALL
+        .iter()
+        .all(|s| !s.label().to_lowercase().contains("adaptive")));
+}
+
+#[test]
+fn offset_clearing_covers_the_core_at_large_requested_stepover() {
+    let mut p = job();
+    let mut op = commands::operation_template(&p, Strategy::AreaRough);
+    op.x = 10.;
+    op.y = 10.;
+    op.width = 30.;
+    op.height = 25.;
+    op.depth = 3.;
+    op.settings.step_over_percent = Some(90.);
+    p.operations.push(op);
+    let path = cam::generate(&p).unwrap();
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    for x in 14..=36 {
+        for y in 14..=31 {
+            let distance = path
+                .moves
+                .iter()
+                .filter(|m| m.motion == Motion::Cut && (m.to.z + 3.).abs() < 1e-8)
+                .map(|m| {
+                    opensourcecam::planar::distance(
+                        [x as f64, y as f64],
+                        [m.from.x, m.from.y, m.from.z],
+                        [m.to.x, m.to.y, m.to.z],
+                    )
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                distance <= radius + 1e-6,
+                "Uncleared core at {x},{y}: {distance}"
+            );
+        }
+    }
+}
+
+#[test]
+fn offset_clearing_milling_direction_matches_spindle_and_boundary_side() {
+    for (mode, positive) in [
+        (MillingMode::Climb, true),
+        (MillingMode::Conventional, false),
+    ] {
+        let mut p = job();
+        let mut op = commands::operation_template(&p, Strategy::AreaRough);
+        op.x = 10.;
+        op.y = 10.;
+        op.width = 30.;
+        op.height = 25.;
+        op.depth = 1.;
+        op.settings.milling_mode = Some(mode);
+        p.operations.push(op);
+        let path = cam::generate(&p).unwrap();
+        let mut start = None;
+        let mut area = 0.;
+        for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+            let first = *start.get_or_insert(m.from);
+            area += m.from.x * m.to.y - m.to.x * m.from.y;
+            if (m.to.x - first.x).abs() < 1e-7 && (m.to.y - first.y).abs() < 1e-7 {
+                break;
+            }
+        }
+        assert_eq!(
+            area > 0.,
+            positive,
+            "M3 climb should follow the outer clearing boundary counterclockwise"
+        );
     }
 }

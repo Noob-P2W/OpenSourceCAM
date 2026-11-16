@@ -594,7 +594,10 @@ pub fn generate_with_cancel(
                 let climb = mode == crate::operation::MillingMode::Climb;
                 let internal = matches!(
                     op.strategy,
-                    Strategy::Pocket | Strategy::CircularPocket | Strategy::InsideProfile
+                    Strategy::Pocket
+                        | Strategy::CircularPocket
+                        | Strategy::InsideProfile
+                        | Strategy::AreaRough
                 ) || (op.strategy.is_round() && !op.settings.outside)
                     || (op.strategy == Strategy::Chamfer && !op.settings.outside);
                 let cw = if op.has_chain() && !op.settings.closed {

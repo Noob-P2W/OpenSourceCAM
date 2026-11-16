@@ -359,8 +359,13 @@ fields on the WebGL path. The axis widget and drawing surface resize only when
 the relevant view state changes. These are scoped optimizations, not a claim that
 every CAM algorithm has been replaced or that arbitrary assemblies are certified.
 
-Area roughing uses bounded planar raster regions at multiple depth levels, with
-selected face holes and projected above-floor model triangles excluded by cutter
-radius plus radial allowance. Overlapping blocked scanline intervals are merged
-before clipping cuts. Projection protects sloped/overhanging walls conservatively
-at all depths; it does not promise constant cutter engagement.
+2D offset clearing uses the shared bounded offset-contour engine with a planar
+free-cell mask. Cutter-radius plus cell-diagonal dilation protects complete cells
+and their linking edges. Above-cut model triangles are clipped and projected at
+each depth, so upper layers clear over lower features. Linked face holes are not
+fixed islands: model geometry supplies obstacles at the current cut height.
+Manual exclusion rings remain protected. Contours in a connected free region link
+at cutting depth; disconnected regions retract. Overlapping blocked scanline
+intervals merge before mask construction. This is offset clearing, without a
+constant-engagement guarantee. The grid is bounded to 262,144 cells and can leave
+conservative residual stock controlled by Toolpath resolution.
