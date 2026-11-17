@@ -441,6 +441,21 @@ await task(async()=>{
  status(failed?'Saved workspace could not be loaded. It has been preserved; download it using Recover draft.':loaded.error?`Ready · Autosave unavailable: ${loaded.error.message}. Download a backup before closing.`:'Ready · All machining calculations run on this device',failed||!!loaded.error);
  $('saved').textContent=failed?'Recovery required':loaded.error?'Not saved — download a backup':saved?'Autosave restored':'No project saved yet';$('saved').dataset.state=autosaved?'saved':'error';
 });
+$('settings-apply-update').onclick=()=>$('update').click();
+$('check-updates').onclick=async()=>{
+ const button=$('check-updates'),message=$('update-check-status');button.disabled=true;message.textContent='Checking for updates…';
+ try{
+  if(!('serviceWorker'in navigator))throw Error('Updates are unavailable in this browser.');
+  if(!navigator.onLine)throw Error('You are offline. Connect to the internet to check for updates.');
+  const reg=await navigator.serviceWorker.getRegistration();
+  if(!reg)throw Error('Update service is not ready. Please retry shortly.');
+  await reg.update();
+  const installing=reg.installing;
+  const show=()=>{const available=!!(reg.waiting&&reg.active);$('settings-apply-update').hidden=!available;message.textContent=available?'An update is ready to install.':installing?.state==='redundant'?'The update download failed. Please retry.':reg.installing?'An update is downloading.':'You are up to date.';};
+  installing?.addEventListener('statechange',show);show();
+ }catch(error){message.textContent=`Could not check for updates: ${error.message}`;}
+ finally{button.disabled=false;}
+};
 if('serviceWorker'in navigator){
  let controlled=!!navigator.serviceWorker.controller,activating=false;
  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(controlled&&!activating){location.reload();return}controlled=true;$('update').hidden=true});

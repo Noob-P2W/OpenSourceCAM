@@ -435,3 +435,7 @@ horizontal regions use model-aware offset clearing with islands. Numeric geometr
 variants remain editable. Existing saved strategy identifiers and toolpath engines
 are retained. Bore, circular and thread milling retain distinct cycles, and facing,
 planar finishing and outside clearing retain their distinct machining purposes.
+
+Software settings includes a manual Check for updates action, with current-version,
+download, offline and failure status. A waiting update uses the existing workspace
+autosave and activation flow through Save workspace and update.
