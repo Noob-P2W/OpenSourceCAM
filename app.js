@@ -243,7 +243,7 @@ function beginPick(callback,label='Pick a face on the model',onCancel=null,previ
 $('pick-face').onclick=()=>{const resume=pickCancel;cancelPicking();if(resume)resume();else shell.resumeOperation?.()};
 async function geometryDraft(strategy,index){
  const feature=index!==undefined?geometryState.report?.features[index]:geometryState.selectedFeature;
- if(feature&&((feature.kind==='rectangular_pocket'&&['pocket','inside_profile','slot','chamfer'].includes(strategy))||(feature.kind==='circular_hole'&&['pocket','circular_pocket','bore','circular','thread','drill','drill_once'].includes(strategy))))return call('geometry',{data:{action:'feature_geometry',feature,strategy:strategy==='pocket'&&feature.kind==='circular_hole'?'circular_pocket':strategy}});
+ if(feature&&((feature.kind==='rectangular_pocket'&&['pocket','circular_pocket','inside_profile','slot','chamfer'].includes(strategy))||(feature.kind==='circular_hole'&&['pocket','circular_pocket','bore','circular','thread','drill','drill_once'].includes(strategy))))return call('geometry',{data:{action:'feature_geometry',feature,strategy}});
  if(strategy==='facing'&&geometryState.face)return call('geometry',{data:{action:'facing_draft',triangle:geometryState.face.id}});
  return null;
 }
@@ -258,7 +258,12 @@ async function pickOperation(strategy,commit,edgeMode='boundary'){
   }
   if(['surface_smooth','area_rough'].includes(strategy)){const draft=await engineCall('geometry',{data:{action:'smooth_face_draft',roughing:strategy==='area_rough',...ray}});const face=await engineCall('geometry',{data:{action:'pick',...ray}});return {draft,selection:face};}
   if(strategy==='facing'){const face=await engineCall('geometry',{data:{action:'pick',...ray}});return {draft:await engineCall('geometry',{data:{action:'facing_draft',triangle:face.id}}),selection:face};}
-  const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});return {draft:await engineCall('geometry',{data:{action:'feature_geometry',feature,strategy:strategy==='pocket'&&feature.kind==='circular_hole'?'circular_pocket':strategy}}),selection:featureHighlight(feature)};
+  if(['pocket','circular_pocket'].includes(strategy)){
+   try{const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});return {draft:await engineCall('geometry',{data:{action:'feature_geometry',feature,strategy}}),selection:featureHighlight(feature)}}catch{
+    const draft=await engineCall('geometry',{data:{action:'smooth_face_draft',roughing:true,...ray}});const face=await engineCall('geometry',{data:{action:'pick',...ray}});return {draft,selection:face};
+   }
+  }
+  const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});return {draft:await engineCall('geometry',{data:{action:'feature_geometry',feature,strategy}}),selection:featureHighlight(feature)};
  };
  const connected=edgeStrategies.includes(strategy)&&edgeMode==='connected';document.body.dataset.edgePicking=String(edgeStrategies.includes(strategy));
  beginPick(async ray=>{const result=await query(ray,connected);highlight=result.selection;chainDraft=result.draft;draw();if(connected){$('pick-finish').dataset.ready='true';$('pick-finish').disabled=false;return false;}await commit(result.draft);},connected?'Select connected edges, then Finish selection':edgeStrategies.includes(strategy)?'Select a highlighted edge or boundary chain':['surface_smooth','area_rough'].includes(strategy)?'Select a highlighted horizontal target face':'Select the highlighted machining feature',null,async ray=>(await query(ray,connected)).selection);
