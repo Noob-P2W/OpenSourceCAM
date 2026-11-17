@@ -26,8 +26,11 @@ export const websession_restore_history: (a: number, b: number, c: number, d: nu
 export const websession_run: (a: number, b: number, c: number, d: number) => void;
 export const websession_save_project: (a: number, b: number) => void;
 export const websession_simulate: (a: number, b: number, c: number, d: number, e: number) => void;
+export const websession_simulate_stock: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const websession_stock_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const websession_stock_frame_mode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
 export const websession_stock_obj: (a: number, b: number, c: number, d: number, e: number) => void;
+export const websession_stock_obj_mode: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const websession_stock_preview: (a: number, b: number, c: number, d: number) => void;
 export const websession_take_stock_vertices: (a: number, b: number) => void;
 export const websession_tool_library: (a: number, b: number) => void;

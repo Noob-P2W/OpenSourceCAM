@@ -19,8 +19,11 @@ export class WebSession {
     run(action: string): string;
     save_project(): string;
     simulate(progress: number, resolution: number, budget: number): string;
+    simulate_stock(progress: number, resolution: number, budget: number, conservative: boolean): string;
     stock_frame(progress: number, resolution: number, epoch: number, limit: number): string;
+    stock_frame_mode(progress: number, resolution: number, epoch: number, limit: number, conservative: boolean): string;
     stock_obj(progress: number, resolution: number, budget: number): string;
+    stock_obj_mode(progress: number, resolution: number, budget: number, conservative: boolean): string;
     stock_preview(progress: number, resolution: number): string;
     take_stock_vertices(): Float32Array;
     tool_library(): string;
@@ -82,8 +85,11 @@ export interface InitOutput {
     readonly websession_run: (a: number, b: number, c: number, d: number) => void;
     readonly websession_save_project: (a: number, b: number) => void;
     readonly websession_simulate: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly websession_simulate_stock: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly websession_stock_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly websession_stock_frame_mode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly websession_stock_obj: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly websession_stock_obj_mode: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly websession_stock_preview: (a: number, b: number, c: number, d: number) => void;
     readonly websession_take_stock_vertices: (a: number, b: number) => void;
     readonly websession_tool_library: (a: number, b: number) => void;

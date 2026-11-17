@@ -452,6 +452,37 @@ export class WebSession {
     /**
      * @param {number} progress
      * @param {number} resolution
+     * @param {number} budget
+     * @param {boolean} conservative
+     * @returns {string}
+     */
+    simulate_stock(progress, resolution, budget, conservative) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.websession_simulate_stock(retptr, this.__wbg_ptr, progress, resolution, budget, conservative);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeObject(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {number} progress
+     * @param {number} resolution
      * @param {number} epoch
      * @param {number} limit
      * @returns {string}
@@ -483,6 +514,38 @@ export class WebSession {
     /**
      * @param {number} progress
      * @param {number} resolution
+     * @param {number} epoch
+     * @param {number} limit
+     * @param {boolean} conservative
+     * @returns {string}
+     */
+    stock_frame_mode(progress, resolution, epoch, limit, conservative) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.websession_stock_frame_mode(retptr, this.__wbg_ptr, progress, resolution, epoch, limit, conservative);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeObject(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {number} progress
+     * @param {number} resolution
      * @param {number} budget
      * @returns {string}
      */
@@ -492,6 +555,37 @@ export class WebSession {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             wasm.websession_stock_obj(retptr, this.__wbg_ptr, progress, resolution, budget);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeObject(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {number} progress
+     * @param {number} resolution
+     * @param {number} budget
+     * @param {boolean} conservative
+     * @returns {string}
+     */
+    stock_obj_mode(progress, resolution, budget, conservative) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.websession_stock_obj_mode(retptr, this.__wbg_ptr, progress, resolution, budget, conservative);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);

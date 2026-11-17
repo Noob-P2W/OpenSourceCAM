@@ -9,7 +9,7 @@ function importCad(file,id){return new Promise((resolve,reject)=>{
  worker.onmessage=({data})=>{if(data.progress){self.postMessage({id,progress:data.progress});return}if(data.error){finish(Error(data.error));return}try{const source=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);finish(null,JSON.parse(core.cad_project(file.name,source,data.format,JSON.stringify(data.mesh),JSON.stringify(data.bodies||[]))))}catch(error){finish(error)}};
  worker.postMessage(file);
 })}
-self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, epoch, budget, tool_id, index, history, strategy, data}}) => {
+self.onmessage = async ({data: {id, action, project, file, inches, edit, role, options, planner, progress, resolution, epoch, budget, conservative, tool_id, index, history, strategy, data}}) => {
   try {
     await ready;
     let value;let transfer=[];
@@ -23,9 +23,9 @@ self.onmessage = async ({data: {id, action, project, file, inches, edit, role, o
     else if(action==='plan-model') value=JSON.parse(session.plan(planner,JSON.stringify(options)));
     else if(action==='tool-preview') value=JSON.parse(session.tool_preview(BigInt(tool_id)));
     else if(action==='playback-tool') value=JSON.parse(session.playback_tool(index));
-    else if(action==='stock-preview'){value=JSON.parse(session.stock_frame(progress,resolution,epoch,budget));value.vertices=session.take_stock_vertices();transfer=[value.vertices.buffer]}
-    else if(action==='simulate-current') value=JSON.parse(session.simulate(progress,resolution,budget));
-    else if(action==='stock-obj') value=session.stock_obj(progress,resolution,budget);
+    else if(action==='stock-preview'){value=JSON.parse(session.stock_frame_mode(progress,resolution,epoch,budget,!!conservative));value.vertices=session.take_stock_vertices();transfer=[value.vertices.buffer]}
+    else if(action==='simulate-current') value=JSON.parse(session.simulate_stock(progress,resolution,budget,!!conservative));
+    else if(action==='stock-obj') value=session.stock_obj_mode(progress,resolution,budget,!!conservative);
     else if(action==='machine-profile') value=session.machine_profile();
     else if(action==='tool-library') value=session.tool_library();
     else if(action==='history-checkpoint') value=session.history_checkpoint();
