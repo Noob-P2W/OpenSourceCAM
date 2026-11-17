@@ -411,3 +411,16 @@ feed applies without spring passes. Circular wall passes have tangential leads
 per depth; pocket entry honors ramp preset angle/feed. Below-stock edge finishing
 requires an exposed-surface confirmation. Fixed-depth V grooves are labeled
 Contour engraving, distinct from variable-width V-carving.
+
+## Remaining stock and native arcs
+
+Shared Rust generation tracks actual preceding cutter sweeps, validates automatic
+wall/face/edge preparation and supports optional remaining-stock rapid clearance.
+The browser exposes the clearance gap and G1-only fallback; native UI additions
+remain paused. Linked outside clearing uses the complete model silhouette and
+exterior-connected free regions; numeric geometry retains its rectangle. All four
+implemented milling posts emit validated analytical G2/G3 circles/helices. Browser
+simulation defaults to conservative whole-cell stock for rectangular blanks, with
+mode-aware playback and OBJ export. Nonrectangular display stays sampled and
+thread/undercut simulation remains unsupported. See
+[remaining stock and arcs](REMAINING_STOCK_AND_ARCS.md).

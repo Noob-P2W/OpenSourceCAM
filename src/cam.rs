@@ -54,7 +54,15 @@ pub struct Move {
 }
 
 #[derive(Clone, Debug)]
+pub struct ArcSpan {
+    pub start: usize,
+    pub end: usize,
+    pub center: [f64; 2],
+    pub sweep: f64,
+}
+#[derive(Clone, Debug)]
 pub struct Toolpath {
+    pub arcs: Vec<ArcSpan>,
     pub moves: Vec<Move>,
     pub cut_length: f64,
     pub rapid_length: f64,
@@ -70,6 +78,12 @@ struct Builder {
     feed: f64,
     plunge: f64,
     rapid: f64,
+    remaining: crate::material::RemainingStock,
+    cutter: Option<crate::stock::Footprint>,
+    certificate_error: f64,
+    stock_clearance: Option<f64>,
+    bodies: Vec<crate::collision::Envelope>,
+    fixtures: Option<crate::collision::FixtureClearance>,
     ramp_angle: f64,
     entry_radius: f64,
     ramp_feed: f64,
@@ -101,41 +115,69 @@ impl Builder {
             }
         };
         self.path.estimated_seconds += distance / rate * 60.0;
-        self.path.moves.push(Move {
+        let movement = Move {
             feed: rate,
             from: self.position,
             to,
             motion,
             operation: self.operation,
-        });
+        };
+        self.remaining
+            .apply(&movement, self.cutter, self.certificate_error);
+        self.path.moves.push(movement);
         self.position = to;
         Ok(())
     }
 
+    fn stock_height(&mut self, a: [f64; 2], b: [f64; 2]) -> Option<f64> {
+        let mut height = f64::NEG_INFINITY;
+        for e in &self.bodies {
+            height = height.max(self.remaining.top(a, b, e.radius)? - e.low);
+        }
+        if let Some(fixtures) = &mut self.fixtures {
+            height = height.max(fixtures.top(a, b, &self.bodies)?);
+        }
+        Some(height)
+    }
     fn retract(&mut self) -> Result<(), String> {
+        let mut z = self.clearance;
+        if let Some(gap) = self.stock_clearance {
+            let q = [self.position.x, self.position.y];
+            if let Some(top) = self.stock_height(q, q) {
+                let local = (top + gap).max(self.position.z);
+                if local <= self.clearance {
+                    z = local;
+                }
+            }
+        }
+        self.go(Point3 { z, ..self.position }, Motion::Rapid)
+    }
+    fn enter(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
+        let mut travel = self.clearance;
+        if let Some(gap) = self.stock_clearance {
+            if let Some(top) = self.stock_height([self.position.x, self.position.y], [x, y]) {
+                let local = (top + gap).max(z);
+                if local <= self.clearance {
+                    travel = local;
+                }
+            }
+        }
         self.go(
             Point3 {
-                z: self.clearance,
+                z: travel,
                 ..self.position
             },
             Motion::Rapid,
-        )
-    }
-
-    fn enter(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
-        self.retract()?;
-        self.go(
-            Point3 {
-                x,
-                y,
-                z: self.clearance,
-            },
-            Motion::Rapid,
         )?;
-        // Feed from clearance. Never rapid down into unverified stock.
+        self.go(Point3 { x, y, z: travel }, Motion::Rapid)?;
+        if let Some(gap) = self.stock_clearance {
+            if let Some(top) = self.stock_height([x, y], [x, y]) {
+                let approach = (top + gap).max(z).min(travel);
+                self.go(Point3 { x, y, z: approach }, Motion::Rapid)?;
+            }
+        }
         self.go(Point3 { x, y, z }, Motion::Plunge)
     }
-
     fn cut(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
         self.go(Point3 { x, y, z }, Motion::Cut)
     }
@@ -221,15 +263,7 @@ impl Builder {
             return Err("Helix entry exceeds its turn budget".into());
         }
         self.enter(cx + radius, cy, previous)?;
-        for i in 1..=turns * segments {
-            let t = i as f64 / (turns * segments) as f64;
-            let a = std::f64::consts::TAU * turns as f64 * t;
-            self.feed_cut(
-                cx + radius * a.cos(),
-                cy + radius * a.sin(),
-                previous + (z - previous) * t,
-            )?
-        }
+        self.arc_xy([cx, cy], std::f64::consts::TAU * turns as f64, z, tolerance)?;
         self.feed_cut(x0, y0, z)
     }
     fn outside_contour(
@@ -289,19 +323,72 @@ impl Builder {
         if radius <= EPS {
             return Ok(());
         }
-        let angle =
-            (2.0 * (1.0 - (tolerance / radius).min(1.0)).acos()).min(std::f64::consts::TAU / 24.0);
-        let segments = (std::f64::consts::TAU / angle).ceil() as usize;
-        if segments > 4096 {
-            return Err(
-                "Circular path exceeds 4,096 segments per ring; increase chord tolerance".into(),
-            );
+        if ((self.position.x - x).hypot(self.position.y - y) - radius).abs() > 1e-5 {
+            return Err("Circular start is not on the commanded circle".into());
         }
-        for i in 1..=segments {
-            let a = std::f64::consts::TAU * i as f64 / segments as f64
-                * if clockwise { -1.0 } else { 1.0 };
-            let (sin, cos) = a.sin_cos();
-            self.cut(x + radius * cos, y + radius * sin, z)?;
+        self.arc_xy(
+            [x, y],
+            if clockwise {
+                -std::f64::consts::TAU
+            } else {
+                std::f64::consts::TAU
+            },
+            z,
+            tolerance,
+        )
+    }
+    fn arc_xy(
+        &mut self,
+        center: [f64; 2],
+        sweep: f64,
+        end_z: f64,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        let origin = self.position;
+        let radius = (origin.x - center[0]).hypot(origin.y - center[1]);
+        if !radius.is_finite() || radius <= EPS || !sweep.is_finite() || sweep.abs() < 1e-12 {
+            return Err("Invalid circular motion".into());
+        }
+        let angle =
+            (2. * (1. - (tolerance / radius).min(1.)).acos()).min(std::f64::consts::TAU / 24.);
+        let per_turn = (std::f64::consts::TAU / angle).ceil() as usize;
+        if per_turn > 4096 {
+            return Err("Circular path exceeds 4,096 segments per revolution".into());
+        }
+        let parts = (sweep.abs() / std::f64::consts::PI).ceil().max(1.) as usize;
+        if parts > MAX_MOVES {
+            return Err("Helical motion exceeds its turn budget".into());
+        }
+        let phase = (origin.y - center[1]).atan2(origin.x - center[0]);
+        for part in 0..parts {
+            let start = self.path.moves.len();
+            let n = (per_turn as f64 * sweep.abs() / parts as f64 / std::f64::consts::TAU)
+                .ceil()
+                .max(2.) as usize;
+            for i in 1..=n {
+                let t = (part as f64 + i as f64 / n as f64) / parts as f64;
+                let a = phase + sweep * t;
+                self.feed_cut(
+                    center[0] + radius * a.cos(),
+                    center[1] + radius * a.sin(),
+                    origin.z + (end_z - origin.z) * t,
+                )?;
+            }
+            let end = self.path.moves.len();
+            if end - start == n
+                && self.path.moves[start..end].iter().all(|m| {
+                    m.motion == Motion::Cut
+                        && (m.feed - self.path.moves[start].feed).abs()
+                            < 1e-7 * self.path.moves[start].feed.max(1.)
+                })
+            {
+                self.path.arcs.push(ArcSpan {
+                    start,
+                    end,
+                    center,
+                    sweep: sweep / parts as f64,
+                });
+            }
         }
         Ok(())
     }
@@ -334,6 +421,17 @@ pub fn validate_cutting_tool(tool: &crate::model::Tool) -> Result<(), String> {
 
 /// Project validity, including geometry-only projects that have no toolpath yet.
 pub fn validate_setup(project: &Project) -> Result<(), String> {
+    validate_setup_geometry(project)?;
+    if project
+        .operations
+        .iter()
+        .any(|op| op.enabled && milling2d::needs_stock_proof(op))
+    {
+        generate(project)?;
+    }
+    Ok(())
+}
+fn validate_setup_geometry(project: &Project) -> Result<(), String> {
     if project.format_version != FORMAT_VERSION {
         return Err("Unsupported project format version".into());
     }
@@ -586,8 +684,8 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate(project: &Project) -> Result<(), String> {
-    validate_setup(project)?;
+fn validate_for_generation(project: &Project) -> Result<(), String> {
+    validate_setup_geometry(project)?;
     if !project.process.supports_toolpaths() {
         return Err(format!(
             "{} toolpaths and postprocessing are not implemented yet",
@@ -598,6 +696,10 @@ pub fn validate(project: &Project) -> Result<(), String> {
         return Err("Create a machining plan or add and enable an operation".into());
     }
     Ok(())
+}
+
+pub fn validate(project: &Project) -> Result<(), String> {
+    generate(project).map(|_| ())
 }
 
 pub fn generate(project: &Project) -> Result<Toolpath, String> {
@@ -629,10 +731,24 @@ pub fn generate_with_cancel(
         }
         return generate_with_cancel(&resolved, cancel);
     }
-    validate(project)?;
+    validate_for_generation(project)?;
+    if project
+        .operations
+        .iter()
+        .any(|o| o.enabled && o.strategy == Strategy::StockRough && o.model_link.is_some())
+    {
+        crate::features::validate_closed(
+            project
+                .part
+                .as_ref()
+                .ok_or("Outside clearing needs its model")?,
+            cancel,
+        )?;
+    }
     let mut surface_budget = crate::surface::Budget::new(cancel);
     let mut b = Builder {
         path: Toolpath {
+            arcs: Vec::new(),
             moves: Vec::new(),
             cut_length: 0.0,
             rapid_length: 0.0,
@@ -648,6 +764,20 @@ pub fn generate_with_cancel(
         clearance: project.travel_clearance(),
         feed: project.tool.feed,
         plunge: project.tool.plunge,
+        remaining: crate::material::RemainingStock::new(project),
+        cutter: None,
+        certificate_error: 0.,
+        stock_clearance: None,
+        bodies: Vec::new(),
+        fixtures: if project
+            .operations
+            .iter()
+            .any(|o| o.enabled && o.settings.stock_clearance.is_some())
+        {
+            Some(crate::collision::FixtureClearance::build(project, cancel)?)
+        } else {
+            None
+        },
         ramp_angle: 3.,
         entry_radius: project.tool.diameter / 4.,
         ramp_feed: project.tool.feed,
@@ -665,6 +795,20 @@ pub fn generate_with_cancel(
         b.clearance = op.settings.clearance.unwrap_or(project.clearance);
         b.feed = tool.feed;
         b.plunge = tool.plunge;
+        milling2d::verify_stock(project, op, index, &mut b.remaining)
+            .map_err(|e| format!("Operation {} ({}): {e}", index + 1, op.name))?;
+        b.cutter = crate::stock::footprint(project, index)?;
+        b.certificate_error = op.settings.path_tolerance.unwrap_or(0.01) + 0.0002;
+        b.stock_clearance = op.settings.stock_clearance;
+        b.bodies = if b.stock_clearance.is_some() {
+            crate::collision::envelopes(project, index)?
+        } else {
+            Vec::new()
+        };
+        if b.stock_clearance.is_some_and(|g| g > b.clearance) {
+            return Err("Stock clearance gap cannot exceed operation clearance".into());
+        }
+
         let preset = project
             .library_tool(Some(op))?
             .map(|t| t.preset(op.preset_id))
@@ -694,6 +838,7 @@ pub fn generate_with_cancel(
         if op.strategy.is_new_2d() || op.has_chain() {
             milling2d::generate(project, op, index, &mut b, cancel)?;
             b.clearance = project.travel_clearance();
+            b.stock_clearance = None;
             b.retract()?;
             continue;
         }
@@ -726,6 +871,7 @@ pub fn generate_with_cancel(
                     }
                 }
                 b.clearance = project.travel_clearance();
+                b.stock_clearance = None;
                 b.retract()?;
                 continue;
             }
@@ -761,6 +907,7 @@ pub fn generate_with_cancel(
                 }
             }
             b.clearance = project.travel_clearance();
+            b.stock_clearance = None;
             b.retract()?;
             continue;
         }
@@ -831,9 +978,21 @@ pub fn generate_with_cancel(
                 )?;
             }
             b.clearance = project.travel_clearance();
+            b.stock_clearance = None;
             b.retract()?;
             continue;
         }
+        // The complete exterior silhouette is independent of cut height. Build
+        // its offset chains once, then reuse XY geometry at every axial level.
+        let exterior = if layers > 0
+            && op.strategy == Strategy::StockRough
+            && op.model_link.is_some()
+            && project.part.is_some()
+        {
+            Some(milling2d::model_exterior(project, op, cancel)?)
+        } else {
+            None
+        };
         for layer in 1..=layers {
             let z = -(top + layer as f64 * tool.step_down).min(depth);
             if op.strategy == Strategy::Facing {
@@ -881,6 +1040,10 @@ pub fn generate_with_cancel(
                 }
                 b.feed = feed;
                 b.retract()?;
+                continue;
+            }
+            if let Some(chains) = &exterior {
+                milling2d::clear_model_exterior(chains, z, &mut b, cancel)?;
                 continue;
             }
             if op.strategy == Strategy::StockRough {
@@ -1119,6 +1282,7 @@ pub fn generate_with_cancel(
             b.retract()?;
         }
         b.clearance = project.travel_clearance();
+        b.stock_clearance = None;
         b.retract()?;
     }
     b.retract()?;

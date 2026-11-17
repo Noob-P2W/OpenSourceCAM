@@ -161,7 +161,7 @@ fn helix_pitch_and_hand_are_preserved() {
 fn cycles_reject_uncleared_bores_bad_tools_pitch_and_unsupported_chains() {
     let mut p = job(Strategy::Bore);
     p.operations[0].settings.precleared = false;
-    assert!(cam::generate(&p).unwrap_err().contains("already cleared"));
+    assert!(cam::generate(&p).unwrap_err().contains("not proven clear"));
     let mut p = job(Strategy::Thread);
     p.operations[0].settings.pitch = Some(2.);
     assert!(cam::generate(&p).unwrap_err().contains("pitch"));

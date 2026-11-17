@@ -54,7 +54,7 @@ pub fn path_value(path: &cam::Toolpath) -> Value {
         elapsed+=m.from.distance(m.to)/m.feed*60.;
         json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid,"operation":m.operation,"start_seconds":start,"end_seconds":elapsed})
     }).collect();
-    json!({"moves":moves,"seconds":path.estimated_seconds,"cut":path.cut_length})
+    json!({"moves":moves,"seconds":path.estimated_seconds,"cut":path.cut_length,"analytical_arcs":path.arcs.len()})
 }
 /// A bounded path cache owned by an editing adapter; discard after every edit.
 /// Geometry, cutter footprints and partial-move removal remain in the shared core.
@@ -66,6 +66,7 @@ struct FrameCache {
     grid: stock::Grid,
     resolution: usize,
     epoch: u32,
+    conservative: bool,
     triangles: Vec<usize>,
 }
 pub struct StockFrame {
@@ -87,18 +88,34 @@ impl PlaybackPreview {
         epoch: u32,
         limit: u64,
     ) -> Result<StockFrame, String> {
+        self.frame_mode(project, progress, resolution, epoch, limit, false)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn frame_mode(
+        &self,
+        project: &Project,
+        progress: f64,
+        resolution: usize,
+        epoch: u32,
+        limit: u64,
+        conservative: bool,
+    ) -> Result<StockFrame, String> {
         if ![50_000_000, 100_000_000, 200_000_000].contains(&limit) {
             return Err("Choose a supported simulation calculation budget".into());
         }
         let mut cache = self.frame.borrow_mut().take();
         let reset = cache.as_ref().is_none_or(|c| {
-            c.epoch != epoch || c.resolution != resolution || progress < c.grid.progress
+            c.epoch != epoch
+                || c.resolution != resolution
+                || c.conservative != conservative
+                || progress < c.grid.progress
         });
         if reset {
             cache = Some(FrameCache {
-                grid: stock::Grid::new(project, resolution)?,
+                grid: stock::Grid::new_mode(project, resolution, conservative)?,
                 resolution,
                 epoch,
+                conservative,
                 triangles: vec![0; resolution.div_ceil(8)],
             });
         }
@@ -138,7 +155,7 @@ impl PlaybackPreview {
             grid.dirty[rows].fill(false);
         }
         let (removed, remaining) = grid.volumes();
-        let metadata = json!({"reset":reset,"epoch":epoch,"resolution":resolution,"patches":patches,"evaluations":grid.evaluations,"visited_cells":grid.visited,"summary":{"resolution":[grid.nx,grid.ny],"cell_size":[grid.dx,grid.dy],"progress":progress,"removed_volume_mm3":removed,"remaining_volume_mm3":remaining}});
+        let metadata = json!({"reset":reset,"epoch":epoch,"resolution":resolution,"patches":patches,"evaluations":grid.evaluations,"visited_cells":grid.visited,"summary":{"resolution":[grid.nx,grid.ny],"cell_size":[grid.dx,grid.dy],"progress":progress,"conservative":grid.conservative,"remaining_upper_bound_mm3":grid.remaining_bound(),"removed_volume_mm3":removed,"remaining_volume_mm3":remaining}});
         *self.frame.borrow_mut() = Some(state);
         Ok(StockFrame { metadata, vertices })
     }
@@ -477,15 +494,22 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                     "Choose outside clearing or outside contour for the part exterior".into(),
                 );
             }
-            let e = crate::features::recognize_project(project)?
-                .exterior
-                .ok_or("The selected setup does not have a supported rectangular exterior")?;
+            let (min, max, bottom) = if strategy == Strategy::StockRough {
+                crate::features::validate_closed(part, &AtomicBool::new(false))?;
+                let b = part.bounds();
+                ([b.min[0], b.min[1]], [b.max[0], b.max[1]], b.min[2])
+            } else {
+                let e = crate::features::recognize_project(project)?
+                    .exterior
+                    .ok_or("The selected setup does not have a supported rectangular exterior")?;
+                (e.min, e.max, e.bottom_z)
+            };
             let mut op = operation_template(project, strategy);
-            op.x = e.min[0];
-            op.y = e.min[1];
-            op.width = e.max[0] - e.min[0];
-            op.height = e.max[1] - e.min[1];
-            op.depth = -e.bottom_z;
+            op.x = min[0];
+            op.y = min[1];
+            op.width = max[0] - min[0];
+            op.height = max[1] - min[1];
+            op.depth = -bottom;
             op.settings.machining_face = project.setup_face;
             crate::machining::link(&mut op, part);
             Ok(json!(op))
@@ -505,14 +529,24 @@ pub fn simulate_project_budget(
     resolution: usize,
     limit: u64,
 ) -> Result<Value, String> {
+    simulate_project_mode(project, progress, resolution, limit, false)
+}
+pub fn simulate_project_mode(
+    project: &Project,
+    progress: f64,
+    resolution: usize,
+    limit: u64,
+    conservative: bool,
+) -> Result<Value, String> {
     let path = post::checked_geometry_path(project)?;
-    let sim = stock::simulate_budget(
+    let sim = stock::simulate_mode(
         project,
         &path,
         progress,
         resolution,
         &AtomicBool::new(false),
         limit,
+        conservative,
     )?;
     Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
 }
@@ -526,14 +560,24 @@ pub fn stock_obj_budget(
     resolution: usize,
     limit: u64,
 ) -> Result<String, String> {
+    stock_obj_mode(project, progress, resolution, limit, false)
+}
+pub fn stock_obj_mode(
+    project: &Project,
+    progress: f64,
+    resolution: usize,
+    limit: u64,
+    conservative: bool,
+) -> Result<String, String> {
     let path = post::checked_geometry_path(project)?;
-    let simulation = stock::simulate_budget(
+    let simulation = stock::simulate_mode(
         project,
         &path,
         progress,
         resolution,
         &AtomicBool::new(false),
         limit,
+        conservative,
     )?;
     stock::obj_data(&simulation)
 }

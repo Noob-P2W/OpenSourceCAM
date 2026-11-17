@@ -224,7 +224,7 @@ fn post_has_explicit_modes_clearance_first_and_no_comment_injection() {
     let mut p = one(Strategy::Pocket);
     p.name = "part)\nM3 S99999\n(unsafe".into();
     let code = gcode(&p).unwrap();
-    assert!(code.contains("G21\nG90\nG17\nG94\nG40\nG49\nG80\nG54\n"));
+    assert!(code.contains("G21\nG90\nG17\nG91.1\nG94\nG40\nG49\nG80\nG54\n"));
     let lines: Vec<_> = code.lines().collect();
     let first_motion = lines
         .iter()

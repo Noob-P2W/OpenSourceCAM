@@ -46,6 +46,8 @@ pub enum ClearingBoundary {
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_clearance: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub clearing_boundary: Option<ClearingBoundary>,
     pub height_offset: Option<f64>,
     pub milling_mode: Option<MillingMode>,
@@ -84,6 +86,12 @@ pub struct Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .stock_clearance
+            .is_some_and(|g| !g.is_finite() || !(0.05..=1000.).contains(&g))
+        {
+            return Err("Stock clearance gap must be between 0.05 and 1000 mm".into());
+        }
         if self
             .height_offset
             .is_some_and(|v| !v.is_finite() || v.abs() > 10000.)

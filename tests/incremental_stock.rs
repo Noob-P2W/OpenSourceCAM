@@ -82,6 +82,7 @@ fn diagonal_repeated_passes_do_not_scan_the_whole_bounding_rectangle() {
     };
     let seconds = m.from.distance(m.to) / 600. * 60.;
     let path = Toolpath {
+        arcs: Vec::new(),
         moves: vec![m.clone(); 1000],
         estimated_seconds: seconds * 1000.,
         cut_length: 1000. * m.from.distance(m.to),

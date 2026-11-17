@@ -111,6 +111,7 @@ fn closed_vise_pose_is_used_by_clearance_checks_and_interference_is_atomic() {
     .unwrap();
     s.apply(Edit::ClampVise { id: 1, grip: 3. }).unwrap();
     let path = Toolpath {
+        arcs: Vec::new(),
         moves: vec![Move {
             from: Point3 {
                 x: 60.,
@@ -462,6 +463,7 @@ fn touching_assembly_components_are_validated_separately_for_clamping_and_cleara
     collision::check(
         &opened,
         &opensourcecam::cam::Toolpath {
+            arcs: Vec::new(),
             moves: vec![],
             estimated_seconds: 0.,
             cut_length: 0.,

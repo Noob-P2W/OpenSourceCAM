@@ -121,6 +121,46 @@ impl Clearing {
             spacing: (stepover / (dx.max(dy) * 2_f64.sqrt())).floor().max(1.) as usize,
         })
     }
+    pub(crate) fn exterior_only(&mut self, width: f64, height: f64) {
+        let mut seen = vec![false; self.heights.len()];
+        let mut queue = VecDeque::new();
+        for y in 0..self.ny {
+            for x in 0..self.nx {
+                let cx = self.origin[0] + (x as f64 + 0.5) * self.dx;
+                let cy = self.origin[1] + (y as f64 + 0.5) * self.dy;
+                let i = y * self.nx + x;
+                if self.heights[i] == f64::NEG_INFINITY
+                    && (cx < 0. || cy < 0. || cx > width || cy > height)
+                {
+                    seen[i] = true;
+                    queue.push_back(i);
+                }
+            }
+        }
+        while let Some(i) = queue.pop_front() {
+            let x = i % self.nx;
+            let y = i / self.nx;
+            for j in [
+                x.checked_sub(1).map(|_| i - 1),
+                (x + 1 < self.nx).then_some(i + 1),
+                y.checked_sub(1).map(|_| i - self.nx),
+                (y + 1 < self.ny).then_some(i + self.nx),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if !seen[j] && self.heights[j] == f64::NEG_INFINITY {
+                    seen[j] = true;
+                    queue.push_back(j);
+                }
+            }
+        }
+        for (i, yes) in seen.into_iter().enumerate() {
+            if !yes {
+                self.heights[i] = f64::INFINITY;
+            }
+        }
+    }
     fn point(&self, node: usize, z: f64) -> Point3 {
         Point3 {
             x: self.origin[0] + (node % (self.nx + 1)) as f64 * self.dx,

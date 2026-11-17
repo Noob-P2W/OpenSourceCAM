@@ -24,6 +24,7 @@ fn six_mm_cutter_slot_and_display_agree_at_all_preview_resolutions() {
         ..Default::default()
     }];
     let path = Toolpath {
+        arcs: Vec::new(),
         moves: vec![Move {
             from: Point3 {
                 x: 10.,

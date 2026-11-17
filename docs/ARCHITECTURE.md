@@ -382,3 +382,16 @@ Pocket entry resolves angle/feed from the measured preset with conservative caps
 Circular wall passes share a parametric tangent-lead helper. Exposed-surface
 confirmations and pre-roughed contour choices are manufacturing state, not camera
 or presentation state. See TOOLPATH_AUDIT.md for method contracts and references.
+
+## Remaining stock and analytical motion
+
+`material::RemainingStock` is the bounded whole-cell upper-height certificate used
+by sequence preparation, local clearance and rest-chain omission. It shares cutter
+profiles and swept-capsule bounds with `stock::Grid`; sampled preview heights are
+never used as clearance proof. Local fixture heights use a cached triangle tree,
+with full swept collision preflight retained for export. `cam::ArcSpan` records
+analytical circular/helical motion alongside its bounded linear samples. Posts
+validate true-curve extrema/feed and fixture envelopes before emitting G2/G3 with
+G91.1 I/J centres; unsupported/uncertain spans retain G1. Browser mode/resolution/epoch
+keys invalidate incremental simulation together. See
+[remaining stock and arcs](REMAINING_STOCK_AND_ARCS.md) for controls and limits.

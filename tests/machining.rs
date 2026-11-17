@@ -343,6 +343,7 @@ fn a_real_through_bore_in_a_connected_fixture_remains_clear() {
     p.operations = vec![Default::default()];
     p.workspace = vec![WorkspaceModel::new(1, ModelKind::Fixture, fixture)];
     let path = cam::Toolpath {
+        arcs: Vec::new(),
         moves: vec![cam::Move {
             from: cam::Point3 {
                 x: 10.0,

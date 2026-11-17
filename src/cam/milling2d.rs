@@ -21,7 +21,7 @@ fn curve(op: &Operation) -> Vec<[f64; 3]> {
 }
 type FaceRegion = (Vec<Vec<[f64; 3]>>, f64);
 fn face_region(op: &Operation) -> Result<FaceRegion, String> {
-    let numeric_z = if op.strategy == Strategy::AreaRough {
+    let numeric_z = if matches!(op.strategy, Strategy::AreaRough | Strategy::StockRough) {
         -op.depth
     } else {
         0.
@@ -91,7 +91,11 @@ fn area_paths(
                 .iter()
                 .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
                 .collect();
-            let floor = level - op.settings.axial_allowance;
+            let floor = if op.strategy == Strategy::StockRough {
+                f64::NEG_INFINITY
+            } else {
+                level - op.settings.axial_allowance
+            };
             if points.iter().all(|q| q[2] <= floor + 1e-6) {
                 continue;
             }
@@ -115,7 +119,7 @@ fn area_paths(
     if z > 1e-7 {
         return Err("2D offset clearing bottom must be at or below stock top".into());
     }
-    let clearing = crate::roughing::Clearing::planar(
+    let mut clearing = crate::roughing::Clearing::planar(
         &rings,
         &obstacles,
         tool.diameter / 2. + op.settings.radial_allowance,
@@ -123,6 +127,9 @@ fn area_paths(
         op.settings.surface_step.unwrap_or(0.25),
         cancel,
     )?;
+    if op.strategy == Strategy::StockRough {
+        clearing.exterior_only(p.stock.width, p.stock.height);
+    }
     let mut budget = crate::surface::Budget::new(cancel);
     let reverse = op.settings.direction == Direction::Clockwise;
     clearing.layer(level, reverse, &mut budget)
@@ -154,6 +161,154 @@ fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
     }
     crate::contour::offset(&points, op.settings.closed, radius, !op.settings.outside)
 }
+pub(super) fn needs_stock_proof(op: &Operation) -> bool {
+    !op.settings.precleared
+        && (op.strategy == Strategy::SurfaceSmooth
+            || matches!(
+                op.strategy,
+                Strategy::Bore
+                    | Strategy::Circular
+                    | Strategy::Thread
+                    | Strategy::Engrave
+                    | Strategy::Chamfer
+                    | Strategy::Trace
+            ))
+}
+pub(super) fn verify_stock(
+    p: &Project,
+    op: &Operation,
+    index: usize,
+    state: &mut crate::material::RemainingStock,
+) -> Result<(), String> {
+    if !needs_stock_proof(op) {
+        return Ok(());
+    }
+    let tool = p.operation_tool(op)?;
+    let clear = if op.strategy == Strategy::SurfaceSmooth {
+        let (rings, z) = face_region(op)?;
+        crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?
+            .iter()
+            .all(|[a, b]| {
+                state.is_clear(
+                    Point3 {
+                        x: a[0],
+                        y: a[1],
+                        z: z + tool.step_down,
+                    },
+                    Point3 {
+                        x: b[0],
+                        y: b[1],
+                        z: z + tool.step_down,
+                    },
+                    tool.diameter / 2.,
+                    0.,
+                )
+            })
+    } else if matches!(
+        op.strategy,
+        Strategy::Bore | Strategy::Circular | Strategy::Thread
+    ) {
+        let depth = op.depth - op.settings.axial_allowance;
+        let low = op.width / 2.
+            - (depth - start(op)) * op.settings.taper_angle.unwrap_or(0.).to_radians().tan();
+        let engagement = if op.strategy == Strategy::Thread {
+            0.
+        } else {
+            tool.diameter * tool.step_over.min(0.5)
+        };
+        if op.settings.outside {
+            state.ring_clear(
+                [op.x, op.y],
+                low + op.settings.radial_allowance + engagement,
+                op.width / 2. + 2. * tool.diameter,
+                -depth,
+            )
+        } else {
+            let pilot = (low - op.settings.radial_allowance - engagement).max(tool.diameter / 2.);
+            state.is_clear(
+                Point3 {
+                    x: op.x,
+                    y: op.y,
+                    z: -depth,
+                },
+                Point3 {
+                    x: op.x,
+                    y: op.y,
+                    z: -depth,
+                },
+                pilot,
+                0.,
+            )
+        }
+    } else {
+        // Face clearing can prove exposure even if a conservative cell straddles
+        // the selected edge. Otherwise every referenced cell must be exposed.
+        let mut points = curve(op);
+        if op.settings.closed && !points.is_empty() {
+            points.push(points[0]);
+        }
+        points.windows(2).all(|pair| {
+            let [a, b] = [pair[0], pair[1]];
+            a[2].min(b[2]) >= -cleared_top(p, index) - EPS
+                || state.is_clear(
+                    Point3 {
+                        x: a[0],
+                        y: a[1],
+                        z: a[2],
+                    },
+                    Point3 {
+                        x: b[0],
+                        y: b[1],
+                        z: b[2],
+                    },
+                    0.,
+                    0.,
+                )
+        })
+    };
+    if clear {
+        Ok(())
+    } else {
+        Err("Remaining stock is not proven clear/exposed here; generate preceding roughing or confirm externally pre-cleared stock".into())
+    }
+}
+pub(super) fn model_exterior(
+    p: &Project,
+    op: &Operation,
+    cancel: &AtomicBool,
+) -> Result<Vec<Vec<Point3>>, String> {
+    area_paths(p, op, -op.depth, cancel)
+}
+pub(super) fn clear_model_exterior(
+    chains: &[Vec<Point3>],
+    z: f64,
+    b: &mut Builder,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    for chain in chains {
+        let layer = chain.iter().map(|q| Point3 { z, ..*q }).collect::<Vec<_>>();
+        cut_chain(&layer, b, cancel)?;
+    }
+    b.retract()
+}
+fn cut_chain(chain: &[Point3], b: &mut Builder, cancel: &AtomicBool) -> Result<(), String> {
+    let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
+    if chain
+        .windows(2)
+        .all(|w| b.remaining.is_clear(w[0], w[1], radius, 0.))
+    {
+        return Ok(());
+    }
+    if let Some(first) = chain.first() {
+        b.enter(first.x, first.y, first.z)?;
+        for q in chain.iter().skip(1) {
+            cancelled(cancel)?;
+            b.feed_cut(q.x, q.y, q.z)?;
+        }
+        b.retract()?;
+    }
+    Ok(())
+}
 fn contour_target(op: &Operation) -> Option<f64> {
     (op.has_chain()
         && matches!(
@@ -179,12 +334,6 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         op.depth - op.settings.axial_allowance
     };
     if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
-        if op.strategy == Strategy::SurfaceSmooth && !op.settings.precleared {
-            return Err(
-                "Confirm the selected face is already rough-machined before planar finishing"
-                    .into(),
-            );
-        }
         if op.strategy == Strategy::AreaRough
             && (op.settings.spring_passes > 0 || op.settings.finish_feed.is_some())
         {
@@ -299,16 +448,6 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             "Chain heights already define the operation top; leave Top depth at zero".into(),
         );
     }
-    if matches!(
-        op.strategy,
-        Strategy::Engrave | Strategy::Chamfer | Strategy::Trace
-    ) && !op.settings.precleared
-        && curve(op)
-            .iter()
-            .any(|q| q[2] < -cleared_top(p, index) - EPS)
-    {
-        return Err("Selected edges are below uncleared stock; confirm that previous machining has exposed this surface".into());
-    }
     if op.has_chain() {
         if op.strategy.is_curve() && op.settings.radial_allowance != 0. {
             return Err("Tool-center chains do not use radial stock allowance".into());
@@ -385,9 +524,6 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             }
         }
     } else if op.strategy.is_round() {
-        if !op.settings.precleared {
-            return Err("Confirm the bore is already cleared before using a wall-finishing or thread cycle; use Pocket to remove solid stock".into());
-        }
         positive(op.width, "Bore diameter", p.stock.width.max(p.stock.height))?;
         if !op.settings.outside && op.width <= tool.diameter + 2. * op.settings.radial_allowance {
             return Err("Bore must be wider than the cutter and allowance".into());
@@ -501,16 +637,11 @@ fn finish_circle(
     tolerance: f64,
     sign: f64,
 ) -> Result<(), String> {
-    let count = segments(radius, tolerance)?;
-    for i in 1..=count {
-        let a = phase + sign * std::f64::consts::TAU * i as f64 / count as f64;
-        b.feed_cut(
-            center[0] + radius * a.cos(),
-            center[1] + radius * a.sin(),
-            z,
-        )?;
+    let _ = phase;
+    if ((b.position.x - center[0]).hypot(b.position.y - center[1]) - radius).abs() > 1e-5 {
+        return Err("Finish circle start differs from its radius".into());
     }
-    Ok(())
+    b.arc_xy(center, sign * std::f64::consts::TAU, z, tolerance)
 }
 // Quarter-circle entry/exit tangent to the finished wall. All points remain on
 // the cleared side: inside a bore, outside a boss. This is computed independently
@@ -545,7 +676,6 @@ impl WallLead {
             wall[0] + (radius + side * lead) * radial[0],
             wall[1] + (radius + side * lead) * radial[1],
         ];
-        let wall_angle = phase + if outside { std::f64::consts::PI } else { 0. };
         let sweep = if outside { -sign } else { sign } * std::f64::consts::FRAC_PI_2;
         if enter {
             let start = [
@@ -554,17 +684,7 @@ impl WallLead {
             ];
             b.enter(start[0], start[1], z)?;
         }
-        let begin = if enter {
-            wall_angle - sweep
-        } else {
-            wall_angle
-        };
-        let steps = segments(lead, tolerance)?.div_ceil(4);
-        for i in 1..=steps {
-            let a = begin + sweep * i as f64 / steps as f64;
-            b.feed_cut(center[0] + lead * a.cos(), center[1] + lead * a.sin(), z)?;
-        }
-        Ok(())
+        b.arc_xy(center, sweep, z, tolerance)
     }
 }
 pub(super) fn generate(
@@ -613,14 +733,7 @@ pub(super) fn generate(
             };
             if op.strategy == Strategy::AreaRough {
                 for chain in area_paths(p, op, level, cancel)? {
-                    if let Some(first) = chain.first() {
-                        b.enter(first.x, first.y, level)?;
-                        for q in chain.iter().skip(1) {
-                            cancelled(cancel)?;
-                            b.feed_cut(q.x, q.y, level)?;
-                        }
-                        b.retract()?;
-                    }
+                    cut_chain(&chain, b, cancel)?;
                 }
                 continue;
             }
@@ -804,16 +917,20 @@ pub(super) fn generate(
                     "Helical cut exceeds the move budget; increase pitch or tolerance".into(),
                 );
             }
-            for i in 1..=steps {
-                if i % 256 == 0 {
-                    cancelled(cancel)?
+            if op.settings.taper_angle.unwrap_or(0.) == 0. {
+                b.arc_xy([op.x, op.y], phase, -depth, tolerance)?;
+            } else {
+                for i in 1..=steps {
+                    if i % 256 == 0 {
+                        cancelled(cancel)?
+                    }
+                    let t = i as f64 / steps as f64;
+                    let d = top + (depth - top) * t;
+                    let a = sign * std::f64::consts::TAU * turns * t;
+                    let radius = radius
+                        - (d - top) * op.settings.taper_angle.unwrap_or(0.).to_radians().tan();
+                    b.feed_cut(op.x + radius * a.cos(), op.y + radius * a.sin(), -d)?;
                 }
-                let t = i as f64 / steps as f64;
-                let d = top + (depth - top) * t;
-                let a = sign * std::f64::consts::TAU * turns * t;
-                let radius =
-                    radius - (d - top) * op.settings.taper_angle.unwrap_or(0.).to_radians().tan();
-                b.feed_cut(op.x + radius * a.cos(), op.y + radius * a.sin(), -d)?;
             }
             if op.strategy != Strategy::Thread {
                 let radius =

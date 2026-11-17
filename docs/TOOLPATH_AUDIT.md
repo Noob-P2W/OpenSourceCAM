@@ -50,8 +50,8 @@ canned-cycle behavior was not assumed to be universal across postprocessors.
 - Buried chamfer, engraving and trace references require an exposed-surface
   confirmation unless earlier facing proves the reference is exposed. Geometry
   below stock top is not, by itself, evidence that the stock has been removed.
-- Outside clearing describes its retained rectangle accurately. It does not claim
-  to follow an irregular model silhouette. Fixed-depth engraving is labeled
+- Linked outside clearing follows the complete model silhouette, preserving enclosed
+  cavities; numeric clearing retains its rectangle. Fixed-depth engraving is labeled
   **Contour engraving** and describes its distinction from variable-width V-carving.
 
 ## Strategy-by-strategy verification
@@ -62,11 +62,11 @@ canned-cycle behavior was not assumed to be universal across postprocessors.
 | Rectangular pocket clearing | Raster/offset coverage of the cutter-accessible region, all four wall passes, ramp/helix/plunge entry, allowances | Numeric/recognized supported rectangles; inside corner radius remains tool-limited; use model clearing for islands |
 | Circular pocket clearing | Concentric clearing reaches floor and wall, center coverage, radial compensation, entry modes | Clears solid stock; distinct from a pre-cleared bore wall-finishing cycle |
 | 2D offset clearing | Stock sides and corners, selected-region confinement, nested loops, connected links, model protection at each depth, core coverage | Bounded grid can leave conservative residual stock; no constant-engagement solver |
-| Outside clearing | Covers stock around the retained rectangle, including diagonal stock corners; keeps retained material | Model default is the complete bounding rectangle, not an irregular silhouette |
+| Outside clearing | Covers exterior stock and diagonal corners; retains model silhouette and enclosed cavities | Linked models use their silhouette and exterior-connected regions; numeric geometry retains a rectangle |
 | Internal 2D contour | Tool-radius/allowance compensation, absolute target height, axial layers, spindle-relative direction and final feed | Flat chains or numeric rectangles; not bulk island/pocket removal |
 | External 2D contour | External compensation, rounded numeric corners, axial layers, positive floor offset and final feed | Selected contour/profile only; not an automatic area-clearing operation |
 | Slot milling | Constant-width centerline, matching cutter, depth layers, finishing repeat and feed | Requires matching cutter width; wider slots must be cleared separately |
-| Planar finishing | Horizontal region, island clearance, target floor offset, full reachable face coverage, final feed | Explicitly pre-roughed stock; not a roughing or 3D-surface strategy |
+| Planar finishing | Horizontal region, island clearance, target floor offset, full reachable face coverage, final feed | Preceding roughing proof or explicit externally prepared stock; not a roughing or 3D-surface strategy |
 | Bore milling | Cylindrical/conical internal helix, external cylinder, bottom cleanup circle, pitch/stepdown and finish feed | Pre-cleared wall cycle; external taper is rejected; radial entry/exit rather than helical lead ramps |
 | Circular milling | Separate circular depth passes, tangent leads in cleared air, side compensation, finish and spring passes | Pre-cleared cylindrical hole/boss; tapered walls direct the user to Bore; contour passes do not remove an entire solid pocket |
 | Thread milling | Measured cutter pitch/tooth/neck, radial thread depth, helix pitch, hand, clearance and fixed-depth exit | Pre-cleared cylindrical, single-lead cycle; no conical/multi-lead threads or helical lead ramps |
@@ -92,16 +92,19 @@ fixture/tool-envelope rejection, physical-stock profiles, contact tolerances,
 model-link invalidation, setup transforms and simulation. Browser tests cover
 boundary-mode persistence and all-four-side overrun after picking a face.
 
-Pre-cleared/exposed-surface confirmations are operator inputs, not automatic
-proof of evolving stock state. Custom 2D selections still require accessibility
+Pre-cleared/exposed-surface confirmations remain operator inputs. Automatic
+preparation checks now also use conservative preceding cutter-sweep certificates.
+Custom 2D selections still require accessibility
 review; this audit does not establish a universal target-solid gouge proof.
 
 This is a geometric and behavior audit of implemented methods. It does not add
 exact evolving-solid rest machining, load-adaptive engagement, variable-width
 V-carving, machine deflection prediction, or automatic tool/material-specific
-cutting-data selection. Those remain explicit feature work. Paths are presently
-linearized within tolerance; native arc/helical NC output and broader tangential
-lead options remain potential program-size and surface-finish improvements.
+cutting-data selection. Those remain explicit feature work. Analytical circles/helices
+now emit G2/G3
+with conservative preflight and a G1 fallback. Broader tangential lead options
+remain a potential improvement. See [remaining stock and arcs](REMAINING_STOCK_AND_ARCS.md)
+for sequence, clearance, rest-clearing and simulation guarantees and limits.
 Separate ramp spindle speeds and transition-feed preset metadata are not emitted
 as mid-operation spindle/phase commands; those preset fields are disabled and
 identified as storage-only in the browser editor. There is no universal shop feed/speed

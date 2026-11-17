@@ -1,4 +1,5 @@
 //! Portable CAM model, deterministic toolpaths, and metric G-code postprocessor.
+pub mod arcs;
 pub mod blank;
 pub mod cam;
 pub mod collision;
@@ -11,6 +12,7 @@ pub mod import;
 pub mod machine;
 pub mod machine_library;
 pub mod machining;
+mod material;
 pub mod model;
 pub mod operation;
 pub mod planar;

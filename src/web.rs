@@ -410,11 +410,21 @@ impl WebSession {
         resolution: usize,
         budget: u32,
     ) -> Result<String, JsValue> {
-        crate::commands::simulate_project_budget(
+        self.simulate_stock(progress, resolution, budget, false)
+    }
+    pub fn simulate_stock(
+        &self,
+        progress: f64,
+        resolution: usize,
+        budget: u32,
+        conservative: bool,
+    ) -> Result<String, JsValue> {
+        crate::commands::simulate_project_mode(
             self.inner.project(),
             progress,
             resolution,
             u64::from(budget),
+            conservative,
         )
         .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
         .map_err(|e| JsValue::from_str(&e))
@@ -446,11 +456,21 @@ impl WebSession {
         resolution: usize,
         budget: u32,
     ) -> Result<String, JsValue> {
-        crate::commands::stock_obj_budget(
+        self.stock_obj_mode(progress, resolution, budget, false)
+    }
+    pub fn stock_obj_mode(
+        &self,
+        progress: f64,
+        resolution: usize,
+        budget: u32,
+        conservative: bool,
+    ) -> Result<String, JsValue> {
+        crate::commands::stock_obj_mode(
             self.inner.project(),
             progress,
             resolution,
             u64::from(budget),
+            conservative,
         )
         .map_err(|e| JsValue::from_str(&e))
     }
@@ -527,6 +547,16 @@ impl WebSession {
         epoch: u32,
         limit: u32,
     ) -> Result<String, JsValue> {
+        self.stock_frame_mode(progress, resolution, epoch, limit, false)
+    }
+    pub fn stock_frame_mode(
+        &mut self,
+        progress: f64,
+        resolution: usize,
+        epoch: u32,
+        limit: u32,
+        conservative: bool,
+    ) -> Result<String, JsValue> {
         if self.playback.is_none() {
             self.playback = Some(
                 crate::commands::PlaybackPreview::new(self.inner.project())
@@ -537,12 +567,13 @@ impl WebSession {
             .playback
             .as_ref()
             .unwrap()
-            .frame(
+            .frame_mode(
                 self.inner.project(),
                 progress,
                 resolution,
                 epoch,
                 u64::from(limit),
+                conservative,
             )
             .map_err(|e| JsValue::from_str(&e))?;
         self.frame_vertices = frame.vertices;

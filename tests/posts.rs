@@ -24,8 +24,8 @@ fn controller_dialects_preserve_all_planned_moves() {
             .lines()
             .filter(|line| line.starts_with("G0 ") || line.starts_with("G1 "))
             .collect();
-        // One initial clearance and one final retract surround the planner's moves.
-        assert_eq!(moves.len(), expected.moves.len() + 2);
+        // Initial clearance/XY and final retract surround the planner's moves.
+        assert_eq!(moves.len(), expected.moves.len() + 3);
         assert_eq!(moves[0], "G0 Z5.0000");
         assert_eq!(moves, baseline_moves);
         assert!(!code.contains("M6"));

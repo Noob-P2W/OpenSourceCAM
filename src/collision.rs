@@ -408,12 +408,12 @@ fn inside(p: [f64; 2], polygon: &[[f64; 2]]) -> bool {
     yes
 }
 #[derive(Clone, Copy)]
-struct Envelope {
-    radius: f64,
-    low: f64,
-    high: f64,
+pub(crate) struct Envelope {
+    pub(crate) radius: f64,
+    pub(crate) low: f64,
+    pub(crate) high: f64,
 }
-fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envelope>, String> {
+pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envelope>, String> {
     let op = project
         .operations
         .get(operation)
@@ -496,9 +496,30 @@ pub fn check_with_cancel(
             remaining: MAX_WORK,
             cancel,
         },
+        0.,
     )
 }
-fn verify(project: &Project, path: &Toolpath, budget: &mut Budget<'_>) -> Result<(), String> {
+pub(crate) fn check_with_margin(
+    project: &Project,
+    path: &Toolpath,
+    margin: f64,
+) -> Result<(), String> {
+    verify(
+        project,
+        path,
+        &mut Budget {
+            remaining: MAX_WORK,
+            cancel: &AtomicBool::new(false),
+        },
+        margin,
+    )
+}
+fn verify(
+    project: &Project,
+    path: &Toolpath,
+    budget: &mut Budget<'_>,
+    margin: f64,
+) -> Result<(), String> {
     budget.tick()?;
     crate::workspace::validate(&project.workspace, project.machine.as_ref())?;
     let mut tree = Tree {
@@ -558,6 +579,11 @@ fn verify(project: &Project, path: &Toolpath, budget: &mut Budget<'_>) -> Result
         let changed = current != Some(movement.operation);
         if changed {
             tool = envelopes(project, movement.operation)?;
+            for e in &mut tool {
+                e.radius += margin;
+                e.low -= margin;
+                e.high += margin;
+            }
             current = Some(movement.operation);
         }
         for envelope in &tool {
@@ -665,6 +691,104 @@ pub fn check_stock_in_vise(project: &Project, id: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Reusable conservative fixture-height queries for local rapid clearance.
+/// Surface XY projections suffice for an upper bound; export still performs the
+/// full closed-shell and swept-envelope collision preflight.
+pub(crate) struct FixtureClearance {
+    tree: Tree,
+    remaining: usize,
+}
+impl FixtureClearance {
+    pub(crate) fn build(project: &Project, cancel: &AtomicBool) -> Result<Self, String> {
+        let mut tree = Tree {
+            triangles: Vec::new(),
+            nodes: Vec::new(),
+        };
+        let mut budget = Budget {
+            remaining: MAX_WORK,
+            cancel,
+        };
+        for model in project
+            .workspace
+            .iter()
+            .filter(|m| m.kind != ModelKind::Machine)
+        {
+            for triangle in &model.part.geometry.mesh.triangles {
+                budget.tick()?;
+                tree.triangles.push(Triangle {
+                    model: 0,
+                    shell: 0,
+                    points: triangle.map(|i| {
+                        model.point(
+                            model.part.geometry.mesh.vertices[i as usize],
+                            project.machine.as_ref(),
+                        )
+                    }),
+                });
+            }
+        }
+        if !tree.triangles.is_empty() {
+            tree.build(0, tree.triangles.len(), &mut budget)?;
+        }
+        Ok(Self {
+            tree,
+            remaining: MAX_WORK,
+        })
+    }
+    pub(crate) fn top(&mut self, a: [f64; 2], b: [f64; 2], envelopes: &[Envelope]) -> Option<f64> {
+        if self.tree.nodes.is_empty() {
+            return Some(f64::NEG_INFINITY);
+        }
+        let cancel = AtomicBool::new(false);
+        let mut budget = Budget {
+            remaining: self.remaining,
+            cancel: &cancel,
+        };
+        let result = (|| {
+            let mut top = f64::NEG_INFINITY;
+            for e in envelopes {
+                let r = e.radius + 0.01;
+                let xy = Bounds {
+                    min: [a[0].min(b[0]) - r, a[1].min(b[1]) - r, f64::NEG_INFINITY],
+                    max: [a[0].max(b[0]) + r, a[1].max(b[1]) + r, f64::INFINITY],
+                };
+                let mut stack = vec![0];
+                while let Some(id) = stack.pop() {
+                    budget.tick()?;
+                    let n = &self.tree.nodes[id];
+                    if !n.bounds.overlaps(xy) || n.bounds.max[2] - e.low <= top {
+                        continue;
+                    }
+                    if let Some(children) = n.children {
+                        stack.extend(children);
+                        continue;
+                    }
+                    for t in &self.tree.triangles[n.start..n.end] {
+                        budget.tick()?;
+                        let p = t.points.map(|q| [q[0], q[1]]);
+                        if inside(a, &p)
+                            || inside(b, &p)
+                            || (0..3).any(|i| segment_distance(a, b, p[i], p[(i + 1) % 3]) <= r)
+                        {
+                            top = top.max(
+                                t.points
+                                    .iter()
+                                    .map(|q| q[2])
+                                    .fold(f64::NEG_INFINITY, f64::max)
+                                    - e.low
+                                    + 0.01,
+                            );
+                        }
+                    }
+                }
+            }
+            Ok::<_, String>(top)
+        })();
+        self.remaining = budget.remaining;
+        result.ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,6 +828,42 @@ mod tests {
             }
         })
         .into()
+    }
+    #[test]
+    fn local_fixture_height_includes_bodies_and_falls_back_on_exhaustion() {
+        let cancel = AtomicBool::new(false);
+        let mut tree = Tree {
+            triangles: cube(1., 2., false),
+            nodes: Vec::new(),
+        };
+        tree.build(
+            0,
+            tree.triangles.len(),
+            &mut Budget {
+                remaining: MAX_WORK,
+                cancel: &cancel,
+            },
+        )
+        .unwrap();
+        let mut f = FixtureClearance {
+            tree,
+            remaining: MAX_WORK,
+        };
+        let e = Envelope {
+            radius: 0.2,
+            low: 0.,
+            high: 4.,
+        };
+        assert!(f.top([1.5, 0.], [1.5, 3.], &[e]).unwrap() >= 2.01);
+        assert_eq!(f.top([-2., 0.], [-2., 3.], &[e]), Some(f64::NEG_INFINITY));
+        let shaft = Envelope {
+            radius: 1.2,
+            low: 0.5,
+            high: 5.,
+        };
+        assert!(f.top([0., 0.], [0., 3.], &[e, shaft]).unwrap() >= 1.51);
+        f.remaining = 0;
+        assert!(f.top([0., 0.], [3., 3.], &[e]).is_none());
     }
     #[test]
     fn containment_uses_closed_shells_and_handles_triangulation_seams() {

@@ -20,6 +20,8 @@ pub struct Summary {
     pub resolution: [usize; 2],
     pub cell_size: [f64; 2],
     pub progress: f64,
+    pub conservative: bool,
+    pub remaining_upper_bound_mm3: Option<f64>,
     pub removed_volume_mm3: f64,
     pub remaining_volume_mm3: f64,
     pub excess_material_mm3: Option<f64>,
@@ -113,6 +115,29 @@ pub fn simulate_budget(
     }
     calculate(project, path, progress, resolution, cancel, true, limit)
 }
+pub fn simulate_mode(
+    project: &Project,
+    path: &Toolpath,
+    progress: f64,
+    resolution: usize,
+    cancel: &AtomicBool,
+    limit: u64,
+    conservative: bool,
+) -> Result<Simulation, String> {
+    if ![50_000_000, 100_000_000, 200_000_000].contains(&limit) {
+        return Err("Choose a supported simulation calculation budget".into());
+    }
+    calculate_mode(
+        project,
+        path,
+        progress,
+        resolution,
+        cancel,
+        true,
+        limit,
+        conservative,
+    )
+}
 fn calculate(
     project: &Project,
     path: &Toolpath,
@@ -122,6 +147,21 @@ fn calculate(
     verify: bool,
     limit: u64,
 ) -> Result<Simulation, String> {
+    calculate_mode(
+        project, path, progress, resolution, cancel, verify, limit, false,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn calculate_mode(
+    project: &Project,
+    path: &Toolpath,
+    progress: f64,
+    resolution: usize,
+    cancel: &AtomicBool,
+    verify: bool,
+    limit: u64,
+    conservative: bool,
+) -> Result<Simulation, String> {
     if !(16..=1024).contains(&resolution)
         || !progress.is_finite()
         || !(0.0..=1.0).contains(&progress)
@@ -129,7 +169,7 @@ fn calculate(
         return Err("Stock preview needs 16–1024 cells on its longest side and a progress fraction from 0 to 1".into());
     }
     crate::cam::validate_setup(project)?;
-    let mut grid = Grid::new(project, resolution)?;
+    let mut grid = Grid::new_mode(project, resolution, conservative)?;
     grid.advance(path, progress, limit, cancel)?;
     let s = &project.stock;
     let nx = grid.nx;
@@ -137,7 +177,7 @@ fn calculate(
     let dx = grid.dx;
     let dy = grid.dy;
     let bottom = grid.bottom;
-    let heights = &grid.heights;
+    let heights = grid.display_heights();
     let floors = &grid.floors;
     let initial = &grid.initial;
     let target = if verify {
@@ -178,7 +218,7 @@ fn calculate(
                 .filter(|_| comparable)
                 .and_then(|r| expected(r, (x as f64 + 0.5) * dx, (y as f64 + 0.5) * dy, bottom))
             {
-                let actual = heights[y * nx + x];
+                let actual = grid.heights[y * nx + x];
                 let delta = actual - column.desired_height;
                 if delta > 0.01 {
                     excess += delta * dx * dy;
@@ -201,7 +241,12 @@ fn calculate(
         },
         cancel,
     )?;
-    let mut notes=vec!["Cell-centre heightfield approximation; small features and exact boundary shapes depend on preview resolution. This is not a full solid-removal certification.".into(),"Machine bodies and spindle kinematics are not collision checked. Fixture checks use conservative cylindrical cutting-tool, shaft and defined-holder envelopes, not exact tool solids.".into()];
+    let mut notes=vec!["Grid heightfield approximation; small features and exact boundary shapes depend on preview resolution. This is not a full solid-removal certification.".into(),"Machine bodies and spindle kinematics are not collision checked. Fixture checks use conservative cylindrical cutting-tool, shaft and defined-holder envelopes, not exact tool solids.".into()];
+    if conservative {
+        notes.insert(0, if grid.conservative {
+            "Conservative stock: a cell is lowered only after its entire area is covered by a cutter sweep. Boundary ridges shrink with increased resolution. Remaining volume is an upper bound on this 2.5D envelope.".into()
+        } else { "Nonrectangular blank: the mesh uses sampled physical columns; the separate remaining-stock bound uses the enclosing rectangular blank.".into() });
+    }
     if !comparable {
         notes.push("Target comparison requires supported 2.5D geometry fully inside the blank; only stock removal is shown for this target.".into());
     }
@@ -228,6 +273,8 @@ fn calculate(
         resolution: [nx, ny],
         cell_size: [dx, dy],
         progress,
+        conservative: grid.conservative,
+        remaining_upper_bound_mm3: grid.certificate.as_ref().map(|s| s.remaining_upper_mm3()),
         removed_volume_mm3: removed,
         remaining_volume_mm3: remaining,
         excess_material_mm3: comparable.then_some(excess),
@@ -254,10 +301,41 @@ fn calculate(
             mesh,
             cad_source: None,
         }),
-        heights: grid.heights,
+        heights: grid.display_heights().to_vec(),
     })
 }
 
+pub(crate) fn cutter_height(r: f64, ball: bool, cone: Option<(f64, f64)>, d: f64) -> f64 {
+    if ball {
+        r - (r * r - d * d).max(0.).sqrt()
+    } else {
+        cone.map_or(0., |(k, tip)| (d - tip).max(0.) / k)
+    }
+}
+pub(crate) fn footprint(project: &Project, index: usize) -> Result<Option<Footprint>, String> {
+    let op = &project.operations[index];
+    if !op.enabled || op.strategy == crate::model::Strategy::Thread {
+        return Ok(None);
+    }
+    let tool = project.operation_tool(op)?;
+    let record = project.library_tool(Some(op))?;
+    Ok(Some(Footprint {
+        radius: tool.diameter / 2.,
+        ball: record.is_some_and(|r| r.kind == ToolKind::BallEndMill),
+        cone: record
+            .filter(|r| matches!(r.kind, ToolKind::Drill | ToolKind::ChamferMill))
+            .map(|r| {
+                if r.kind == ToolKind::Drill {
+                    ((r.dimension("point_angle").to_radians() / 2.).tan(), 0.)
+                } else {
+                    (
+                        (r.dimension("included_angle").to_radians() / 2.).tan(),
+                        r.dimension("tip_diameter") / 2.,
+                    )
+                }
+            }),
+    }))
+}
 /// Minimum cutter surface height over the part of a linear XYZ move covering P.
 /// In particular, a sloping move must not stamp its lowest endpoint across its entire length.
 fn swept_height(
@@ -271,13 +349,7 @@ fn swept_height(
     let vx = b.x - a.x;
     let vy = b.y - a.y;
     let l2 = vx * vx + vy * vy;
-    let profile = |d: f64| {
-        if ball {
-            r - (r * r - d * d).max(0.0).sqrt()
-        } else {
-            cone.map_or(0.0, |(k, tip)| (d - tip).max(0.) / k)
-        }
-    };
+    let profile = |d| cutter_height(r, ball, cone, d);
     if l2 < 1e-20 {
         let d = (p[0] - a.x).hypot(p[1] - a.y);
         return (d <= r).then(|| a.z.min(b.z) + profile(d));
@@ -330,8 +402,17 @@ fn swept_height(
     Some(height)
 }
 
-fn write_obj(mesh: &Mesh, out: &mut impl std::io::Write) -> std::io::Result<()> {
-    writeln!(out, "# OpenSourceCAM sampled remaining stock, millimetres")?;
+fn write_obj(simulation: &Simulation, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "# OpenSourceCAM {} remaining stock, millimetres",
+        if simulation.summary.conservative {
+            "conservative"
+        } else {
+            "sampled"
+        }
+    )?;
+    let mesh = &simulation.geometry.mesh;
     for v in &mesh.vertices {
         writeln!(out, "v {} {} {}", v[0], v[1], v[2])?;
     }
@@ -342,24 +423,21 @@ fn write_obj(mesh: &Mesh, out: &mut impl std::io::Write) -> std::io::Result<()> 
 }
 pub fn obj_data(simulation: &Simulation) -> Result<String, String> {
     let mut data = Vec::new();
-    write_obj(&simulation.geometry.mesh, &mut data).map_err(|e| e.to_string())?;
+    write_obj(simulation, &mut data).map_err(|e| e.to_string())?;
     String::from_utf8(data).map_err(|e| e.to_string())
 }
 pub fn export_obj(simulation: &Simulation, file: &Path) -> Result<(), String> {
     crate::files::write_atomic_with(file, |file| {
-        write_obj(
-            &simulation.geometry.mesh,
-            &mut std::io::BufWriter::new(file),
-        )
+        write_obj(simulation, &mut std::io::BufWriter::new(file))
     })
     .map_err(|e| e.to_string())
 }
 
 #[derive(Clone, Copy)]
-struct Footprint {
-    radius: f64,
-    ball: bool,
-    cone: Option<(f64, f64)>,
+pub(crate) struct Footprint {
+    pub(crate) radius: f64,
+    pub(crate) ball: bool,
+    pub(crate) cone: Option<(f64, f64)>,
 }
 pub(crate) struct Grid {
     pub nx: usize,
@@ -368,6 +446,9 @@ pub(crate) struct Grid {
     pub dy: f64,
     pub bottom: f64,
     pub heights: Vec<f64>,
+    certificate: Option<crate::material::RemainingStock>,
+    errors: Vec<f64>,
+    pub conservative: bool,
     floors: Vec<f64>,
     initial: Vec<f64>,
     tools: Vec<Footprint>,
@@ -380,7 +461,15 @@ pub(crate) struct Grid {
     pub dirty: Vec<bool>,
 }
 impl Grid {
+    #[cfg(test)]
     pub fn new(project: &Project, resolution: usize) -> Result<Self, String> {
+        Self::new_mode(project, resolution, false)
+    }
+    pub fn new_mode(
+        project: &Project,
+        resolution: usize,
+        conservative: bool,
+    ) -> Result<Self, String> {
         if !(16..=1024).contains(&resolution) {
             return Err("Stock preview needs 16–1024 cells on its longest side".into());
         }
@@ -450,6 +539,14 @@ impl Grid {
             dx,
             dy,
             bottom,
+            certificate: conservative
+                .then(|| crate::material::RemainingStock::dimensions(project, nx, ny)),
+            conservative: conservative && s.profile == crate::blank::StockProfile::Rectangular,
+            errors: project
+                .operations
+                .iter()
+                .map(|o| o.settings.path_tolerance.unwrap_or(0.01) + 0.0002)
+                .collect(),
             initial: heights.clone(),
             heights,
             floors,
@@ -472,6 +569,9 @@ impl Grid {
     ) -> Result<(), String> {
         if !progress.is_finite() || !(0. ..=1.).contains(&progress) || progress < self.progress {
             return Err("Invalid forward stock progress".into());
+        }
+        if let Some(c) = &mut self.certificate {
+            c.reset_budget(limit);
         }
         self.evaluations = 0;
         self.visited = 0;
@@ -496,7 +596,25 @@ impl Grid {
                         .tools
                         .get(m.operation)
                         .ok_or("Invalid toolpath operation index")?;
-                    self.cut(interpolate(a), interpolate(b), tool, limit, cancel)?;
+                    let from = interpolate(a);
+                    let to = interpolate(b);
+                    self.cut(from, to, tool, limit, cancel)?;
+                    if let Some(c) = &mut self.certificate {
+                        c.cut(from, to, tool, self.errors[m.operation]);
+                        if c.exhausted {
+                            return Err("Conservative stock exhausted its calculation budget; increase budget or reduce detail".into());
+                        }
+                        if self.conservative {
+                            let y0 = ((from.y.min(to.y) - tool.radius) / self.dy).floor().max(0.)
+                                as usize;
+                            let y1 = (((from.y.max(to.y) + tool.radius) / self.dy).ceil().max(0.)
+                                as usize)
+                                .min(self.ny);
+                            for y in y0.saturating_sub(1)..(y1 + 1).min(self.ny) {
+                                self.dirty[y] = true;
+                            }
+                        }
+                    }
                 }
             }
             if end > until {
@@ -580,7 +698,7 @@ impl Grid {
         let dx = self.dx;
         let dy = self.dy;
         let bottom = self.bottom;
-        let heights = &self.heights;
+        let heights = self.display_heights();
         let floors = &self.floors;
         let mut mesh = Mesh {
             vertices: Vec::new(),
@@ -698,15 +816,25 @@ impl Grid {
         }
         Ok(mesh)
     }
+    pub fn display_heights(&self) -> &[f64] {
+        if self.conservative {
+            &self.certificate.as_ref().unwrap().upper
+        } else {
+            &self.heights
+        }
+    }
+    pub fn remaining_bound(&self) -> Option<f64> {
+        self.certificate.as_ref().map(|s| s.remaining_upper_mm3())
+    }
     pub fn volumes(&self) -> (f64, f64) {
         let area = self.dx * self.dy;
         (
             self.initial
                 .iter()
-                .zip(&self.heights)
+                .zip(self.display_heights())
                 .map(|(a, h)| (a - h).max(0.) * area)
                 .sum(),
-            self.heights
+            self.display_heights()
                 .iter()
                 .zip(&self.floors)
                 .map(|(h, f)| (h - f).max(0.) * area)
@@ -715,7 +843,7 @@ impl Grid {
     }
 }
 /// Horizontal section of the swept XY capsule. Exact sweep checks still decide removal.
-fn capsule_row(a: Point3, b: Point3, r: f64, y: f64) -> Option<[f64; 2]> {
+pub(crate) fn capsule_row(a: Point3, b: Point3, r: f64, y: f64) -> Option<[f64; 2]> {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for p in [a, b] {

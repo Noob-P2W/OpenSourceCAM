@@ -111,6 +111,8 @@ pub enum Coolant {
 #[serde(deny_unknown_fields)]
 pub struct PostSettings {
     #[serde(default)]
+    pub linearize_arcs: bool,
+    #[serde(default)]
     pub use_tool_coolant: bool,
     pub processor: PostProcessor,
     pub work_offset: WorkOffset,
@@ -218,7 +220,7 @@ fn manual_change(
     }
     writeln!(
         output,
-        "G21\nG90\nG17\nG94\n{}",
+        "G21\nG90\nG17\nG91.1\nG94\n{}",
         project.post.work_offset.code()
     )
     .unwrap();
@@ -253,6 +255,7 @@ fn validate_manual_routes(project: &Project, path: &crate::cam::Toolpath) -> Res
         return Err("Manual tool-change Z must be at or above setup travel clearance".into());
     }
     let mut routes = crate::cam::Toolpath {
+        arcs: Vec::new(),
         moves: Vec::new(),
         cut_length: 0.,
         rapid_length: 0.,
@@ -311,6 +314,7 @@ fn validate_manual_routes(project: &Project, path: &crate::cam::Toolpath) -> Res
 pub fn gcode(project: &Project) -> Result<String, String> {
     let path = checked_path(project)?;
     let processor = project.post.processor;
+    let native_arcs = !project.post.linearize_arcs && crate::arcs::preflight(project, &path)?;
     let percent = matches!(processor, PostProcessor::Mach3 | PostProcessor::LinuxCnc);
     let mut output = String::new();
     if percent {
@@ -349,7 +353,7 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         );
     }
     writeln!(output, "(Project: {})", comment(&project.name)).unwrap();
-    output.push_str("G21\nG90\nG17\nG94\nG40\nG49\nG80\n");
+    output.push_str("G21\nG90\nG17\nG91.1\nG94\nG40\nG49\nG80\n");
     writeln!(output, "{}", project.post.work_offset.code()).unwrap();
     if matches!(processor, PostProcessor::Mach3 | PostProcessor::LinuxCnc) {
         output.push_str("G61\n");
@@ -398,9 +402,9 @@ pub fn gcode(project: &Project) -> Result<String, String> {
     // With ATC, the configured M6 routine establishes safe changer positioning
     // before compensation is enabled. The CAM program does not guess its path.
     writeln!(output, "G0 Z{:.4}", project.travel_clearance()).unwrap();
-    if automatic {
-        // M6 may leave XY at the changer. Restore the validated path start even
-        // when the planner omitted a zero-distance positioning move.
+    {
+        // Establish the validated start for every mounting mode, including an
+        // omitted zero-distance planner move or a previous controller position.
         let start = path.moves.first().ok_or("No generated moves")?.from;
         writeln!(output, "G0 X{:.4} Y{:.4}", start.x, start.y).unwrap();
     }
@@ -418,11 +422,27 @@ pub fn gcode(project: &Project) -> Result<String, String> {
     if initial_coolant == Coolant::Flood {
         output.push_str("M8\n");
     }
+    if !native_arcs && !path.arcs.is_empty() {
+        output.push_str("(Analytical arcs linearized by setting or conservative arc preflight)\n");
+    }
+    let mut posted = path
+        .moves
+        .first()
+        .map_or(crate::cam::Point3::default(), |m| crate::cam::Point3 {
+            x: round(m.from.x, 4),
+            y: round(m.from.y, 4),
+            z: round(m.from.z, 4),
+        });
+    let mut skip_until = 0;
+    let arcs: std::collections::BTreeMap<_, _> = path.arcs.iter().map(|a| (a.start, a)).collect();
     let mut current_op = None;
     let mut current_tool = first_record.map(|t| t.id);
     let mut current_rpm = first_tool.spindle_rpm;
     let mut current_coolant = initial_coolant;
-    for movement in &path.moves {
+    for (movement_index, movement) in path.moves.iter().enumerate() {
+        if movement_index < skip_until {
+            continue;
+        }
         if current_op != Some(movement.operation) {
             current_op = Some(movement.operation);
             let op = &project.operations[movement.operation];
@@ -431,6 +451,11 @@ pub fn gcode(project: &Project) -> Result<String, String> {
             let coolant = tool_coolant(project, op)?;
             let id = record.map(|t| t.id);
             if current_tool != id {
+                posted = crate::cam::Point3 {
+                    x: round(movement.from.x, 4),
+                    y: round(movement.from.y, 4),
+                    z: round(movement.from.z, 4),
+                };
                 let record = record.ok_or("Missing operation tool")?;
                 if manual {
                     manual_change(&mut output, project, op)?;
@@ -492,6 +517,41 @@ pub fn gcode(project: &Project) -> Result<String, String> {
             )
             .unwrap();
         }
+        if native_arcs {
+            if let Some(arc) = arcs.get(&movement_index) {
+                let end = crate::arcs::endpoint(&path, arc);
+                let line = format!(
+                    "{} X{:.6} Y{:.6} Z{:.6} I{:.6} J{:.6} F{:.4}",
+                    if arc.sweep < 0. { "G2" } else { "G3" },
+                    end.x,
+                    end.y,
+                    end.z,
+                    arc.center[0] - posted.x,
+                    arc.center[1] - posted.y,
+                    movement.feed
+                );
+                let start_radius = (posted.x - arc.center[0]).hypot(posted.y - arc.center[1]);
+                let end_radius = (end.x - arc.center[0]).hypot(end.y - arc.center[1]);
+                // Small circles whose rounded entry no longer fits the curve,
+                // and lines too long for GRBL, retain validated G1 samples.
+                if start_radius < 0.001
+                    || (start_radius - end_radius).abs() > start_radius * 0.001
+                    || (processor == PostProcessor::Grbl && line.len() >= 80)
+                {
+                    // Fall through to the ordinary first linear sample below.
+                } else {
+                    output.push_str(&line);
+                    output.push('\n');
+                    posted = crate::cam::Point3 {
+                        x: round(end.x, 6),
+                        y: round(end.y, 6),
+                        z: round(end.z, 6),
+                    };
+                    skip_until = arc.end;
+                    continue;
+                }
+            }
+        }
         match movement.motion {
             Motion::Rapid => {
                 if (movement.from.z - movement.to.z).abs() > 1e-7 {
@@ -510,6 +570,20 @@ pub fn gcode(project: &Project) -> Result<String, String> {
                 )
                 .unwrap();
             }
+        }
+        if movement.motion == Motion::Rapid {
+            if (movement.from.z - movement.to.z).abs() > 1e-7 {
+                posted.z = round(movement.to.z, 4);
+            } else {
+                posted.x = round(movement.to.x, 4);
+                posted.y = round(movement.to.y, 4);
+            }
+        } else {
+            posted = crate::cam::Point3 {
+                x: round(movement.to.x, 4),
+                y: round(movement.to.y, 4),
+                z: round(movement.to.z, 4),
+            };
         }
     }
     writeln!(
@@ -654,4 +728,12 @@ fn comment(text: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || " ._- /".contains(*c))
         .take(32)
         .collect()
+}
+
+fn round(value: f64, places: usize) -> f64 {
+    // Use the exact same tie handling as the NC formatter, including values
+    // such as 0.03125. Multiplication followed by round() is not equivalent.
+    format!("{value:.places$}")
+        .parse()
+        .expect("Formatted coordinate")
 }
