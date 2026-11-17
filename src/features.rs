@@ -913,6 +913,14 @@ pub fn draft(
     feature: &Feature,
     strategy: Strategy,
 ) -> Result<Operation, String> {
+    let strategy = if matches!(strategy, Strategy::Pocket | Strategy::CircularPocket) {
+        match feature.kind {
+            FeatureKind::CircularHole => Strategy::CircularPocket,
+            FeatureKind::RectangularPocket => Strategy::Pocket,
+        }
+    } else {
+        strategy
+    };
     if matches!(strategy, Strategy::Slot | Strategy::Chamfer)
         && matches!(
             feature.detail.shape,

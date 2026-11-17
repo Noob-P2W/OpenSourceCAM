@@ -424,3 +424,14 @@ simulation defaults to conservative whole-cell stock for rectangular blanks, wit
 mode-aware playback and OBJ export. Nonrectangular display stays sampled and
 thread/undercut simulation remains unsupported. See
 [remaining stock and arcs](REMAINING_STOCK_AND_ARCS.md).
+
+## Geometry-driven operation families
+
+The browser has one 2D contour command for internal/external walls. Rust resolves
+its compensation side from the selected model boundary before linking the draft.
+Pocket clearing groups rectangular, circular and model-region offset clearing in
+one family; selected circular features resolve to circular clearing, while general
+horizontal regions use model-aware offset clearing with islands. Numeric geometry
+variants remain editable. Existing saved strategy identifiers and toolpath engines
+are retained. Bore, circular and thread milling retain distinct cycles, and facing,
+planar finishing and outside clearing retain their distinct machining purposes.

@@ -408,6 +408,17 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             }
             op.settings.outside =
                 crate::faces::waste_side(part, origin, direction, &op.settings.path, closed)?;
+            if matches!(
+                strategy,
+                crate::model::Strategy::InsideProfile | crate::model::Strategy::OutsideProfile
+            ) {
+                op.strategy = if op.settings.outside {
+                    crate::model::Strategy::OutsideProfile
+                } else {
+                    crate::model::Strategy::InsideProfile
+                };
+                op.name = op.strategy.label().into();
+            }
             if strategy == crate::model::Strategy::Trace {
                 op.settings.trace_offset = true;
             }

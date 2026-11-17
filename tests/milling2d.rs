@@ -404,3 +404,69 @@ fn picked_slot_tolerates_coordinate_roundoff_and_edges_are_real_boundaries() {
     assert_eq!(edge.len(), 2);
     assert!(edge.iter().all(|q| (q[2] - b.max[2]).abs() < 1e-6));
 }
+
+#[test]
+fn pocket_family_resolves_shape_and_contour_family_resolves_material_side() {
+    use opensourcecam::{
+        commands::GeometryQuery,
+        features,
+        import::{self, Units},
+    };
+    let mut p = Project::from_part(
+        import::import_file(
+            std::path::Path::new("examples/models/mount.stl"),
+            Units::Millimetres,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    p.ensure_tool_library();
+    let report = features::recognize_project(&p).unwrap();
+    for kind in [
+        features::FeatureKind::RectangularPocket,
+        features::FeatureKind::CircularHole,
+    ] {
+        let f = report.features.iter().find(|f| f.kind == kind).unwrap();
+        for requested in [Strategy::Pocket, Strategy::CircularPocket] {
+            let op = features::draft(&p, f, requested).unwrap();
+            assert_eq!(
+                op.strategy,
+                if kind == features::FeatureKind::CircularHole {
+                    Strategy::CircularPocket
+                } else {
+                    Strategy::Pocket
+                }
+            );
+            assert!(op.model_link.is_some());
+        }
+    }
+    let bounds = p.part.as_ref().unwrap().bounds();
+    for requested in [Strategy::InsideProfile, Strategy::OutsideProfile] {
+        let op: opensourcecam::model::Operation = serde_json::from_value(
+            commands::geometry_query(
+                &p,
+                GeometryQuery::ChainDraft {
+                    origin: [bounds.min[0] + 1., bounds.min[1] + 1., bounds.max[2] + 10.],
+                    direction: [0., 0., -1.],
+                    strategy: requested,
+                    single_edge: false,
+                    existing_path: vec![],
+                    edge_tolerance: None,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            op.strategy,
+            if op.settings.outside {
+                Strategy::OutsideProfile
+            } else {
+                Strategy::InsideProfile
+            }
+        );
+        assert!(op.settings.outside, "Selected the exterior boundary");
+        p.operations = vec![op];
+        opensourcecam::machining::validate_links(&p).unwrap();
+    }
+}
