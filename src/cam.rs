@@ -8,14 +8,19 @@ const EPS: f64 = 1e-7;
 
 // A model opening is not proof that stock above it is already air. Only an
 // earlier whole-blank facing pass establishes a cleared starting level here.
-fn material_top(project: &Project, index: usize) -> f64 {
-    let requested = project.operations[index].settings.start_depth.unwrap_or(0.);
-    let cleared = project.operations[..index]
+fn cleared_top(project: &Project, index: usize) -> f64 {
+    project.operations[..index]
         .iter()
         .filter(|op| op.enabled && op.strategy == Strategy::Facing)
         .map(|op| op.depth - op.settings.axial_allowance)
-        .fold(0., f64::max);
-    requested.min(cleared)
+        .fold(0., f64::max)
+}
+fn material_top(project: &Project, index: usize) -> f64 {
+    project.operations[index]
+        .settings
+        .start_depth
+        .unwrap_or(0.)
+        .min(cleared_top(project, index))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -65,6 +70,11 @@ struct Builder {
     feed: f64,
     plunge: f64,
     rapid: f64,
+    ramp_angle: f64,
+    entry_radius: f64,
+    ramp_feed: f64,
+    lead_in_feed: f64,
+    lead_out_feed: f64,
 }
 
 impl Builder {
@@ -148,6 +158,23 @@ impl Builder {
         entry: crate::operation::Entry,
         tolerance: f64,
     ) -> Result<(), String> {
+        if entry == crate::operation::Entry::Plunge {
+            return self.enter(bounds[0], bounds[1], z);
+        }
+        let feed = self.feed;
+        self.feed = self.ramp_feed.min(feed);
+        let result = self.ramped_entry(bounds, previous, z, entry, tolerance);
+        self.feed = feed;
+        result
+    }
+    fn ramped_entry(
+        &mut self,
+        bounds: [f64; 4],
+        previous: f64,
+        z: f64,
+        entry: crate::operation::Entry,
+        tolerance: f64,
+    ) -> Result<(), String> {
         let [x0, y0, x1, y1] = bounds;
         if entry == crate::operation::Entry::Plunge {
             return self.enter(x0, y0, z);
@@ -157,7 +184,7 @@ impl Builder {
             if length <= EPS {
                 return Err("Ramp entry needs room along X".into());
             }
-            let passes = ((previous - z).abs() / (length * 3_f64.to_radians().tan()))
+            let passes = ((previous - z).abs() / (length * self.ramp_angle.to_radians().tan()))
                 .ceil()
                 .max(1.) as usize;
             if passes > MAX_LAYERS {
@@ -173,7 +200,7 @@ impl Builder {
             }
             return self.feed_cut(x0, y0, z);
         }
-        let radius = ((x1 - x0).min(y1 - y0) / 4.).min(1.);
+        let radius = ((x1 - x0).min(y1 - y0) / 2.).min(self.entry_radius);
         if radius <= EPS {
             return Err("Helix entry needs a wider pocket".into());
         }
@@ -187,7 +214,7 @@ impl Builder {
         }
         let circumference =
             2. * radius * (std::f64::consts::PI / segments as f64).sin() * segments as f64;
-        let turns = ((previous - z).abs() / (circumference * 3_f64.to_radians().tan()))
+        let turns = ((previous - z).abs() / (circumference * self.ramp_angle.to_radians().tan()))
             .ceil()
             .max(1.) as usize;
         if turns > MAX_LAYERS {
@@ -425,10 +452,11 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
             if op.strategy.is_drilling()
                 && (op.settings.radial_allowance > 0.0
                     || op.settings.axial_allowance > 0.0
-                    || op.settings.spring_passes > 0)
+                    || op.settings.spring_passes > 0
+                    || op.settings.finish_feed.is_some())
             {
                 return Err(
-                    "Stock allowances and contour spring passes do not apply to drilling".into(),
+                    "Stock allowances, finish feeds and contour spring passes do not apply to drilling".into(),
                 );
             }
             if op.strategy != Strategy::DrillOnce
@@ -591,29 +619,7 @@ pub fn generate_with_cancel(
                     continue;
                 }
                 let clockwise = project.library_tool(Some(op))?.is_none_or(|t| t.clockwise);
-                let climb = mode == crate::operation::MillingMode::Climb;
-                let internal = matches!(
-                    op.strategy,
-                    Strategy::Pocket
-                        | Strategy::CircularPocket
-                        | Strategy::InsideProfile
-                        | Strategy::AreaRough
-                ) || (op.strategy.is_round() && !op.settings.outside)
-                    || (op.strategy == Strategy::Chamfer && !op.settings.outside);
-                let cw = if op.has_chain() && !op.settings.closed {
-                    (climb == clockwise)
-                        == if op.model_link.is_some() {
-                            op.settings.outside
-                        } else {
-                            match op.strategy {
-                                Strategy::OutsideProfile => true,
-                                Strategy::InsideProfile => false,
-                                _ => op.settings.outside,
-                            }
-                        }
-                } else {
-                    internal != (climb == clockwise)
-                };
+                let cw = crate::operation::clockwise_for(op, mode, clockwise);
                 op.settings.direction = if cw {
                     crate::operation::Direction::Clockwise
                 } else {
@@ -642,6 +648,11 @@ pub fn generate_with_cancel(
         clearance: project.travel_clearance(),
         feed: project.tool.feed,
         plunge: project.tool.plunge,
+        ramp_angle: 3.,
+        entry_radius: project.tool.diameter / 4.,
+        ramp_feed: project.tool.feed,
+        lead_in_feed: project.tool.feed,
+        lead_out_feed: project.tool.feed,
         rapid: project.machine.as_ref().map_or(3000.0, |m| m.rapid_feed),
     };
     for (index, op) in project
@@ -654,6 +665,30 @@ pub fn generate_with_cancel(
         b.clearance = op.settings.clearance.unwrap_or(project.clearance);
         b.feed = tool.feed;
         b.plunge = tool.plunge;
+        let preset = project
+            .library_tool(Some(op))?
+            .map(|t| t.preset(op.preset_id))
+            .transpose()?;
+        let value = |name: &str, fallback: f64| {
+            preset
+                .and_then(|p| p.values.get(name))
+                .copied()
+                .unwrap_or(fallback)
+        };
+        b.entry_radius = tool.diameter / 4.;
+        b.ramp_angle = value("ramp_angle", 3.).min(3.);
+        b.ramp_feed = value("ramp_feed", tool.feed).min(tool.feed);
+        b.lead_in_feed = value("lead_in_feed", tool.feed).min(tool.feed);
+        b.lead_out_feed = value("lead_out_feed", tool.feed).min(tool.feed);
+        if matches!(op.strategy, Strategy::Pocket | Strategy::CircularPocket)
+            && op.settings.entry != crate::operation::Entry::Plunge
+            && b.ramp_angle <= 0.
+        {
+            return Err(
+                "The selected tool preset needs a positive ramp angle for ramp/helix entry".into(),
+            );
+        }
+
         let r = tool.diameter / 2.0;
         b.operation = index;
         if op.strategy.is_new_2d() || op.has_chain() {
@@ -819,8 +854,8 @@ pub fn generate_with_cancel(
                     1
                 };
                 let feed = b.feed;
-                for pass in 0..passes {
-                    if pass > 0 {
+                for _pass in 0..passes {
+                    if layer == layers {
                         b.feed = op.settings.finish_feed.unwrap_or(feed);
                     }
                     for row in 0..=rows {
@@ -871,6 +906,9 @@ pub fn generate_with_cancel(
                 b.enter(op.x, op.y - outer, z)?;
                 for ring in 0..=rings {
                     let offset = outer - (outer - final_offset) * ring as f64 / rings as f64;
+                    if layer == layers && ring == rings {
+                        b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
+                    }
                     b.outside_contour(
                         [op.x, op.y, op.x + op.width, op.y + op.height],
                         offset,
@@ -921,6 +959,9 @@ pub fn generate_with_cancel(
                     for ring in 1..=rings {
                         let current = radius * ring as f64 / rings as f64;
                         b.cut(op.x + current, op.y, z)?;
+                        if layer == layers && ring == rings {
+                            b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
+                        }
                         b.circle(
                             op.x,
                             op.y,
@@ -958,9 +999,9 @@ pub fn generate_with_cancel(
                 } else {
                     1
                 };
-                for pass in 0..passes {
-                    if pass > 0 {
-                        b.feed = op.settings.finish_feed.unwrap_or(feed)
+                for _pass in 0..passes {
+                    if layer == layers {
+                        b.feed = op.settings.finish_feed.unwrap_or(feed);
                     }
                     b.outside_contour(
                         [op.x, op.y, op.x + op.width, op.y + op.height],
@@ -1054,6 +1095,9 @@ pub fn generate_with_cancel(
                 b.cut(x0, y0, z)?;
             }
             // Internal centerlines are offset inward; cutter radius remains at internal corners.
+            if layer == layers {
+                b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
+            }
             let outline = if op.settings.direction == crate::operation::Direction::Clockwise {
                 [(x0, y1), (x1, y1), (x1, y0), (x0, y0)]
             } else {

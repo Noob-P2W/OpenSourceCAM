@@ -73,7 +73,7 @@ fn one_way_rows_spring_passes_and_peck_retracts_are_effective() {
             .iter()
             .filter(|m| m.motion == cam::Motion::Cut && m.feed == 150.0)
             .count(),
-        8
+        12 // Final wall pass plus two spring passes.
     );
     p.operations[0].strategy = Strategy::Drill;
     p.tool_library.tools = vec![opensourcecam::tool_library::LibraryTool::new(
@@ -84,6 +84,7 @@ fn one_way_rows_spring_passes_and_peck_retracts_are_effective() {
     p.active_tool = Some(1);
     p.active_preset = Some(1);
     p.operations[0].settings.spring_passes = 0;
+    p.operations[0].settings.finish_feed = None;
     p.operations[0].settings.retract = Some(2.0);
     let drill = cam::generate(&p).unwrap();
     assert!(drill

@@ -97,7 +97,7 @@ impl Strategy {
             Self::Bore => "Bore milling",
             Self::Circular => "Circular milling",
             Self::Thread => "Thread milling",
-            Self::Engrave => "Engraving",
+            Self::Engrave => "Contour engraving",
             Self::Chamfer => "Chamfer milling",
             Self::SurfaceSmooth => "Planar finishing",
             Self::AreaRough => "2D offset clearing",

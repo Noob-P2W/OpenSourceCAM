@@ -369,3 +369,16 @@ at cutting depth; disconnected regions retract. Overlapping blocked scanline
 intervals merge before mask construction. This is offset clearing, without a
 constant-engagement guarantee. The grid is bounded to 262,144 cells and can leave
 conservative residual stock controlled by Toolpath resolution.
+
+
+Planar clearing separates its reference face from its machining boundary.
+`clearing_boundary` is optional for saved-file compatibility: linked operations
+use the stock boundary by default, and numeric regions use the selected boundary.
+Stock mode extends the planar mask into air so complete stock-edge coverage does
+not depend on eroding a selected face. Model projections still protect raised
+geometry at every depth. Spindle-relative traversal and its displayed mode share
+`operation::clockwise_for` rather than independent UI/generator formulas.
+Pocket entry resolves angle/feed from the measured preset with conservative caps;
+Circular wall passes share a parametric tangent-lead helper. Exposed-surface
+confirmations and pre-roughed contour choices are manufacturing state, not camera
+or presentation state. See TOOLPATH_AUDIT.md for method contracts and references.

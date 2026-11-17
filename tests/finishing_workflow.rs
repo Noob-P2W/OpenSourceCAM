@@ -66,6 +66,7 @@ fn a_chamfered_slot_is_two_standard_operations_with_measured_chamfer() {
     assert!((path.moves.iter().map(|m| m.to.z).fold(0., f64::min) + 8.).abs() < 1e-7);
     let mut chamfer = features::draft(&p, &f, Strategy::Chamfer).unwrap();
     chamfer.tool_id = Some(2);
+    chamfer.settings.precleared = true;
     assert_eq!(chamfer.settings.chamfer_width, Some(0.5));
     assert!((chamfer.settings.chamfer_angle.unwrap() - 45.).abs() < 1e-7);
     p.operations = vec![chamfer];
@@ -86,6 +87,7 @@ fn zero_and_positive_finishing_offsets_never_cut_below_selected_edge() {
             [20., 40., -8.],
         ];
         op.settings.closed = true;
+        op.settings.precleared = true;
         op.settings.height_offset = Some(offset);
         p.operations.push(op);
         let path = cam::generate(&p).unwrap();

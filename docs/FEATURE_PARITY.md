@@ -393,10 +393,21 @@ bounded and is not an adaptive/constant-engagement algorithm.
 Operation labels use machining terms consistently: Face milling, 2D pocket
 clearing (rectangular/circular geometry), 2D contour (internal/external), Outside
 clearing, Slot milling, Planar finishing, Bore milling, Circular milling, Thread
-milling, Engraving, Chamfer milling, Drilling, Peck drilling, 3D offset clearing
+milling, Contour engraving, Chamfer milling, Drilling, Peck drilling, 3D offset clearing
 and Parallel finishing. Strategy IDs and user-supplied operation names remain
 portable. Legacy trochoidal pocket/trace strategies retain their generators and
 accurate labels, without being added back to the creation ribbon.
 
 Slot retains its own through-slot illustration. Software solid rendering
 preserves all imported workpiece triangles.
+
+
+The [milling toolpath audit](TOOLPATH_AUDIT.md) records externally referenced
+requirements and the supported contracts of all 20 current/legacy strategy IDs.
+Linked 2D offset clearing now defaults to stock-boundary machining with edge
+overrun; selected-face confinement remains an explicit option. Absolute-height
+contours honor axial stepdowns unless stock is confirmed pre-roughed. Finishing
+feed applies without spring passes. Circular wall passes have tangential leads
+per depth; pocket entry honors ramp preset angle/feed. Below-stock edge finishing
+requires an exposed-surface confirmation. Fixed-depth V grooves are labeled
+Contour engraving, distinct from variable-width V-carving.

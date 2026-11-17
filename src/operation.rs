@@ -36,9 +36,17 @@ pub enum MillingMode {
     Climb,
     Conventional,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClearingBoundary {
+    Stock,
+    Selected,
+}
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clearing_boundary: Option<ClearingBoundary>,
     pub height_offset: Option<f64>,
     pub milling_mode: Option<MillingMode>,
     pub islands: Vec<Vec<[f64; 3]>>,
@@ -158,5 +166,48 @@ impl Settings {
             return Err("Stock allowances must be finite and nonnegative".into());
         }
         Ok(())
+    }
+}
+
+/// Resolve geometric traversal from feed mode and spindle rotation in one place.
+/// Grid clearing outer boundaries are internal; their island loops reverse winding.
+pub fn clockwise_for(
+    op: &crate::model::Operation,
+    mode: MillingMode,
+    spindle_clockwise: bool,
+) -> bool {
+    use crate::model::Strategy;
+    let climb = mode == MillingMode::Climb;
+    if op.has_chain() && !op.settings.closed {
+        let right = if op.model_link.is_some() {
+            op.settings.outside
+        } else {
+            match op.strategy {
+                Strategy::OutsideProfile => true,
+                Strategy::InsideProfile => false,
+                _ => op.settings.outside,
+            }
+        };
+        return (climb == spindle_clockwise) == right;
+    }
+    let internal = matches!(
+        op.strategy,
+        Strategy::Pocket
+            | Strategy::CircularPocket
+            | Strategy::InsideProfile
+            | Strategy::AreaRough
+            | Strategy::SmoothRough
+            | Strategy::SurfaceRough
+    ) || (op.strategy.is_round() && !op.settings.outside)
+        || (op.strategy == Strategy::Chamfer && !op.settings.outside);
+    internal != (climb == spindle_clockwise)
+}
+pub fn inferred_milling_mode(op: &crate::model::Operation, spindle_clockwise: bool) -> MillingMode {
+    if clockwise_for(op, MillingMode::Climb, spindle_clockwise)
+        == (op.settings.direction == Direction::Clockwise)
+    {
+        MillingMode::Climb
+    } else {
+        MillingMode::Conventional
     }
 }
