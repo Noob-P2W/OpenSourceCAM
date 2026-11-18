@@ -1,3 +1,4 @@
+import {operationRgb} from './help.js';
 import {ThreeView} from './three-view.js';
 // Presentation only: display coordinates never feed machining calculations.
 export class Viewport {
@@ -52,7 +53,7 @@ export class Viewport {
  rebuild(project,workspace,simulation){
   this.canvas.dataset.sceneBuilds=String(Number(this.canvas.dataset.sceneBuilds||0)+1);
   this.release(this.cursorItem);
-  for(const item of this.buffers)this.release(item);this.buffers=[];this.scene=project;this.simulation=simulation;this.pathSource=null;this.pathFilter=undefined;this.pathBounds=null;this.pathBuffers=[];this.pathPrefixes=[];this.highlightSource=null;this.highlightBuffer=null;this.cursorItem=null;this.stockPieces=new Map();this.stockBuffers=[];
+  for(const item of this.buffers)this.release(item);this.buffers=[];this.scene=project;this.simulation=simulation;this.pathSource=null;this.pathFilter=undefined;this.pathBounds=null;this.pathBuffers=[];this.highlightSource=null;this.highlightBuffer=null;this.cursorItem=null;this.stockPieces=new Map();this.stockBuffers=[];
   const stock=project.stock;this.bounds={min:[0,0,-stock.thickness],max:[stock.width,stock.height,0]};
   const include=p=>{for(let i=0;i<3;i++){this.bounds.min[i]=Math.min(this.bounds.min[i],p[i]);this.bounds.max[i]=Math.max(this.bounds.max[i],p[i])}};
   if(project.part?.visible){const part=project.part,f=part.units==='inches'?25.4:1;const matrix=project._display?.part_transform;const transform=v=>matrix?[0,1,2].map(i=>matrix[0][i]*v[0]+matrix[1][i]*v[1]+matrix[2][i]*v[2]+matrix[3][i]):v.map((x,i)=>x*f+part.offset[i]);for(const v of part.geometry.mesh.vertices)include(transform(v));if(!simulation)this.mesh(part.geometry.mesh,transform,[.6,.79,.88],true,project._display?.part_geometry_key,matrix?.flat())}
@@ -87,11 +88,19 @@ export class Viewport {
   this.canvas.dataset.stockTriangles=String(this.stockBuffers.reduce((n,item)=>n+item.count/3,0));
  }
  updatePath(path,filter){
-  const visibility=[...(this.controls.hiddenOperations||[])].sort().join(',');if(this.pathSource===path&&this.pathFilter===filter&&this.pathVisibility===visibility)return;this.pathVisibility=visibility;if(this.toolPath!==path){this.toolEnvelope=null;this.toolPath=path}this.pathSource=path;this.pathFilter=filter;
-  for(const item of this.pathBuffers||[]){this.release(item);this.buffers.splice(this.buffers.indexOf(item),1)}this.pathBuffers=[];this.pathBounds=null;
-  if(!path)return;this.pathBounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};const cuts=[],rapids=[];this.pathPrefixes=[new Uint32Array(path.moves.length+1),new Uint32Array(path.moves.length+1)];path.moves.forEach((move,index)=>{for(const p of [move.from,move.to])for(let i=0;i<3;i++){this.pathBounds.min[i]=Math.min(this.pathBounds.min[i],p[i]);this.pathBounds.max[i]=Math.max(this.pathBounds.max[i],p[i])}const included=(filter===null||move.operation===filter)&&!this.controls.hiddenOperations?.has(move.operation);if(included)(move.rapid?rapids:cuts).push(move.from,move.to);for(let i=0;i<2;i++)this.pathPrefixes[i][index+1]=this.pathPrefixes[i][index]+(included&&Number(move.rapid)===i?2:0)});
-  this.pathBuffers=[this.lines(cuts,this.controls.dark?[.33,.96,.77]:[.02,.5,.4]),this.lines(rapids,[.76,.48,.28])];
+  const key=filter instanceof Set?[...filter].sort((a,b)=>a-b).join(','):String(filter);
+  const visibility=[...(this.controls.hiddenOperations||[])].sort().join(',');if(this.pathSource===path&&this.pathFilter===key&&this.pathVisibility===visibility)return;this.pathVisibility=visibility;if(this.toolPath!==path){this.toolEnvelope=null;this.toolPath=path}this.pathSource=path;this.pathFilter=key;
+  const oldPaths=new Set(this.pathBuffers||[]);for(const item of oldPaths)this.release(item);this.buffers=this.buffers.filter(item=>!oldPaths.has(item));this.pathBuffers=[];this.pathBounds=null;
+  if(!path)return;this.pathBounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};const groups=new Map();
+  path.moves.forEach((move,index)=>{
+   for(const p of [move.from,move.to])for(let i=0;i<3;i++){this.pathBounds.min[i]=Math.min(this.pathBounds.min[i],p[i]);this.pathBounds.max[i]=Math.max(this.pathBounds.max[i],p[i])}
+   if(!(filter===null||(filter instanceof Set?filter.has(move.operation):move.operation===filter))||this.controls.hiddenOperations?.has(move.operation))return;
+   const key=move.operation+':'+move.rapid;let group=groups.get(key);if(!group){group={operation:move.operation,rapid:move.rapid,points:[],ends:[]};groups.set(key,group);}group.points.push(move.from,move.to);group.ends.push(index+1);
+  });
+  for(const group of groups.values()){const strategy=this.scene?.operations?.[group.operation]?.strategy;const item=this.lines(group.points,operationRgb(strategy,this.controls.dark));item.operation=group.operation;item.rapid=group.rapid;item.strategy=strategy;item.moveEnds=Uint32Array.from(group.ends);this.pathBuffers.push(item);}
  }
+ pathCount(item,completed){let lo=0,hi=item.moveEnds.length;while(lo<hi){const mid=(lo+hi)>>>1;if(item.moveEnds[mid]<=completed)lo=mid+1;else hi=mid;}return lo*2;}
+ pathColor(item){return item.moveEnds?operationRgb(item.strategy,this.controls.dark||this.controls.hoveredOperation===item.operation).map((v,i)=>this.controls.dark&&this.controls.hoveredOperation===item.operation?v+(1-v)*0.3:v):item.color;}
  draw(project,workspace,path,progress,simulation,highlight,wireframe,showStock,filter=null,toolForOperation=null){
   const canvas=this.canvas,w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||this.lost)return;
   const dpr=Math.min(devicePixelRatio||1,2,Math.sqrt(4000000/(w*h)));if(!this.gl){if(canvas.width!==Math.floor(w*dpr))canvas.width=Math.floor(w*dpr);if(canvas.height!==Math.floor(h*dpr))canvas.height=Math.floor(h*dpr);}
@@ -109,7 +118,7 @@ export class Viewport {
   const move=path?.moves[Math.min(completed,path.moves.length-1)];
   const fraction=move?(completed===path.moves.length?1:Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)))):0;
   const cursor=move?move.from.map((v,i)=>v+(move.to[i]-v)*fraction):null;
-  const showCursor=cursor&&(filter===null||move.operation===filter);
+  const showCursor=cursor&&(filter===null||(filter instanceof Set?filter.has(move.operation):move.operation===filter));
   const tool=showCursor?toolForOperation?.(move.operation):null;this.setTool(tool||null);
   if(tool){if(!this.toolEnvelope)this.toolEnvelope={min:[...tool.min],max:[...tool.max]};else for(let i=0;i<3;i++){this.toolEnvelope.min[i]=Math.min(this.toolEnvelope.min[i],tool.min[i]);this.toolEnvelope.max[i]=Math.max(this.toolEnvelope.max[i],tool.max[i])}}
   // Fit the tool's swept envelope, rather than moving the camera with the cutter.
@@ -130,15 +139,15 @@ export class Viewport {
   if(this.screenAnchor){const {point,screenPoint}=this.screenAnchor,current=projectPoint(point);this.pan[0]+=screenPoint[0]-current[0];this.pan[1]+=screenPoint[1]-current[1];this.screenAnchor=null}
   this.projectWorld=projectPoint;
   const jawOffset=item=>{if(!item.jawMotion)return [0,0,0];if(item.jawMotion.start===null)item.jawMotion.start=performance.now();const fraction=Math.max(0,1-(performance.now()-item.jawMotion.start)/450);if(fraction>0)this.requestDraw();return item.jawMotion.from.map(v=>v*fraction)};
-  const visible=this.buffers.filter(item=>(!item.setupStock||showStock)&&(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!this.pathBuffers.includes(item)||this.controls.paths!==false)&&(item!==this.pathBuffers[1]||this.controls.rapids)).sort((a,b)=>(a.lines?2:a.selection?1:0)-(b.lines?2:b.selection?1:0));
+  const visible=this.buffers.filter(item=>(!item.setupStock||showStock)&&(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!item.moveEnds||this.controls.paths!==false)&&(!item.rapid||this.controls.rapids)).sort((a,b)=>(a.lines?2:a.selection?1:0)-(b.lines?2:b.selection?1:0));
   if(this.gl){
-   const items=visible.map(item=>{item.drawOffset=jawOffset(item);item.drawColor=(highlight?.component&&highlight.component.model===item.model&&(highlight.component.body===undefined||highlight.component.body===item.body)||highlight?.movingModel===item.model&&item.moving)?[1,.7,.28]:item.color;item.wireframe=wireframe&&!item.lines;const index=this.pathBuffers.indexOf(item);item.drawCount=index>=0?this.pathPrefixes[index][completed]:item.count;return item});
+   const items=visible.map(item=>{item.drawOffset=jawOffset(item);item.drawColor=(highlight?.component&&highlight.component.model===item.model&&(highlight.component.body===undefined||highlight.component.body===item.body)||highlight?.movingModel===item.model&&item.moving)?[1,.7,.28]:this.pathColor(item);item.wireframe=wireframe&&!item.lines;item.drawCount=item.moveEnds?this.pathCount(item,completed):item.count;return item});
    if(tool)for(const item of this.toolBuffers){item.drawOffset=cursor;item.drawColor=item.color;item.wireframe=false;item.drawCount=item.count;items.push(item)}
    if(showCursor&&!tool){if(!this.cursorItem)this.cursorItem={three:this.three.marker(),lines:true,color:[1,.35,.08],count:1};this.cursorItem.drawOffset=cursor;this.cursorItem.drawColor=this.cursorItem.color;this.cursorItem.drawCount=1;items.push(this.cursorItem)}
    this.three.render(items,{width:w,height:h,dpr,center,depth,up,scale,pan:this.pan,radius,dark:this.controls.dark});canvas.dataset.renderer='webgl';canvas.dataset.engine='three';canvas.dataset.geometryUploads=String(this.three.uploads);canvas.dataset.geometryCacheHits=String(this.three.hits);canvas.dataset.geometryBytes=String(this.three.cacheBytes);
   }else if(this.ctx){
    const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=this.controls.dark?'#0e171f':'#f2f5f6';ctx.fillRect(0,0,w,h);const faces=[];
-   const drawLine=item=>{const line=new Path2D();let count=item.count;const index=this.pathBuffers?.indexOf(item);if(index>=0)count=this.pathPrefixes[index][completed];for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${item.color.map(v=>Math.round(v*255)).join(',')})`;ctx.stroke(line)};
+   const drawLine=item=>{const line=new Path2D();let count=item.count;if(item.moveEnds)count=this.pathCount(item,completed);for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${this.pathColor(item).map(v=>Math.round(v*255)).join(',')})`;ctx.globalAlpha=item.rapid?.45:1;ctx.stroke(line);ctx.globalAlpha=1};
    if(visible.includes(this.gridLines))drawLine(this.gridLines);
    for(const item of visible){if(item.lines)continue;const motion=jawOffset(item);const stride=1;for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+motion[k])));faces.push({p,color:(highlight?.component&&highlight.component.model===item.model&&(highlight.component.body===undefined||highlight.component.body===item.body)||highlight?.movingModel===item.model&&item.moving)?[1,.7,.28]:item.color,reference:item.reference,z:p.reduce((n,v)=>n+v[2],0)/3})}}
    if(tool)for(const item of this.toolBuffers)for(let i=0;i<item.count;i+=3){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+cursor[k])));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3,tool:true})}
@@ -149,6 +158,6 @@ export class Viewport {
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
   canvas.dataset.selectionCopies=String((this.highlightItems||[]).filter(b=>!b.lines).reduce((n,b)=>n+b.count/3,0));canvas.dataset.referenceTriangles=String(this.buffers.filter(b=>b.reference).reduce((n,b)=>n+b.count/3,0));canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
   canvas.dataset.markerVisible=String(!!showCursor&&!tool);canvas.dataset.toolTriangles=String((this.toolBuffers||[]).reduce((n,item)=>n+item.count/3,0));canvas.dataset.toolId=tool?String(tool.library_id??'legacy'):'';canvas.dataset.toolTip=showCursor?cursor.join(','):'';canvas.dataset.toolOperation=showCursor?String(move.operation):'';
-  return {triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
+  return {timelineOperation:move?.operation??null,triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
  }
 }

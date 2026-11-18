@@ -1,6 +1,6 @@
 import {initScene} from './scene.js';
 import {initVise} from './vise.js';
-import {attachHelp,initEyes,installStaticHelp} from './help.js';
+import {operationColor,attachHelp,initEyes,installStaticHelp} from './help.js';
 import {loadWorkspace,readSnapshot,saveWorkspace} from './storage.js';
 import {BUILD_ID} from './build.js';
 import {Viewport} from './viewport.js';
@@ -63,9 +63,27 @@ let autoGenerateTimer=null;
 function scheduleGeneration(){clearTimeout(autoGenerateTimer);if(!shell?.prefs().autoGenerate)return;const rev=revision;autoGenerateTimer=setTimeout(function run(){if(rev!==revision||!shell.prefs().autoGenerate)return;if(busy||fieldsDirty){autoGenerateTimer=setTimeout(run,250);return;}if(project?.process==='milling'&&project.operations.some(o=>o.enabled)&&!path)$('generate').click();},600);}
 async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();await persist();throw e}}
+ operationSelection.clear();selectionAnchor=selected;viewport.controls.hoveredOperation=null;
  lastState=projectJSON();revision++;viewport.controls.hiddenOperations?.clear();path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();await persist();historyButtons();draw();scheduleGeneration()
 }
 function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);attachHelp(input,key,label);return input}
+let operationSelection=new Set(),selectionAnchor=0;
+function selectedOperations(){return operationSelection.size?operationSelection:new Set(project?.operations[selected]?[selected]:[]);}
+function selectOperation(index,event={}){
+ selectionAnchor=Math.max(0,Math.min(selectionAnchor,project.operations.length-1));for(const i of operationSelection)if(i>=project.operations.length)operationSelection.delete(i);
+ if(event.shiftKey){if(!(event.ctrlKey||event.metaKey))operationSelection.clear();for(let i=Math.min(selectionAnchor,index);i<=Math.max(selectionAnchor,index);i++)operationSelection.add(i);}
+ else if(event.ctrlKey||event.metaKey){if(operationSelection.size===0)operationSelection.add(selected);if(operationSelection.has(index))operationSelection.delete(index);else operationSelection.add(index);if(!operationSelection.size)operationSelection.add(index);selectionAnchor=index;}
+ else {operationSelection=new Set([index]);selectionAnchor=index;}
+ selected=operationSelection.has(index)?index:[...operationSelection].at(-1);draw();
+}
+let timelinePath,timelineOperation;
+function updateTimeline(){
+ if(timelinePath===path)return;timelinePath=path;timelineOperation=undefined;const bar=$('path-sections');bar.replaceChildren();const stops=[];
+ if(!path?.seconds){$('progress').style.background='';return;}
+ let blocks=[];for(const m of path.moves){let b=blocks.at(-1);if(!b||b.operation!==m.operation){b={operation:m.operation,start:m.start_seconds,end:m.end_seconds};blocks.push(b);}else b.end=m.end_seconds;}
+ for(const b of blocks){if(b.end<=b.start)continue;const op=project.operations[b.operation],color=operationColor(op?.strategy),start=b.start/path.seconds*100,end=b.end/path.seconds*100;stops.push(`${color} ${start}%`,`${color} ${end}%`);const button=document.createElement('button');button.type='button';button.dataset.operation=b.operation;button.style.background=color;button.style.width=(end-start)+'%';button.title=`${b.operation+1}. ${op?.name||'Operation'} · ${formatTime(b.start)}–${formatTime(b.end)}`;button.setAttribute('aria-label',button.title);button.onmouseenter=()=>{viewport.controls.hoveredOperation=b.operation;draw()};button.onmouseleave=()=>{viewport.controls.hoveredOperation=null;draw()};button.onclick=()=>{pausePlayback();$('progress').value=(b.start+Math.min(0.000001,(b.end-b.start)/2))/path.seconds*100;requestStockPreview(true);draw()};bar.append(button);}
+ $('progress').style.background=`linear-gradient(to right,${stops.join(',')})`;
+}
 function render(){if(!project)return;selected=Math.max(0,Math.min(selected,project.operations.length-1));$('title').textContent=project.name;$('title').title=project.name;renderSetup();renderExtras();refreshEditor();shell?.render();sceneUI?.render();draw()}
 async function adopt(p){project=p;serializedProject=null;selected=0;await changed();render()}
 function download(text,name){const url=URL.createObjectURL(new Blob([text],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)}
@@ -88,12 +106,13 @@ for(const action of ['plan','surface'])$(action).onclick=()=>task(async()=>{
 });
 let drawPending=false;
 function draw(){if(drawPending)return;drawPending=true;requestAnimationFrame(()=>{drawPending=false;paint()})}
-function paint(){
+function paint(){updateTimeline();
  if(!project)return;
 const visibleProgress=$('show-simulation').checked&&simulation&&path?simulation.summary.progress*100:Number($('progress').value);
 $('simulation-off').hidden=!($('show-simulation').checked||playing||simulation);$('simulation-off').disabled=busy;$('simulation-off-menu').disabled=busy||!($('show-simulation').checked||playing||simulation);
 $('canvas').dataset.stockProgress=$('show-simulation').checked&&simulation?String(simulation.summary.progress*100):'';if(path)$('playback-clock').textContent=`${formatTime(visibleProgress/100*path.seconds)} / ${formatTime(path.seconds)}`;
-const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show-simulation').checked?simulation:null,hoverSelection||highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selected:null,$('show-tool').checked?playbackTool:null);
+const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show-simulation').checked?simulation:null,hoverSelection||highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selectedOperations():null,$('show-tool').checked?playbackTool:null);
+ if(result&&timelineOperation!==result.timelineOperation){timelineOperation=result.timelineOperation;for(const button of $('path-sections').children){if(Number(button.dataset.operation)===timelineOperation)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');}}
  positionFeatureTags(result);
  if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name} · cutting Ø${result.tool.cutting_diameter} mm${result.tool.shaft_diameter!==result.tool.cutting_diameter?` · shaft Ø${result.tool.shaft_diameter} mm`:""}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
  if(result){if($('show-simulation').checked&&simulation)$('stock-playback-state').textContent=`Stock ${(simulation.summary.progress*100).toFixed(1)}% · ${simulation.resolution} cells · spacing ${Math.max(...simulation.summary.cell_size).toFixed(3)} mm${stockRequest?' · updating':simulation.preview?' · playback preview':' · inspected snapshot'}`;$('preview-detail').textContent=result.fallback?`Software preview: complete model surfaces. Full geometry is retained for CAM and project files.`:`${result.triangles.toLocaleString()} model triangles · Full geometry is retained for CAM and project files.`;}
@@ -312,7 +331,15 @@ viewport.onInspect=async (ray,pixel)=>{if(busy||!project.part)return;const rev=r
  else {const face=await engineCall('geometry',{data:{action:'pick',...ray}});if(rev!==revision)return;highlight=face;if(inspectionMode){inspection={title:face.planar_direction?'Planar surface':'Surface',fields:[['Area',`${face.area.toFixed(3)} mm²`],['Inclination',`${face.inclination_degrees.toFixed(2)}°`],['Normal',face.normal.map(n=>n.toFixed(4)).join(', ')],['Center',face.center.map(n=>n.toFixed(3)).join(', ')+' mm'],['Boundary edges',face.edge_lengths.length]]};if(pixel){let best=7,edge=-1;for(let i=0;i<face.segments.length;i+=2){const a=viewport.projectWorld(face.segments[i]),b=viewport.projectWorld(face.segments[i+1]),dx=b[0]-a[0],dy=b[1]-a[1],t=Math.max(0,Math.min(1,((pixel.x-a[0])*dx+(pixel.y-a[1])*dy)/(dx*dx+dy*dy||1))),distance=Math.hypot(pixel.x-a[0]-t*dx,pixel.y-a[1]-t*dy);if(distance<best){best=distance;edge=i/2}}if(edge>=0){inspection={title:'Surface boundary edge',fields:[['Length',`${face.edge_lengths[edge].toFixed(3)} mm`],['Start',face.segments[edge*2].map(n=>n.toFixed(3)).join(', ')+' mm'],['End',face.segments[edge*2+1].map(n=>n.toFixed(3)).join(', ')+' mm']]};highlight={segments:face.segments.slice(edge*2,edge*2+2),outline:[]}}}shell.render()}status(`Surface · area ${face.area.toFixed(2)} mm² · normal ${face.normal.map(n=>n.toFixed(2)).join(', ')} · Z ${face.z.toFixed(3)} mm`)}draw();
 }catch(error){if(error.message.includes('No model face')){inspection=null;if(inspectionMode)shell.render();clearGeometrySelection();status('Selection cleared')}else status(error.message,true)}};
 function operationActions(index){
- const op=project.operations[index];return [
+ if(!selectedOperations().has(index)){selectOperation(index);render();}
+ const op=project.operations[index];
+ if(selectedOperations().has(index)&&selectedOperations().size>1){const indices=new Set(selectedOperations());return [
+  {label:`Enable ${indices.size} selected operations`,action:()=>task(async()=>{for(const i of indices)project.operations[i].enabled=true;await changed();operationSelection=new Set(indices);render()})},
+  {label:`Disable ${indices.size} selected operations`,action:()=>task(async()=>{for(const i of indices)project.operations[i].enabled=false;await changed();operationSelection=new Set(indices);render()})},
+  {label:'Show selected paths',action:()=>{for(const i of indices)viewport.controls.hiddenOperations?.delete(i);render()}},
+  {label:'Hide selected paths',action:()=>{viewport.controls.hiddenOperations??=new Set();for(const i of indices)viewport.controls.hiddenOperations.add(i);render()}},
+ ];}
+ return [
   {label:'Edit operation',action:()=>shell.openOperation(index)},
   {label:'Operation enabled',checked:op.enabled,action:()=>task(async()=>{op.enabled=!op.enabled;await changed();render()})},
   {label:'Duplicate operation',action:()=>task(()=>sessionEdit({kind:'duplicate_operation',index}))},
@@ -434,7 +461,7 @@ viseUI=initVise({project:()=>project,call,edit:sessionEdit,task,status,viewport,
 $('fit-vise').onclick=()=>sceneUI.centerVise();
 sceneUI=initScene({project:()=>project,call,edit:sessionEdit,task,status,viewport,highlight:(id,body)=>{if(inspectionMode)toggleInspection(false);if(viewport.controls.clampingStock)cancelPicking();highlight={component:{model:id,body}};draw()},viseOpen:()=>viseUI.isOpen(),suspendVise:()=>viseUI.suspend(),editExampleVise:model=>shell.openVise(model),openVise:id=>{sceneUI.close();viseUI.open(id)},viseState:id=>viseUI.treeState(id),toggleBody:(id,body,checked)=>viseUI.toggleBody(id,body,checked)});
 $('open-vise-library').onclick=()=>viseUI.showLibrary();
-shell=initShell({project:()=>project,inspectionMode:()=>inspectionMode,inspection:()=>inspection,toggleInspection,sendToVise,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,select:index=>{selected=index;if(inspectionMode){inspectionMode=false;inspection=null;document.body.dataset.featureInspect='false'}},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,operationActions,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,pickOperation,recognizeAll,cancelPicking,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
+shell=initShell({project:()=>project,inspectionMode:()=>inspectionMode,inspection:()=>inspection,toggleInspection,sendToVise,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,selectedOperations,select:(index,event)=>{selectOperation(index,event);if(inspectionMode){inspectionMode=false;inspection=null;document.body.dataset.featureInspect='false'}},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,operationActions,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,pickOperation,recognizeAll,cancelPicking,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
 $('machine-file').onchange=()=>task(async()=>{const file=$('machine-file').files[0];if(!file)return;$('machine-file').value='';await shell.importMachine(file);shell.openMachines()});
 await task(async()=>{
  catalog=await call('catalog');await shell.restoreLibraries();renderHome();const loaded=await loadWorkspace(),saved=loaded.data;let failed=false;

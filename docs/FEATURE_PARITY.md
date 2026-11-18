@@ -463,3 +463,19 @@ with shared vertex maxima and merged flat strips, rather than internal voxel wal
 The conservative removal kernel and reported cell-volume bound remain unchanged;
 the rendered envelope can retain additional material. This is a 2.5D approximation,
 not solid CSG or an undercut simulation. Nonrectangular stock retains sampled columns.
+
+## Operation colors and selection
+
+Browser paths, list color strips and playback sections share stable strategy-family
+colors. Rapid moves retain the operation color at reduced opacity. List/timeline
+hover brightens the corresponding path without rebuilding its buffers. Playback
+sections use Rust-provided move start/end times, including rapids; clicking a
+section seeks its start. The native range control retains keyboard scrubbing.
+
+Ctrl/Command-click toggles operations and Shift-click extends a contiguous range;
+plain click selects one. The selected-path filter accepts the complete selection.
+Context actions enable/disable the group in one validated Session transaction,
+with one undo step, and can show/hide selected paths. Editing opens the active
+operation. Selection is presentation state; operation order and NC are unchanged.
+Stock simulation continues to process the complete chronological operation sequence
+when path display is filtered.

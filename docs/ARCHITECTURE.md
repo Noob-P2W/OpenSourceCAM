@@ -395,3 +395,9 @@ validate true-curve extrema/feed and fixture envelopes before emitting G2/G3 wit
 G91.1 I/J centres; unsupported/uncertain spans retain G1. Browser mode/resolution/epoch
 keys invalidate incremental simulation together. See
 [remaining stock and arcs](REMAINING_STOCK_AND_ARCS.md) for controls and limits.
+
+Path presentation groups line buffers by operation and motion class. Each group
+keeps a sparse sorted list of global move-end indices, so playback clips each
+buffer with binary search and total index storage remains proportional to moves.
+Hover changes material colors only. Timeline sections consume existing Rust timing;
+JavaScript does not estimate machining time or alter stock-removal scope.
