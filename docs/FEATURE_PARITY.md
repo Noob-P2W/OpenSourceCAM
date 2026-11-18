@@ -439,3 +439,27 @@ planar finishing and outside clearing retain their distinct machining purposes.
 Software settings includes a manual Check for updates action, with current-version,
 download, offline and failure status. A waiting update uses the existing workspace
 autosave and activation flow through Save workspace and update.
+
+## Planar outside clearing and automatic calculation
+
+Outside clearing can pick a closed horizontal exterior/island boundary, like 2D
+contour. Its measured plane supplies the bottom; positive tip offsets leave stock.
+Each layer protects the selected island and all neighboring model material above
+that plane. Open or internal pocket boundaries are rejected. Saved numeric and
+whole-model outside jobs retain their previous interpretation; reselect geometry
+to use planar clearing. Edge overlays remain visible over coincident solid faces,
+and edge snap distances use normalized rays.
+
+Software settings adds optional automatic generation after committed project edits,
+with debounce, revision checks and busy/edit guards. Failures remain visible and do
+not trigger a retry loop. Milling direction includes Optimized: climb on closed
+loops, nearest compensated entry on open chains (either milling direction there).
+Closed loop entry rotation retains winding. Redundant offset-pocket boundary laps
+are omitted; finish and spring feeds remain separate. Native arc posting and all
+clearance/fixture checks remain active.
+
+Rectangular conservative stock now uses a continuous triangulated upper envelope,
+with shared vertex maxima and merged flat strips, rather than internal voxel walls.
+The conservative removal kernel and reported cell-volume bound remain unchanged;
+the rendered envelope can retain additional material. This is a 2.5D approximation,
+not solid CSG or an undercut simulation. Nonrectangular stock retains sampled columns.

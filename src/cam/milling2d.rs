@@ -60,6 +60,8 @@ fn area_paths(
     cancel: &AtomicBool,
 ) -> Result<Vec<Vec<Point3>>, String> {
     let (mut rings, z) = face_region(op)?;
+    let contour_clearing = op.strategy == Strategy::StockRough && op.has_chain();
+    let retained = contour_clearing.then(|| rings[0].clone());
     if op.model_link.is_some() {
         rings.truncate(1);
     }
@@ -67,7 +69,7 @@ fn area_paths(
     let stock_boundary = op
         .settings
         .clearing_boundary
-        .map_or(op.model_link.is_some(), |b| {
+        .map_or(op.model_link.is_some() || contour_clearing, |b| {
             b == crate::operation::ClearingBoundary::Stock
         });
     if stock_boundary {
@@ -84,14 +86,14 @@ fn area_paths(
             [-margin, p.stock.height + margin, floor],
         ];
     }
-    let mut obstacles = Vec::new();
+    let mut obstacles = retained.into_iter().collect::<Vec<_>>();
     if let Some(part) = &p.part {
         for triangle in &part.geometry.mesh.triangles {
             let points: Vec<_> = triangle
                 .iter()
                 .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
                 .collect();
-            let floor = if op.strategy == Strategy::StockRough {
+            let floor = if op.strategy == Strategy::StockRough && !contour_clearing {
                 f64::NEG_INFINITY
             } else {
                 level - op.settings.axial_allowance
@@ -292,6 +294,26 @@ pub(super) fn clear_model_exterior(
     b.retract()
 }
 fn cut_chain(chain: &[Point3], b: &mut Builder, cancel: &AtomicBool) -> Result<(), String> {
+    // Rotate a closed loop without reversing its milling direction or crossing
+    // its retained island. The entry segment uses normal clearance checks.
+    let rotated;
+    let chain = if chain.len() > 3 && chain[0].distance(*chain.last().unwrap()) < 1e-7 {
+        let n = chain.len() - 1;
+        let nearest = (0..n)
+            .min_by(|a, c| {
+                b.position
+                    .distance(chain[*a])
+                    .total_cmp(&b.position.distance(chain[*c]))
+            })
+            .unwrap();
+        rotated = (0..=n)
+            .map(|i| chain[(nearest + i) % n])
+            .collect::<Vec<_>>();
+        &rotated[..]
+    } else {
+        chain
+    };
+
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
     if chain
         .windows(2)
@@ -333,14 +355,29 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
     } else {
         op.depth - op.settings.axial_allowance
     };
-    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
-        if op.strategy == Strategy::AreaRough
+    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough)
+        || (op.strategy == Strategy::StockRough && op.has_chain())
+    {
+        if (op.strategy == Strategy::AreaRough
+            || (op.strategy == Strategy::StockRough && op.has_chain()))
             && (op.settings.spring_passes > 0 || op.settings.finish_feed.is_some())
         {
             return Err("2D offset clearing has no separate finishing/spring pass; add a contour or planar finishing operation".into());
         }
         if op.strategy == Strategy::SurfaceSmooth && op.settings.spring_passes > 0 {
             return Err("Planar finishing does not use contour spring passes; add another finishing operation".into());
+        }
+        if op.strategy == Strategy::StockRough
+            && (!op.settings.closed || op.settings.path.len() < 3)
+        {
+            return Err("Outside clearing requires a closed planar contour".into());
+        }
+        if op.strategy == Strategy::StockRough
+            && op.settings.clearing_boundary == Some(crate::operation::ClearingBoundary::Selected)
+        {
+            return Err(
+                "Outside clearing uses the stock boundary around the retained island".into(),
+            );
         }
         let (rings, z) = face_region(op)?;
         if rings.iter().flatten().any(|q| !p.stock.contains(*q, 0.002)) {
@@ -362,7 +399,9 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         if z > op.settings.clearance.unwrap_or(p.clearance) || z < -p.stock.thickness - EPS {
             return Err("Planar machining height is outside stock/clearance limits".into());
         }
-        if op.strategy == Strategy::AreaRough {
+        if op.strategy == Strategy::AreaRough
+            || (op.strategy == Strategy::StockRough && op.has_chain())
+        {
             if op.settings.height_offset.unwrap_or(0.) < 0. {
                 return Err("2D offset clearing cannot cut below the selected face".into());
             }
@@ -710,7 +749,14 @@ pub(super) fn generate(
     } else {
         start(op)
     };
-    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
+    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough)
+        || (op.strategy == Strategy::StockRough && op.has_chain())
+    {
+        if op.strategy == Strategy::StockRough
+            && (!op.settings.closed || op.settings.path.len() < 3)
+        {
+            return Err("Outside clearing requires a closed planar contour".into());
+        }
         let (rings, z) = face_region(op)?;
         let paths = if op.strategy == Strategy::SurfaceSmooth {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?
@@ -720,18 +766,24 @@ pub(super) fn generate(
         if op.strategy == Strategy::SurfaceSmooth {
             b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
         }
-        let layers = if op.strategy == Strategy::AreaRough {
+        let layers = if op.strategy == Strategy::AreaRough
+            || (op.strategy == Strategy::StockRough && op.has_chain())
+        {
             ((-z / tool.step_down).ceil() as usize).max(1)
         } else {
             1
         };
         for layer in 1..=layers {
-            let level = if op.strategy == Strategy::AreaRough {
+            let level = if op.strategy == Strategy::AreaRough
+                || (op.strategy == Strategy::StockRough && op.has_chain())
+            {
                 -(layer as f64 * tool.step_down).min(-z)
             } else {
                 z
             };
-            if op.strategy == Strategy::AreaRough {
+            if op.strategy == Strategy::AreaRough
+                || (op.strategy == Strategy::StockRough && op.has_chain())
+            {
                 for chain in area_paths(p, op, level, cancel)? {
                     cut_chain(&chain, b, cancel)?;
                 }
@@ -777,7 +829,15 @@ pub(super) fn generate(
                 a[0] * c[1] - c[0] * a[1]
             })
             .sum::<f64>();
-        let reverse = if op.settings.closed {
+        let reverse = if op.settings.optimize_entry && !op.settings.closed {
+            let point = |q: [f64; 3]| Point3 {
+                x: q[0],
+                y: q[1],
+                z: b.position.z,
+            };
+            b.position.distance(point(*points.last().unwrap()))
+                < b.position.distance(point(points[0]))
+        } else if op.settings.closed {
             (area < 0.) != (op.settings.direction == Direction::Clockwise)
         } else {
             op.settings.direction == Direction::Clockwise
@@ -788,6 +848,15 @@ pub(super) fn generate(
             } else {
                 points.reverse();
             }
+        }
+        if op.settings.closed && !points.is_empty() {
+            let nearest = (0..points.len())
+                .min_by(|a, c| {
+                    let distance = |q: [f64; 3]| (q[0] - b.position.x).hypot(q[1] - b.position.y);
+                    distance(points[*a]).total_cmp(&distance(points[*c]))
+                })
+                .unwrap();
+            points.rotate_left(nearest);
         }
         let target = contour_target(op);
         let axial_top = -material_top(p, index);

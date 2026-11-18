@@ -408,3 +408,107 @@ fn conservative_nonrectangular_stock_retains_physical_sampled_columns() {
     assert!(sim.summary.remaining_upper_bound_mm3.unwrap() > sim.summary.remaining_volume_mm3);
     assert_eq!(sim.heights[0], -p.stock.thickness);
 }
+
+#[test]
+fn planar_outside_clearing_stops_at_selected_floor_and_retains_the_selected_island() {
+    let mut p = job();
+    let mut o = commands::operation_template(&p, Strategy::StockRough);
+    o.settings.path = vec![
+        [15., 12., -3.],
+        [30., 12., -3.],
+        [30., 26., -3.],
+        [15., 26., -3.],
+    ];
+    o.settings.closed = true;
+    o.settings.height_offset = Some(0.);
+    o.settings.step_down = Some(1.);
+    use opensourcecam::import::{Geometry, Mesh, Part, SourceFormat, Units};
+    let mut vertices = Vec::new();
+    for z in [-5., 0.] {
+        for (x, y) in [(36., 15.), (43., 15.), (43., 22.), (36., 22.)] {
+            vertices.push([x, y, z]);
+        }
+    }
+    p.part = Some(Part {
+        geometry: std::sync::Arc::new(Geometry {
+            bodies: vec![],
+            removed_degenerate_triangles: 0,
+            source_name: "neighbor.obj".into(),
+            format: SourceFormat::Obj,
+            mesh: Mesh {
+                vertices,
+                triangles: vec![
+                    [0, 2, 1],
+                    [0, 3, 2],
+                    [4, 5, 6],
+                    [4, 6, 7],
+                    [0, 1, 5],
+                    [0, 5, 4],
+                    [1, 2, 6],
+                    [1, 6, 5],
+                    [2, 3, 7],
+                    [2, 7, 6],
+                    [3, 0, 4],
+                    [3, 4, 7],
+                ],
+            },
+            cad_source: None,
+        }),
+        units: Units::Millimetres,
+        offset: [0.; 3],
+        rotation: [0.; 3],
+        visible: true,
+    });
+    p.operations = vec![o];
+    let path = cam::generate(&p).unwrap();
+    assert!(path.moves.iter().any(|m| m.motion == Motion::Cut));
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!((m.from.z - m.to.z).abs() < 1e-8);
+        assert!(m.to.z >= -3. - 1e-8);
+        for i in 0..=10 {
+            let t = i as f64 / 10.;
+            let q = [
+                m.from.x + (m.to.x - m.from.x) * t,
+                m.from.y + (m.to.y - m.from.y) * t,
+            ];
+            let dx = (15. - q[0]).max(q[0] - 30.).max(0.);
+            let dy = (12. - q[1]).max(q[1] - 26.).max(0.);
+            let nx = (36. - q[0]).max(q[0] - 43.).max(0.);
+            let ny = (15. - q[1]).max(q[1] - 22.).max(0.);
+            assert!(
+                nx.hypot(ny) >= 3. - 1e-6,
+                "A neighboring feature was crossed"
+            );
+            assert!(dx.hypot(dy) >= 3. - 1e-6, "Selected island was crossed");
+        }
+    }
+    p.operations[0].settings.height_offset = Some(-0.5);
+    assert!(cam::generate(&p).is_err());
+}
+
+#[test]
+fn conservative_surface_has_slopes_instead_of_internal_voxel_walls() {
+    let mut p = job();
+    p.operations = vec![pocket(&p)];
+    let path = cam::generate(&p).unwrap();
+    let sim =
+        stock::simulate_mode(&p, &path, 1., 64, &AtomicBool::new(false), 50_000_000, true).unwrap();
+    let mesh = &sim.geometry.mesh;
+    let mut slopes = 0;
+    for tri in &mesh.triangles {
+        let q = tri.map(|i| mesh.vertices[i as usize]);
+        let n = opensourcecam::import::normal(q);
+        if n[2].abs() > 1e-10 && (q[0][2] - q[1][2]).abs().max((q[0][2] - q[2][2]).abs()) > 1e-8 {
+            slopes += 1;
+        }
+        if n[2].abs() < 1e-10 {
+            assert!(
+                (0..2).any(|axis| q.iter().all(|v| v[axis].abs() < 1e-8)
+                    || q.iter()
+                        .all(|v| (v[axis] - [p.stock.width, p.stock.height][axis]).abs() < 1e-8)),
+                "Internal block wall remained in continuous surface"
+            );
+        }
+    }
+    assert!(slopes > 0);
+}

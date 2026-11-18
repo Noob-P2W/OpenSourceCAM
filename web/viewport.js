@@ -99,7 +99,7 @@ export class Viewport {
   if(this.highlightSource!==highlight){
    for(const item of this.highlightItems||[]){this.release(item);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
    this.highlightItems=[];this.highlightSource=highlight;
-   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}this.highlightItems.push(this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.hover?[.1,.65,1]:[1,.45,.04]));}
+   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
   }
 
   // Both the model's tip and the old marker use the shared estimated-time cursor.

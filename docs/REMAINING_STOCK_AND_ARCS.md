@@ -42,8 +42,9 @@ conservative rest clearing, not an engagement-controlled adaptive strategy.
 ## Simulation
 
 The browser defaults to **Conservative remaining stock**. Rectangular blanks show
-the whole-cell upper envelope, including residual boundary ridges. Raise resolution
-to reduce those ridges. Playback, detailed inspection and downloaded stock OBJ use
+a continuous conservative upper envelope, with shared vertices taking the maximum
+of adjacent whole-cell heights and flat strips merged to reduce mesh size. Raise
+resolution to reduce conservative residual material. Playback, detailed inspection and downloaded stock OBJ use
 the same selected mode. Seeking, editing, changing resolution or changing mode
 invalidates the incremental state. Work/mesh limits still return explicit errors.
 

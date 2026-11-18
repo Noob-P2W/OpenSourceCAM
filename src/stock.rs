@@ -244,7 +244,7 @@ fn calculate_mode(
     let mut notes=vec!["Grid heightfield approximation; small features and exact boundary shapes depend on preview resolution. This is not a full solid-removal certification.".into(),"Machine bodies and spindle kinematics are not collision checked. Fixture checks use conservative cylindrical cutting-tool, shaft and defined-holder envelopes, not exact tool solids.".into()];
     if conservative {
         notes.insert(0, if grid.conservative {
-            "Conservative stock: a cell is lowered only after its entire area is covered by a cutter sweep. Boundary ridges shrink with increased resolution. Remaining volume is an upper bound on this 2.5D envelope.".into()
+            "Conservative stock: cells require complete cutter coverage. A continuous triangulated display uses the maximum neighboring cell height at shared vertices. Volume is the cell upper bound; the display can retain extra material. This remains a 2.5D approximation.".into()
         } else { "Nonrectangular blank: the mesh uses sampled physical columns; the separate remaining-stock bound uses the enclosing rectangular blank.".into() });
     }
     if !comparable {
@@ -693,6 +693,9 @@ impl Grid {
         limit: usize,
         cancel: &AtomicBool,
     ) -> Result<Mesh, String> {
+        if self.conservative {
+            return self.surface_rows(rows, limit, cancel);
+        }
         let nx = self.nx;
         let ny = self.ny;
         let dx = self.dx;
@@ -810,6 +813,108 @@ impl Grid {
                             p[3][2] = z0;
                             quad(p)?
                         }
+                    }
+                }
+            }
+        }
+        Ok(mesh)
+    }
+    /// Continuous conservative surface: shared vertices use the maximum of
+    /// adjacent whole-cell upper bounds. This never interpolates stock away.
+    fn surface_rows(
+        &self,
+        rows: std::ops::Range<usize>,
+        limit: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Mesh, String> {
+        let h = self.display_heights();
+        let nx = self.nx;
+        let ny = self.ny;
+        let vertex = |x: usize, y: usize| {
+            let mut z = self.bottom;
+            for cy in y.saturating_sub(1)..=y.min(ny - 1) {
+                for cx in x.saturating_sub(1)..=x.min(nx - 1) {
+                    z = z.max(h[cy * nx + cx]);
+                }
+            }
+            z
+        };
+        let mut mesh = Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+        };
+        let mut quad = |p: [[f64; 3]; 4]| -> Result<(), String> {
+            if mesh.triangles.len() + 2 > limit {
+                return Err(
+                    "Stock preview surface exceeds its triangle budget; reduce preview resolution"
+                        .into(),
+                );
+            }
+            let i = mesh.vertices.len() as u32;
+            mesh.vertices.extend(p);
+            mesh.triangles
+                .extend([[i, i + 1, i + 2], [i, i + 2, i + 3]]);
+            Ok(())
+        };
+        for y in rows {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Stock preview cancelled".into());
+            }
+            let mut x = 0;
+            while x < nx {
+                let start = x;
+                let z = [vertex(x, y), vertex(x, y + 1)];
+                x += 1;
+                // Merge flat strips rather than emit a cube for every sample.
+                if vertex(x, y) == z[0] && vertex(x, y + 1) == z[1] {
+                    while x < nx && vertex(x + 1, y) == z[0] && vertex(x + 1, y + 1) == z[1] {
+                        x += 1;
+                    }
+                }
+                let a = start as f64 * self.dx;
+                let b = x as f64 * self.dx;
+                let c = y as f64 * self.dy;
+                let d = c + self.dy;
+                let e = [vertex(x, y), vertex(x, y + 1)];
+                if z.into_iter().chain(e).any(|q| q > self.bottom + 1e-9) {
+                    quad([[a, c, z[0]], [b, c, e[0]], [b, d, e[1]], [a, d, z[1]]])?;
+                    quad([
+                        [a, d, self.bottom],
+                        [b, d, self.bottom],
+                        [b, c, self.bottom],
+                        [a, c, self.bottom],
+                    ])?;
+                    if y == 0 {
+                        quad([
+                            [a, c, self.bottom],
+                            [b, c, self.bottom],
+                            [b, c, e[0]],
+                            [a, c, z[0]],
+                        ])?;
+                    }
+                    if y + 1 == ny {
+                        quad([
+                            [a, d, z[1]],
+                            [b, d, e[1]],
+                            [b, d, self.bottom],
+                            [a, d, self.bottom],
+                        ])?;
+                    }
+                    if start == 0 {
+                        quad([
+                            [a, c, z[0]],
+                            [a, d, z[1]],
+                            [a, d, self.bottom],
+                            [a, c, self.bottom],
+                        ])?;
+                    }
+                    if x == nx {
+                        quad([
+                            [b, c, self.bottom],
+                            [b, d, self.bottom],
+                            [b, d, e[1]],
+                            [b, c, e[0]],
+                        ])?;
                     }
                 }
             }

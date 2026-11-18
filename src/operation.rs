@@ -33,6 +33,7 @@ pub enum Entry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MillingMode {
+    Optimized,
     Climb,
     Conventional,
 }
@@ -45,6 +46,8 @@ pub enum ClearingBoundary {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    #[serde(skip)]
+    pub optimize_entry: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stock_clearance: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,7 +188,7 @@ pub fn clockwise_for(
     spindle_clockwise: bool,
 ) -> bool {
     use crate::model::Strategy;
-    let climb = mode == MillingMode::Climb;
+    let climb = mode != MillingMode::Conventional;
     if op.has_chain() && !op.settings.closed {
         let right = if op.model_link.is_some() {
             op.settings.outside
@@ -206,7 +209,8 @@ pub fn clockwise_for(
             | Strategy::AreaRough
             | Strategy::SmoothRough
             | Strategy::SurfaceRough
-    ) || (op.strategy.is_round() && !op.settings.outside)
+    ) || (op.strategy == Strategy::StockRough && op.has_chain())
+        || (op.strategy.is_round() && !op.settings.outside)
         || (op.strategy == Strategy::Chamfer && !op.settings.outside);
     internal != (climb == spindle_clockwise)
 }

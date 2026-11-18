@@ -441,7 +441,11 @@ fn pocket_family_resolves_shape_and_contour_family_resolves_material_side() {
         }
     }
     let bounds = p.part.as_ref().unwrap().bounds();
-    for requested in [Strategy::InsideProfile, Strategy::OutsideProfile] {
+    for requested in [
+        Strategy::InsideProfile,
+        Strategy::OutsideProfile,
+        Strategy::StockRough,
+    ] {
         let op: opensourcecam::model::Operation = serde_json::from_value(
             commands::geometry_query(
                 &p,
@@ -457,16 +461,121 @@ fn pocket_family_resolves_shape_and_contour_family_resolves_material_side() {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            op.strategy,
-            if op.settings.outside {
-                Strategy::OutsideProfile
-            } else {
-                Strategy::InsideProfile
-            }
-        );
+        if requested == Strategy::StockRough {
+            assert_eq!(op.strategy, Strategy::StockRough);
+            assert_eq!(op.settings.height_offset, Some(0.));
+        } else {
+            assert_eq!(
+                op.strategy,
+                if op.settings.outside {
+                    Strategy::OutsideProfile
+                } else {
+                    Strategy::InsideProfile
+                }
+            );
+        }
         assert!(op.settings.outside, "Selected the exterior boundary");
         p.operations = vec![op];
         opensourcecam::machining::validate_links(&p).unwrap();
     }
+}
+
+#[test]
+fn optimized_open_chain_chooses_nearest_compensated_endpoint() {
+    let mut p = job(Strategy::OutsideProfile);
+    p.operations[0].settings.path = vec![[60., 20., 0.], [20., 20., 0.]];
+    p.operations[0].settings.closed = false;
+    p.operations[0].settings.milling_mode = Some(opensourcecam::operation::MillingMode::Optimized);
+    let path = cam::generate(&p).unwrap();
+    let cut = path.moves.iter().find(|m| m.motion == Motion::Cut).unwrap();
+    assert!(
+        cut.from.x < cut.to.x,
+        "Should approach the endpoint nearest the initial position"
+    );
+}
+
+#[test]
+fn edge_picking_is_independent_of_ray_vector_length() {
+    use opensourcecam::{
+        faces,
+        import::{self, Units},
+    };
+    let p = Project::from_part(
+        import::import_file(
+            std::path::Path::new("examples/models/mount.stl"),
+            Units::Millimetres,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let part = p.part.as_ref().unwrap();
+    let b = part.bounds();
+    let origin = [b.min[0] + 1., b.min[1] + 1., b.max[2] + 10.];
+    let a = faces::machining_edges(part, origin, [0., 0., -1.], false, Some(2.)).unwrap();
+    let c = faces::machining_edges(part, origin, [0., 0., -1000.], false, Some(2.)).unwrap();
+    assert_eq!(a, c);
+}
+
+#[test]
+fn offset_pocket_does_not_repeat_the_boundary_without_a_spring_pass() {
+    let mut p = job(Strategy::Pocket);
+    let op = &mut p.operations[0];
+    op.width = 30.;
+    op.height = 25.;
+    op.settings.pocket_pattern = PocketPattern::Offset;
+    op.settings.spring_passes = 0;
+    let path = cam::generate(&p).unwrap();
+    let op = &p.operations[0];
+    let r = p.operation_tool(op).unwrap().diameter / 2.;
+    let y = op.y + r;
+    let full_edges = path
+        .moves
+        .iter()
+        .filter(|m| {
+            m.motion == Motion::Cut
+                && (m.from.y - y).abs() < 1e-7
+                && (m.to.y - y).abs() < 1e-7
+                && (m.to.x - m.from.x).abs() > op.width - 2. * r - 1e-7
+        })
+        .count();
+    assert_eq!(
+        full_edges, 3,
+        "Exactly one outside lap at each depth, not two"
+    );
+}
+
+#[test]
+fn pocket_floor_boundary_has_internal_compensation_even_though_its_floor_is_solid() {
+    use opensourcecam::{
+        faces, features,
+        import::{self, Units},
+    };
+    let p = Project::from_part(
+        import::import_file(
+            std::path::Path::new("examples/models/mount.stl"),
+            Units::Millimetres,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let report = features::recognize_project(&p).unwrap();
+    let f = report
+        .features
+        .iter()
+        .find(|f| f.kind == features::FeatureKind::RectangularPocket)
+        .unwrap();
+    let path = vec![
+        [f.min[0], f.min[1], f.bottom_z],
+        [f.max[0], f.min[1], f.bottom_z],
+        [f.max[0], f.max[1], f.bottom_z],
+        [f.min[0], f.max[1], f.bottom_z],
+    ];
+    assert!(!faces::waste_side(
+        p.part.as_ref().unwrap(),
+        [0.; 3],
+        [0., 0., -1.],
+        &path,
+        true
+    )
+    .unwrap());
 }

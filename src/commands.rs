@@ -377,6 +377,7 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
                     | crate::model::Strategy::Chamfer
                     | crate::model::Strategy::InsideProfile
                     | crate::model::Strategy::OutsideProfile
+                    | crate::model::Strategy::StockRough
             ) {
                 return Err("This operation does not use an edge chain".into());
             }
@@ -406,8 +407,18 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             ) {
                 op.settings.height_offset = Some(0.);
             }
+            if strategy == crate::model::Strategy::StockRough {
+                if !closed {
+                    return Err("Outside clearing requires a closed planar contour".into());
+                }
+                op.settings.height_offset = Some(0.);
+            }
             op.settings.outside =
                 crate::faces::waste_side(part, origin, direction, &op.settings.path, closed)?;
+            if strategy == crate::model::Strategy::StockRough && !op.settings.outside {
+                return Err("Select an exterior wall or island boundary; use pocket clearing for an internal pocket".into());
+            }
+
             if matches!(
                 strategy,
                 crate::model::Strategy::InsideProfile | crate::model::Strategy::OutsideProfile

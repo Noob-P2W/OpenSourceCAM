@@ -720,6 +720,14 @@ pub fn generate_with_cancel(
                 if op.strategy == Strategy::Thread {
                     continue;
                 }
+                // Closed contours retain climb milling. Open chains can choose
+                // their entry endpoint from the actual current tool position.
+                if mode == crate::operation::MillingMode::Optimized
+                    && op.has_chain()
+                    && !op.settings.closed
+                {
+                    op.settings.optimize_entry = true;
+                }
                 let clockwise = project.library_tool(Some(op))?.is_none_or(|t| t.clockwise);
                 let cw = crate::operation::clockwise_for(op, mode, clockwise);
                 op.settings.direction = if cw {
@@ -835,6 +843,7 @@ pub fn generate_with_cancel(
 
         let r = tool.diameter / 2.0;
         b.operation = index;
+
         if op.strategy.is_new_2d() || op.has_chain() {
             milling2d::generate(project, op, index, &mut b, cancel)?;
             b.clearance = project.travel_clearance();
@@ -1226,6 +1235,9 @@ pub fn generate_with_cancel(
                     } else {
                         [(a, d), (c, d), (c, e), (a, e), (a, d)]
                     };
+                    if layer == layers && ring == rings {
+                        b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
+                    }
                     for (x, y) in points {
                         b.cut(x, y, z)?
                     }
@@ -1266,9 +1278,14 @@ pub fn generate_with_cancel(
             } else {
                 [(x1, y0), (x1, y1), (x0, y1), (x0, y0)]
             };
-            for (x, y) in outline {
-                b.cut(x, y, z)?;
+            if !(op.strategy == Strategy::Pocket
+                && op.settings.pocket_pattern == crate::operation::PocketPattern::Offset)
+            {
+                for (x, y) in outline {
+                    b.cut(x, y, z)?;
+                }
             }
+
             if layer == layers {
                 let previous = b.feed;
                 b.feed = op.settings.finish_feed.unwrap_or(previous);

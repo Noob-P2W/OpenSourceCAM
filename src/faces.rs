@@ -532,13 +532,32 @@ pub fn waste_side(
         })
         .sum::<f64>();
     let sign = if closed && area < 0. { -1. } else { 1. };
-    let q = [
-        (a[0] + b[0]) / 2. - sign * d[1] / len * 0.001,
-        (a[1] + b[1]) / 2. + sign * d[0] / len * 0.001,
-    ];
-    let origin = [q[0], q[1], part.bounds().max[2] + 1.];
-    let material =
-        ray_hit(part, origin, [0., 0., -1.]).is_ok_and(|(_, t)| origin[2] - t >= a[2] - 1e-5);
+    let top = |q: [f64; 2]| {
+        let origin = [q[0], q[1], part.bounds().max[2] + 1.];
+        ray_hit(part, origin, [0., 0., -1.])
+            .ok()
+            .map(|(_, t)| origin[2] - t)
+    };
+    let midpoint = [(a[0] + b[0]) / 2., (a[1] + b[1]) / 2.];
+    let mut material = false;
+    for distance in [0.001_f64, 0.01, 0.05] {
+        let delta = distance.min(len / 4.);
+        let normal = [-sign * d[1] / len * delta, sign * d[0] / len * delta];
+        let inside = top([midpoint[0] + normal[0], midpoint[1] + normal[1]]);
+        let outside = top([midpoint[0] - normal[0], midpoint[1] - normal[1]]);
+        if let Some(inside) = inside {
+            material = inside >= a[2] - 1e-5;
+            if outside.is_none_or(|h| inside > h + 1e-5) {
+                return Ok(true);
+            }
+            if outside.is_some_and(|h| inside < h - 1e-5) {
+                return Ok(false);
+            }
+        } else if outside.is_some() {
+            return Ok(false);
+        }
+    }
+
     Ok(material)
 }
 
@@ -600,6 +619,8 @@ pub fn machining_edges(
     {
         return Err("Invalid edge-selection ray or tolerance".into());
     }
+    let length = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let direction = direction.map(|v| v / length);
     let face_hit = ray_hit(part, origin, direction).ok().map(|(_, t)| t);
     type Key = [i64; 3];
     type Edge = (Key, Key);
