@@ -100,7 +100,8 @@ export class Viewport {
   for(const group of groups.values()){const strategy=this.scene?.operations?.[group.operation]?.strategy;const item=this.lines(group.points,operationRgb(strategy,this.controls.dark));item.operation=group.operation;item.rapid=group.rapid;item.strategy=strategy;item.moveEnds=Uint32Array.from(group.ends);this.pathBuffers.push(item);}
  }
  pathCount(item,completed){let lo=0,hi=item.moveEnds.length;while(lo<hi){const mid=(lo+hi)>>>1;if(item.moveEnds[mid]<=completed)lo=mid+1;else hi=mid;}return lo*2;}
- pathColor(item){return item.moveEnds?operationRgb(item.strategy,this.controls.dark||this.controls.hoveredOperation===item.operation).map((v,i)=>this.controls.dark&&this.controls.hoveredOperation===item.operation?v+(1-v)*0.3:v):item.color;}
+ pathColor(item){return item.moveEnds?operationRgb(item.strategy,this.controls.hoveredOperation===item.operation?.55:this.controls.dark?.2:0):item.color;}
+
  draw(project,workspace,path,progress,simulation,highlight,wireframe,showStock,filter=null,toolForOperation=null){
   const canvas=this.canvas,w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||this.lost)return;
   const dpr=Math.min(devicePixelRatio||1,2,Math.sqrt(4000000/(w*h)));if(!this.gl){if(canvas.width!==Math.floor(w*dpr))canvas.width=Math.floor(w*dpr);if(canvas.height!==Math.floor(h*dpr))canvas.height=Math.floor(h*dpr);}
