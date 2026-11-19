@@ -467,10 +467,13 @@ not solid CSG or an undercut simulation. Nonrectangular stock retains sampled co
 ## Operation colors and selection
 
 Browser paths, list color strips and playback sections share stable strategy-family
-colors. Rapid moves retain the operation color at reduced opacity. List/timeline
+colors. Rapid moves retain the operation color at reduced opacity. List
 hover brightens the corresponding path without rebuilding its buffers. Playback
-sections use Rust-provided move start/end times, including rapids; clicking a
-section seeks its start. The native range control retains keyboard scrubbing.
+colors use Rust-provided move start/end times, including rapids, on a single
+native playback slider. Pointer and keyboard scrubbing remain available; there
+is no separate upper timeline bar. Thin separators distinguish adjacent operations
+even when they share a type color. The categorical palette uses more separated
+hues and retains saturation in dark mode.
 
 Ctrl/Command-click toggles operations and Shift-click extends a contiguous range;
 plain click selects one. The selected-path filter accepts the complete selection.
