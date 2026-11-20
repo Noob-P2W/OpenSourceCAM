@@ -30,7 +30,10 @@ try{for(const software of [false,true]){
   const path={seconds:1,moves:[{from:[0,0,0],to:[500,500,200],operation:0,rapid:true,start_seconds:0,end_seconds:1}]};
   const tool={min:[-20,-20,0],max:[20,20,1000],meshes:[mesh],cutting_diameter:6};v.draw(project,[],path,50,{mesh},null,false,true,null,()=>tool);
   const scaleError=Math.abs(v.viewScale-scale),afterError=Math.hypot(...v.projectWorld(point).slice(0,2).map((x,i)=>x-screen[i]));
-  v.three?.dispose();c.remove();return{error,pivotError,scaleError,afterError,immediateError,tapRayError};
+  // A layout change can precede the next paint; picking must already agree
+  // with projection at the new canvas size.
+  const beforeResize=v.projectWorld(point);c.style.height='340px';const resized=v.projectWorld(point),resizeProjectionError=Math.abs(resized[1]-beforeResize[1]+30),resizeRay=v.pickRay(...resized),rt=point.reduce((n,x,i)=>n+(x-resizeRay.origin[i])*resizeRay.direction[i],0),resizeRayError=Math.hypot(...point.map((x,i)=>x-resizeRay.origin[i]-rt*resizeRay.direction[i]));
+  v.three?.dispose();c.remove();return{error,pivotError,scaleError,afterError,immediateError,tapRayError,resizeRayError,resizeProjectionError};
  },software);
  for(const [key,value] of Object.entries(stable))assert.ok(value<1e-5,`${key}: ${JSON.stringify(stable)}`);
  await context.close();console.log(`PASS: ${software?'software':'WebGL'} panned wheel/cursor, viewport-center buttons, moving pinch anchor and zoom limits`);
