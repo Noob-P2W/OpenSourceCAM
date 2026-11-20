@@ -1,0 +1,38 @@
+Command: node web/vise-wizard-smoke.mjs
+PASS: 390px real gripping-face picks, jaw contact, pose persistence, reopen and reusable device vise library
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'Save to vise library', exact: true })
+    - locator resolved to <button type="button">Save to vise library</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div tabindex="0" role="separator" id="browser-resizer" class="browser-resizer" aria-orientation="vertical" aria-label="Resize project sidebar"></div> intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div tabindex="0" role="separator" id="browser-resizer" class="browser-resizer" aria-orientation="vertical" aria-label="Resize project sidebar"></div> intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    58 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div tabindex="0" role="separator" id="browser-resizer" class="browser-resizer" aria-orientation="vertical" aria-label="Resize project sidebar"></div> intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+
+    at /home/runner/work/OpenSourceCAM/OpenSourceCAM/web/vise-wizard-smoke.mjs:17:333 {
+  name: 'TimeoutError'
+}
+
+Node.js v22.23.5
