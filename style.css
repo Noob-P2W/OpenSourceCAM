@@ -87,3 +87,21 @@ body[data-edge-picking="true"] .feature-tags{display:none}
 .playback-track{flex:1;min-width:100px}#progress{width:100%;min-width:0;appearance:none;-webkit-appearance:none;height:8px;border-radius:4px;margin:4px 0}#progress::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;background:#fff;border:2px solid #233b50;border-radius:50%}#progress::-moz-range-thumb{width:12px;height:12px;background:#fff;border:2px solid #233b50;border-radius:50%}#progress::-moz-range-track{background:transparent}
 
 #progress{padding:0;border:0;min-height:0;display:block}#progress::-webkit-slider-runnable-track{height:8px;background:transparent}#progress::-webkit-slider-thumb{margin-top:-3.5px}#progress::-moz-range-progress{background:transparent}
+
+/* Imported vise controls occupy the actual inspector column. */
+body:has(#inspector .vise-dock[open]) .side-panels{display:flex}
+body:has(#inspector .vise-dock[open]) .canvas-host{margin-right:0}
+#inspector:has(.vise-dock[open]){display:flex;flex-direction:column;padding:0;overflow:hidden}
+#inspector:has(.vise-dock[open])>:not(.vise-dock){display:none}
+#inspector .vise-dock[open]{position:static;display:flex;flex-direction:column;width:100%;height:100%;max-height:none;max-width:none;min-width:0;margin:0;border:0;border-radius:0;box-shadow:none;z-index:auto}
+#inspector .vise-dock .dialog-body{flex:1;min-height:0;overflow:auto}
+@media(min-width:1100px){body:has(#inspector .vise-dock[open]) .workbench{grid-template-columns:var(--browser-width,260px) minmax(0,1fr) var(--editor-width,320px)}body[data-browser-floating=true]:has(#inspector .vise-dock[open]) .workbench{grid-template-columns:0 minmax(0,1fr) var(--editor-width,320px)}}
+
+#selection-hint[data-unavailable=true]{color:var(--danger,#c53b30)}
+@media(max-width:1099px){body:has(#inspector .vise-dock[open]) .workbench{grid-template-rows:minmax(160px,1fr) 36dvh}body:has(#inspector .vise-dock[open]) #inspector{grid-column:1/-1;grid-row:2;min-height:0;height:36dvh;position:static;max-height:none}body:has(#inspector .vise-dock[open]) .viewer{grid-row:1;min-height:0}}
+/* Eligibility messages must not move the face away from a stationary pointer. */
+.viewer-controls #selection-hint{flex:1 1 240px;min-width:0;max-width:100%;height:44px;box-sizing:border-box;overflow:auto}
+@media(max-width:1099px){body[data-geometry-picking=true][data-feature-inspect=true] .side-panels{display:none}body[data-geometry-picking=true][data-feature-inspect=true] .viewer{padding-bottom:0}}
+@media(min-width:700px) and (max-width:1099px){body[data-geometry-picking=true][data-feature-inspect=true] .workbench{grid-template-columns:var(--browser-width,260px) minmax(0,1fr)}}
+/* A stacked vise inspector is below the project/view row, outside its resize handle. */
+@media(min-width:700px) and (max-width:1099px){body:has(#inspector .vise-dock[open]) .browser-resizer{bottom:36dvh}}

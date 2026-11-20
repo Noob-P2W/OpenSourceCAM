@@ -9,7 +9,7 @@ export class Viewport {
   if(!this.gl)this.ctx=canvas.getContext('2d');
   canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();this.lost=true;onStatus('3D graphics paused by the browser. Waiting to restore the view…',true)});
   canvas.addEventListener('webglcontextrestored',()=>{this.lost=false;this.toolSource=null;this.scene=null;requestDraw();onStatus('3D view restored')});
-  canvas.addEventListener('pointerdown',event=>{this.pickStart=this.pointers.size===0&&event.button===0?[event.clientX,event.clientY]:null;canvas.setPointerCapture(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);this.gesture=null;if(this.pointers.size===2){const points=[...this.pointers.values()];this.gesture={distance:Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center:[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2]}}});
+  canvas.addEventListener('pointerdown',event=>{this.pickStart=this.pointers.size===0&&event.button===0?[event.clientX,event.clientY]:null;canvas.setPointerCapture(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);this.gesture=null;if(this.pointers.size===1&&(event.button===1||event.pointerType==='touch'))this.beginOrbit(event.clientX,event.clientY);if(this.pointers.size===2){const points=[...this.pointers.values()];this.gesture={distance:Math.hypot(points[0][0]-points[1][0],points[0][1]-points[1][1]),center:[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2]}}});
   canvas.addEventListener('pointermove',event=>{
    if(!this.pointers.has(event.pointerId)){if(this.onHover&&this.pickRay){const rect=canvas.getBoundingClientRect();this.onHover(this.pickRay(event.clientX-rect.left,event.clientY-rect.top));}return;}
    const old=this.pointers.get(event.pointerId);this.pointers.set(event.pointerId,[event.clientX,event.clientY]);const points=[...this.pointers.values()];
@@ -27,12 +27,28 @@ export class Viewport {
  initGL(){this.three=new ThreeView(this.canvas,this.gl);this.canvas.camViewport=this;}
  release(item){if(item?.three)this.three?.remove(item.three)}
  setView(preset){this.preset=preset;this.yaw=preset==='top'||preset==='front'?-Math.PI/2:preset==='right'?0:-Math.PI/4;this.elevation=preset==='top'?Math.PI/2:['front','right'].includes(preset)?0:preset==='axo'?Math.PI/6:Math.asin(1/Math.sqrt(3));this.fit(this.fitTarget||(this.includeReferences?'all':'part'))}
- fit(mode='part'){this.focusBounds=null;this.fixedScale=null;this.screenAnchor=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
+ fit(mode='part'){this.cameraFrame=null;this.focusBounds=null;this.fixedScale=null;this.screenAnchor=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
  // Keep a physical reference steady across a work-origin edit; explicit Fit releases the scale.
  keepPointOnScreen(point,screenPoint){
   if(point?.length<3||screenPoint?.length<2||!point?.slice(0,3).every(Number.isFinite)||!screenPoint?.slice(0,2).every(Number.isFinite))return;
   if(this.viewScale)this.fixedScale=this.viewScale/this.zoom;
   this.screenAnchor={point:[...point],screenPoint:[...screenPoint]};this.requestDraw();
+ }
+ // Use the visible surface under the pointer as the orbit pivot. Empty space
+ // falls back to the plane through the current view centre.
+ beginOrbit(clientX,clientY){
+  if(!this.cameraFrame||!this.pickRay)return;
+  const rect=this.canvas.getBoundingClientRect(),x=clientX-rect.left,y=clientY-rect.top,ray=this.pickRay(x,y);
+  const solids=this.buffers.filter(b=>!b.lines&&!b.selection&&!b.setupStock);
+  let point=this.three?.pickPoint(ray,solids);
+  if(!this.gl){
+   let nearest=Infinity;const sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+   for(const item of solids)for(let i=0;i<item.count;i+=3){const [a,b,c]=[0,1,2].map(j=>Array.from(item.data.subarray((i+j)*6,(i+j)*6+3))),e1=sub(b,a),e2=sub(c,a),h=cross(ray.direction,e2),det=dot(e1,h);if(Math.abs(det)<1e-12)continue;const v=sub(ray.origin,a),u=dot(v,h)/det;if(u<0||u>1)continue;const q=cross(v,e1),w=dot(ray.direction,q)/det;if(w<0||u+w>1)continue;const t=dot(e2,q)/det;if(t>=0&&t<nearest){nearest=t;point=ray.origin.map((v,k)=>v+t*ray.direction[k])}}
+  }
+  if(!point){const c=this.cameraFrame.center,t=c.reduce((n,v,i)=>n+(v-ray.origin[i])*(-ray.direction[i]),0);point=ray.origin.map((v,i)=>v-t*ray.direction[i])}
+  const screen=this.projectWorld(point);// Keep the current picking/projection closures on the same centre array,
+  // including a touch tap released before the next animation frame.
+  this.cameraFrame.center.splice(0,3,...point);this.pan=[screen[0]-this.canvas.clientWidth/2,screen[1]-this.canvas.clientHeight/2];
  }
  magnify(factor,anchor=[this.canvas.clientWidth/2,this.canvas.clientHeight/2]){if(!Number.isFinite(factor)||factor<=0)return;const next=Math.max(.1,Math.min(30,this.zoom*factor)),ratio=next/this.zoom;this.pan=this.pan.map((pan,i)=>{const offset=anchor[i]-(i?this.canvas.clientHeight:this.canvas.clientWidth)/2;return offset-(offset-pan)*ratio});this.zoom=next;this.requestDraw()}
  upload(data,color,lines=false,retain=true){const item={data,color,lines,count:data.length/6};if(this.gl){item.three=this.three.upload(data,color,lines);delete item.data;}if(retain)this.buffers.push(item);return item}
@@ -109,7 +125,7 @@ export class Viewport {
   if(this.highlightSource!==highlight){
    for(const item of this.highlightItems||[]){this.release(item);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
    this.highlightItems=[];this.highlightSource=highlight;
-   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
+   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.unavailable?[1,.35,.2]:highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.unavailable?[.9,.15,.05]:highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
   }
 
   // Both the model's tip and the old marker use the shared estimated-time cursor.
@@ -122,21 +138,21 @@ export class Viewport {
   const showCursor=cursor&&(filter===null||(filter instanceof Set?filter.has(move.operation):move.operation===filter));
   const tool=showCursor?toolForOperation?.(move.operation):null;this.setTool(tool||null);
   if(tool){if(!this.toolEnvelope)this.toolEnvelope={min:[...tool.min],max:[...tool.max]};else for(let i=0;i<3;i++){this.toolEnvelope.min[i]=Math.min(this.toolEnvelope.min[i],tool.min[i]);this.toolEnvelope.max[i]=Math.max(this.toolEnvelope.max[i],tool.max[i])}}
-  // Fit the tool's swept envelope, rather than moving the camera with the cutter.
+  // Only explicit Fit changes framing. Playback, tool changes and orbit must not refit.
   let frame=this.includeReferences?this.allBounds:this.bounds;
   if(this.fitTarget&&!this.focusBounds){const m=workspace.find(m=>m.id===this.fitTarget.model),b=project.workspace?.find(m=>m.id===this.fitTarget.model)?.part.geometry.bodies?.[this.fitTarget.body];if(m){const indices=b?m.triangles.slice(b.first_triangle,b.first_triangle+b.triangle_count).flat():null;const points=indices?indices.map(i=>m.vertices[i]):m.vertices;frame={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};this.focusBounds=frame;for(const p of points)for(let i=0;i<3;i++){frame.min[i]=Math.min(frame.min[i],p[i]);frame.max[i]=Math.max(frame.max[i],p[i])}}}
   frame=this.focusBounds||frame;
-  const bounds={min:frame.min.map((v,i)=>Math.min(v,((this.fitTarget?null:this.pathBounds)?.min[i]??v)+((this.fitTarget?null:this.toolEnvelope)?.min[i]??0))),max:frame.max.map((v,i)=>Math.max(v,((this.fitTarget?null:this.pathBounds)?.max[i]??v)+((this.fitTarget?null:this.toolEnvelope)?.max[i]??0)))};
+  const bounds={min:frame.min.map((v,i)=>Math.min(v,((this.includeReferences?this.pathBounds:null)?.min[i]??v)+((this.includeReferences?this.toolEnvelope:null)?.min[i]??0))),max:frame.max.map((v,i)=>Math.max(v,((this.includeReferences?this.pathBounds:null)?.max[i]??v)+((this.includeReferences?this.toolEnvelope:null)?.max[i]??0)))};
   for(const p of this.annotationPoints||[])for(let i=0;i<3;i++){bounds.min[i]=Math.min(bounds.min[i],p[i]);bounds.max[i]=Math.max(bounds.max[i],p[i])}
-  const center=bounds.min.map((v,i)=>(v+bounds.max[i])/2),radius=Math.max(.001,Math.hypot(...bounds.max.map((v,i)=>v-bounds.min[i]))/2);
+  const center=this.cameraFrame?.center||bounds.min.map((v,i)=>(v+bounds.max[i])/2),radius=Math.max(.001,Math.hypot(...bounds.max.map((v,i)=>v-bounds.min[i]))/2);
   const cy=Math.cos(this.yaw),sy=Math.sin(this.yaw),ce=Math.cos(this.elevation),se=Math.sin(this.elevation);const right=[-sy,cy,0],up=[-se*cy,-se*sy,ce],depth=[ce*cy,ce*sy,se];const dot=(a,b)=>a.reduce((n,x,i)=>n+x*b[i],0);
-  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);const scale=(this.fixedScale??Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey))))*this.zoom;this.viewScale=scale;
+  let ex=0,ey=0;for(let mask=0;mask<8;mask++){const v=center.map((x,i)=>(mask&(1<<i)?bounds.max[i]:bounds.min[i])-x);ex=Math.max(ex,Math.abs(dot(v,right)));ey=Math.max(ey,Math.abs(dot(v,up)))}const margin=Math.min(this.annotationPoints?.length?100:40,Math.min(w,h)*0.4);if(!this.cameraFrame)this.cameraFrame={center,scale:Math.min((w-margin)/(2*Math.max(.001,ex)),(h-margin)/(2*Math.max(.001,ey)))};const scale=(this.fixedScale??this.cameraFrame.scale)*this.zoom;this.viewScale=scale;
   // Software picking also starts in front of distant references when fitting the part.
   const rayDistance=Math.max(radius*4,...[this.allBounds,this.pathBounds].filter(b=>b&&b.min.every(Number.isFinite)&&b.max.every(Number.isFinite)).map(b=>Math.hypot(...center.map((c,i)=>Math.max(Math.abs(b.min[i]-c),Math.abs(b.max[i]-c))))+radius));
-  this.pickRay=(x,y)=>{const u=(x-w/2-this.pan[0])/scale,v=(h/2+this.pan[1]-y)/scale,distance=this.gl?this.three.cameraDistance:rayDistance;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*distance),direction:depth.map(c=>-c)}};
+  this.pickRay=(x,y)=>{const u=(x-canvas.clientWidth/2-this.pan[0])/scale,v=(canvas.clientHeight/2+this.pan[1]-y)/scale,distance=this.gl?this.three.cameraDistance:rayDistance;return {origin:center.map((c,i)=>c+u*right[i]+v*up[i]+depth[i]*distance),direction:depth.map(c=>-c)}};
   if(!this.axisWidget){this.axisWidget=document.createElement('div');this.axisWidget.className='scene-axis-widget';this.axisWidget.setAttribute('aria-label','Work coordinate axes in millimetres');this.canvas.parentElement.append(this.axisWidget)}this.axisWidget.hidden=!this.controls.axes;
   const axisKey=`${this.yaw}:${this.elevation}:${this.controls.dark}`;if(this.axisKey!==axisKey){this.axisKey=axisKey;this.axisWidget.innerHTML=`<svg viewBox="0 0 82 82" role="img" aria-label="3D coordinate axes">${['X','Y','Z'].map((label,i)=>{const x=41+right[i]*27,y=41-up[i]*27;return `<path d="M41 41L${x} ${y}" stroke="${['#df3c3c','#278d48','#2879d4'][i]}" stroke-width="2"/><text x="${x+2}" y="${y-2}" fill="${['#df3c3c','#278d48','#2879d4'][i]}" font-size="11">${label}</text>`}).join('')}<text x="4" y="78" fill="${this.controls.dark?'#cad9e4':'#435b6c'}" font-size="9">Work · mm</text></svg>`;}
-  const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [w/2+this.pan[0]+dot(v,right)*scale,h/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
+  const projectPoint=p=>{const v=p.map((x,i)=>x-center[i]);return [canvas.clientWidth/2+this.pan[0]+dot(v,right)*scale,canvas.clientHeight/2+this.pan[1]-dot(v,up)*scale,dot(v,depth)]};
   if(this.screenAnchor){const {point,screenPoint}=this.screenAnchor,current=projectPoint(point);this.pan[0]+=screenPoint[0]-current[0];this.pan[1]+=screenPoint[1]-current[1];this.screenAnchor=null}
   this.projectWorld=projectPoint;
   const jawOffset=item=>{if(!item.jawMotion)return [0,0,0];if(item.jawMotion.start===null)item.jawMotion.start=performance.now();const fraction=Math.max(0,1-(performance.now()-item.jawMotion.start)/450);if(fraction>0)this.requestDraw();return item.jawMotion.from.map(v=>v*fraction)};
