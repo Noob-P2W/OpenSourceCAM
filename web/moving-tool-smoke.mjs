@@ -25,7 +25,7 @@ try{
   if(software)await context.addInitScript(()=>{const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'?null:get.call(this,type,...args)}});
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(process.env.PWA_URL||'http://127.0.0.1:8098');await ready(page);const seed=await page.evaluate(()=>window.seedProject);
-  await page.locator('[data-process=milling]').click();await page.locator('#status').filter({hasText:'Milling workspace opened'}).waitFor();
+  // Keep ready()'s single-tool fixture; new workspaces now contain example tooling.
   await section(page,'tools');await page.locator('#tool-table tr').first().getByRole('button',{name:'Edit',exact:true}).click();
   const editor=page.locator('#tool-library-editor');
   for(const [kind,count] of [['drill',2],['holder',3]]){

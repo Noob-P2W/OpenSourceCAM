@@ -14,5 +14,24 @@ try{for(const software of [false,true]){
  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:cx-25,y:cy,id:1},{x:cx+25,y:cy,id:2}]});await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:cx-40+15,y:cy+10,id:1},{x:cx+40+15,y:cy+10,id:2}]});await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});near(await projected(pinchWorld),[point[0]+15,point[1]+10]);
  // Reaching a zoom limit must not continue moving the view.
  await canvas.evaluate(c=>c.camViewport.magnify(100));await projected(world);const limit=await projected(world);await canvas.evaluate(c=>c.camViewport.magnify(2));near(await projected(world),limit);
+ // Exercise orbit picking with a real visible surface, then change the
+ // playback envelope without changing the user's framing.
+ const stable=await page.evaluate(async software=>{
+  const {Viewport}=await import('./viewport.js'),c=document.createElement('canvas');c.style.cssText='position:fixed;left:0;top:0;width:400px;height:400px';document.body.append(c);
+  if(software){const get=c.getContext.bind(c);c.getContext=(type,...args)=>type==='webgl'?null:get(type,...args)}
+  const mesh={vertices:[[0,0,0],[20,0,0],[20,20,0],[0,20,0]],triangles:[[0,1,2],[0,2,3]]};
+  const project={stock:{width:20,height:20,thickness:5},part:{visible:true,units:'millimetres',offset:[0,0,0],geometry:{mesh}}};
+  let v;const draw=()=>v.draw(project,[],null,0,null,null,false,true);v=new Viewport(c,draw,()=>{});v.controls={axes:false,grid:false};draw();
+  const point=[7,8,0],screen=v.projectWorld(point),rect=c.getBoundingClientRect(),scale=v.viewScale;
+  v.beginOrbit(rect.left+screen[0],rect.top+screen[1]);
+  const immediateError=Math.hypot(...v.projectWorld(point).slice(0,2).map((x,i)=>x-screen[i])),ray=v.pickRay(...screen),t=point.reduce((n,x,i)=>n+(x-ray.origin[i])*ray.direction[i],0),tapRayError=Math.hypot(...point.map((x,i)=>x-ray.origin[i]-t*ray.direction[i]));
+  v.yaw-=35*.012;v.elevation+=15*.012;draw();
+  const error=Math.hypot(...v.projectWorld(point).slice(0,2).map((x,i)=>x-screen[i])),pivotError=Math.hypot(...v.cameraFrame.center.map((x,i)=>x-point[i]));
+  const path={seconds:1,moves:[{from:[0,0,0],to:[500,500,200],operation:0,rapid:true,start_seconds:0,end_seconds:1}]};
+  const tool={min:[-20,-20,0],max:[20,20,1000],meshes:[mesh],cutting_diameter:6};v.draw(project,[],path,50,{mesh},null,false,true,null,()=>tool);
+  const scaleError=Math.abs(v.viewScale-scale),afterError=Math.hypot(...v.projectWorld(point).slice(0,2).map((x,i)=>x-screen[i]));
+  v.three?.dispose();c.remove();return{error,pivotError,scaleError,afterError,immediateError,tapRayError};
+ },software);
+ for(const [key,value] of Object.entries(stable))assert.ok(value<1e-5,`${key}: ${JSON.stringify(stable)}`);
  await context.close();console.log(`PASS: ${software?'software':'WebGL'} panned wheel/cursor, viewport-center buttons, moving pinch anchor and zoom limits`);
 }}finally{await browser.close()}

@@ -232,3 +232,37 @@ fn explicit_rebuild_recovers_after_stock_fit_invalidates_old_model_links() {
     assert_eq!(rebuilt.operations.len(), 2);
     assert!(commands::execute_project(&rebuilt, Command::Export).is_ok());
 }
+
+#[test]
+fn example_tooling_is_valid_and_additive_without_rebinding_existing_tools() {
+    let mut session = Session::new(Project::default());
+    session
+        .apply(Edit::NewProject {
+            process: Process::Milling,
+        })
+        .unwrap();
+    let p = session.project();
+    assert_eq!(p.tool_library.tools.len(), 11);
+    p.tool_library.validate().unwrap();
+    for kind in [
+        ToolKind::FlatEndMill,
+        ToolKind::BallEndMill,
+        ToolKind::FaceMill,
+        ToolKind::Drill,
+        ToolKind::SpotDrill,
+        ToolKind::ChamferMill,
+        ToolKind::ThreadMill,
+    ] {
+        assert!(p.tool_library.tools.iter().any(|t| t.kind == kind));
+    }
+    let saved = session.json().unwrap();
+    Project::from_json(saved.as_bytes()).unwrap();
+    let original = p.tool_library.clone();
+    let active = p.active_tool;
+    session.apply(Edit::AddExampleTools).unwrap();
+    assert_eq!(session.project().tool_library.tools.len(), 22);
+    assert_eq!(session.project().active_tool, active);
+    assert_eq!(&session.project().tool_library.tools[..11], &original.tools);
+    session.apply(Edit::Undo).unwrap();
+    assert_eq!(session.json().unwrap(), saved);
+}

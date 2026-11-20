@@ -20,8 +20,15 @@ fn curve(op: &Operation) -> Vec<[f64; 3]> {
     }
 }
 type FaceRegion = (Vec<Vec<[f64; 3]>>, f64);
+fn planar_rough(op: &Operation) -> bool {
+    op.strategy == Strategy::AreaRough
+        || (matches!(op.strategy, Strategy::Pocket | Strategy::StockRough) && op.has_chain())
+}
 fn face_region(op: &Operation) -> Result<FaceRegion, String> {
-    let numeric_z = if matches!(op.strategy, Strategy::AreaRough | Strategy::StockRough) {
+    let numeric_z = if matches!(
+        op.strategy,
+        Strategy::AreaRough | Strategy::StockRough | Strategy::Pocket
+    ) {
         -op.depth
     } else {
         0.
@@ -315,20 +322,76 @@ fn cut_chain(chain: &[Point3], b: &mut Builder, cancel: &AtomicBool) -> Result<(
     };
 
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
-    if chain
-        .windows(2)
-        .all(|w| b.remaining.is_clear(w[0], w[1], radius, 0.))
-    {
-        return Ok(());
-    }
-    if let Some(first) = chain.first() {
-        b.enter(first.x, first.y, first.z)?;
-        for q in chain.iter().skip(1) {
+    // A connected clearing path can contain many complete laps in already-cut
+    // stock. Trim only spans proved empty by the conservative stock certificate.
+    // Bound subdivision so long air links do not hide short engagement zones.
+    let spacing = radius.max(0.25);
+    let mut attached = false;
+    let mut air = Vec::new();
+    let mut air_length = 0.;
+    for edge in chain.windows(2) {
+        let count = (edge[0].distance(edge[1]) / spacing).ceil().max(1.) as usize;
+        if count > MAX_ROWS {
+            return Err("Clearing span exceeds its subdivision budget".into());
+        }
+        let mut cut_end: Option<Point3> = None;
+        for i in 0..count {
             cancelled(cancel)?;
+            let point = |t: f64| Point3 {
+                x: edge[0].x + (edge[1].x - edge[0].x) * t,
+                y: edge[0].y + (edge[1].y - edge[0].y) * t,
+                z: edge[0].z + (edge[1].z - edge[0].z) * t,
+            };
+            let a = point(i as f64 / count as f64);
+            let c = point((i + 1) as f64 / count as f64);
+            if b.remaining.is_clear(a, c, radius, 0.) {
+                if let Some(q) = cut_end.take() {
+                    b.feed_cut(q.x, q.y, q.z)?;
+                }
+                if attached {
+                    air_length += a.distance(c);
+                    if air.len() >= MAX_MOVES {
+                        return Err("Clearing air links exceed the path point budget".into());
+                    }
+                    air.push(c);
+                }
+                continue;
+            }
+            if cut_end.is_some() {
+                cut_end = Some(c);
+                continue;
+            }
+            if attached {
+                let shortcut = air_length > 4. * radius
+                    && b.stock_height([b.position.x, b.position.y], [a.x, a.y])
+                        .is_some_and(|h| h <= a.z.min(b.position.z) + 1e-8);
+                if shortcut {
+                    // The whole tool/holder route and fixtures are clear. Feed
+                    // across the cleared floor; do not rapid while touching it.
+                    b.feed_cut(a.x, a.y, a.z)?;
+                } else {
+                    // Keep the original obstacle-safe route when a straight
+                    // shortcut cannot be certified, without another plunge.
+                    for q in &air {
+                        b.feed_cut(q.x, q.y, q.z)?;
+                    }
+                }
+            }
+            air.clear();
+            air_length = 0.;
+            if !attached {
+                // enter() checks the entire approach against remaining stock
+                // and retains fixture/travel checks for every rapid move.
+                b.enter(a.x, a.y, a.z)?;
+                attached = true;
+            }
+            cut_end = Some(c);
+        }
+        if let Some(q) = cut_end {
             b.feed_cut(q.x, q.y, q.z)?;
         }
-        b.retract()?;
     }
+    b.retract()?;
     Ok(())
 }
 fn contour_target(op: &Operation) -> Option<f64> {
@@ -355,12 +418,8 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
     } else {
         op.depth - op.settings.axial_allowance
     };
-    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough)
-        || (op.strategy == Strategy::StockRough && op.has_chain())
-    {
-        if (op.strategy == Strategy::AreaRough
-            || (op.strategy == Strategy::StockRough && op.has_chain()))
-            && (op.settings.spring_passes > 0 || op.settings.finish_feed.is_some())
+    if op.strategy == Strategy::SurfaceSmooth || planar_rough(op) {
+        if planar_rough(op) && (op.settings.spring_passes > 0 || op.settings.finish_feed.is_some())
         {
             return Err("2D offset clearing has no separate finishing/spring pass; add a contour or planar finishing operation".into());
         }
@@ -378,6 +437,14 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             return Err(
                 "Outside clearing uses the stock boundary around the retained island".into(),
             );
+        }
+        if op.strategy == Strategy::Pocket && op.settings.entry != crate::operation::Entry::Plunge {
+            return Err("Selected pocket regions currently require plunge entry".into());
+        }
+        if op.strategy == Strategy::Pocket
+            && op.settings.pocket_pattern != crate::operation::PocketPattern::Offset
+        {
+            return Err("Selected pocket regions use offset passes; use numeric pocket geometry for raster passes".into());
         }
         let (rings, z) = face_region(op)?;
         if rings.iter().flatten().any(|q| !p.stock.contains(*q, 0.002)) {
@@ -399,9 +466,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         if z > op.settings.clearance.unwrap_or(p.clearance) || z < -p.stock.thickness - EPS {
             return Err("Planar machining height is outside stock/clearance limits".into());
         }
-        if op.strategy == Strategy::AreaRough
-            || (op.strategy == Strategy::StockRough && op.has_chain())
-        {
+        if planar_rough(op) {
             if op.settings.height_offset.unwrap_or(0.) < 0. {
                 return Err("2D offset clearing cannot cut below the selected face".into());
             }
@@ -749,9 +814,7 @@ pub(super) fn generate(
     } else {
         start(op)
     };
-    if matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough)
-        || (op.strategy == Strategy::StockRough && op.has_chain())
-    {
+    if op.strategy == Strategy::SurfaceSmooth || planar_rough(op) {
         if op.strategy == Strategy::StockRough
             && (!op.settings.closed || op.settings.path.len() < 3)
         {
@@ -766,24 +829,18 @@ pub(super) fn generate(
         if op.strategy == Strategy::SurfaceSmooth {
             b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
         }
-        let layers = if op.strategy == Strategy::AreaRough
-            || (op.strategy == Strategy::StockRough && op.has_chain())
-        {
+        let layers = if planar_rough(op) {
             ((-z / tool.step_down).ceil() as usize).max(1)
         } else {
             1
         };
         for layer in 1..=layers {
-            let level = if op.strategy == Strategy::AreaRough
-                || (op.strategy == Strategy::StockRough && op.has_chain())
-            {
+            let level = if planar_rough(op) {
                 -(layer as f64 * tool.step_down).min(-z)
             } else {
                 z
             };
-            if op.strategy == Strategy::AreaRough
-                || (op.strategy == Strategy::StockRough && op.has_chain())
-            {
+            if planar_rough(op) {
                 for chain in area_paths(p, op, level, cancel)? {
                     cut_chain(&chain, b, cancel)?;
                 }

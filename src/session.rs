@@ -94,6 +94,7 @@ pub enum Edit {
     NewProject {
         process: crate::process::Process,
     },
+    AddExampleTools,
     ImportPart {
         part: crate::import::Part,
     },
@@ -292,7 +293,21 @@ impl Session {
         let mut candidate = self.project.clone();
         match edit {
             Edit::Replace { project } => candidate = *project,
-            Edit::NewProject { process } => candidate = Project::new_for_process(process),
+            Edit::NewProject { process } => {
+                candidate = Project::new_for_process(process);
+                if process == crate::process::Process::Milling {
+                    candidate.tool_library = crate::tool_library::ToolLibrary::milling_examples();
+                    candidate.active_tool = Some(2);
+                    candidate.active_preset = Some(1);
+                }
+            }
+            Edit::AddExampleTools => {
+                crate::tool_library::import_into(
+                    &mut candidate,
+                    crate::tool_library::ToolLibrary::milling_examples(),
+                    false,
+                )?;
+            }
             Edit::ImportPart { part } => {
                 let fitted = Project::from_part(part)?;
                 candidate.name = fitted.name;
@@ -403,11 +418,21 @@ impl Session {
                 name: strategy.label().into(),
                 tool_id: candidate.active_tool,
                 preset_id: candidate.active_preset,
+                settings: crate::operation::Settings {
+                    milling_mode: (candidate.process == crate::process::Process::Milling)
+                        .then_some(crate::operation::MillingMode::Optimized),
+                    ..Default::default()
+                },
                 ..Operation::default()
             }),
             Edit::AddOperation => candidate.operations.push(Operation {
                 tool_id: candidate.active_tool,
                 preset_id: candidate.active_preset,
+                settings: crate::operation::Settings {
+                    milling_mode: (candidate.process == crate::process::Process::Milling)
+                        .then_some(crate::operation::MillingMode::Optimized),
+                    ..Default::default()
+                },
                 ..Operation::default()
             }),
             Edit::ConfigureVise {

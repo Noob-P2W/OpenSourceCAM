@@ -326,7 +326,9 @@ fn face_finishing_has_no_hidden_penetration_depth_from_setup_defaults() {
 #[test]
 fn saved_cut_direction_is_named_without_rewriting_the_operation() {
     let p = job();
-    let op = commands::operation_template(&p, Strategy::OutsideProfile);
+    let mut op = commands::operation_template(&p, Strategy::OutsideProfile);
+    assert_eq!(op.settings.milling_mode, Some(MillingMode::Optimized));
+    op.settings.milling_mode = None; // saved legacy traversal retains its interpretation
     let before = op.clone();
     let refs = commands::operation_defaults(&p, &op).unwrap();
     assert_eq!(refs["milling_mode"], "conventional");
@@ -578,5 +580,46 @@ fn offset_clearing_milling_direction_matches_spindle_and_boundary_side() {
             positive,
             "M3 climb should follow the outer clearing boundary counterclockwise"
         );
+    }
+}
+
+#[test]
+fn selecting_an_open_floor_keeps_pocket_identity_and_its_selected_boundary() {
+    use opensourcecam::{
+        commands::GeometryQuery,
+        import::{self, Units},
+    };
+    let mut p = Project::from_part(
+        import::import_file(
+            std::path::Path::new("examples/models/mount.stl"),
+            Units::Millimetres,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    p.ensure_tool_library();
+    let op: opensourcecam::model::Operation = serde_json::from_value(
+        commands::geometry_query(
+            &p,
+            GeometryQuery::PocketFaceDraft {
+                origin: [6., 6., 30.],
+                direction: [0., 0., -1.],
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(op.strategy, Strategy::Pocket);
+    assert_eq!(
+        op.settings.clearing_boundary,
+        Some(opensourcecam::operation::ClearingBoundary::Selected)
+    );
+    assert!(op.has_chain());
+    assert!(op.model_link.is_some());
+    p.operations = vec![op];
+    let path = cam::generate(&p).unwrap();
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!(m.to.x >= 5. && m.to.x <= p.stock.width - 5.);
+        assert!(m.to.y >= 5. && m.to.y <= p.stock.height - 5.);
     }
 }

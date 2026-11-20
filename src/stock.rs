@@ -244,7 +244,7 @@ fn calculate_mode(
     let mut notes=vec!["Grid heightfield approximation; small features and exact boundary shapes depend on preview resolution. This is not a full solid-removal certification.".into(),"Machine bodies and spindle kinematics are not collision checked. Fixture checks use conservative cylindrical cutting-tool, shaft and defined-holder envelopes, not exact tool solids.".into()];
     if conservative {
         notes.insert(0, if grid.conservative {
-            "Conservative stock: cells require complete cutter coverage. A continuous triangulated display uses the maximum neighboring cell height at shared vertices. Volume is the cell upper bound; the display can retain extra material. This remains a 2.5D approximation.".into()
+            "Conservative stock: cells require complete cutter coverage. The display preserves sharp terraces for flat cutters and uses upper-height triangulation for curved-cutter jobs. Volume is the cell upper bound; the display can retain extra material. This remains a 2.5D approximation.".into()
         } else { "Nonrectangular blank: the mesh uses sampled physical columns; the separate remaining-stock bound uses the enclosing rectangular blank.".into() });
     }
     if !comparable {
@@ -693,7 +693,16 @@ impl Grid {
         limit: usize,
         cancel: &AtomicBool,
     ) -> Result<Mesh, String> {
-        if self.conservative {
+        // Flat-end cutters create discontinuous heights: connecting adjacent
+        // upper cells with triangles invents a sloped wall under the cutter.
+        // Keep horizontal terraces and vertical risers for flat or mixed jobs.
+        if self.conservative
+            && self
+                .tools
+                .iter()
+                .filter(|t| t.radius > 0.)
+                .all(|t| t.ball || t.cone.is_some())
+        {
             return self.surface_rows(rows, limit, cancel);
         }
         let nx = self.nx;

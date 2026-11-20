@@ -487,28 +487,50 @@ fn planar_outside_clearing_stops_at_selected_floor_and_retains_the_selected_isla
 }
 
 #[test]
-fn conservative_surface_has_slopes_instead_of_internal_voxel_walls() {
+fn flat_endmill_stock_preserves_vertical_shoulders_without_invented_ramps() {
     let mut p = job();
     p.operations = vec![pocket(&p)];
     let path = cam::generate(&p).unwrap();
     let sim =
         stock::simulate_mode(&p, &path, 1., 64, &AtomicBool::new(false), 50_000_000, true).unwrap();
-    let mesh = &sim.geometry.mesh;
-    let mut slopes = 0;
-    for tri in &mesh.triangles {
-        let q = tri.map(|i| mesh.vertices[i as usize]);
+    let mut shoulders = 0;
+    for tri in &sim.geometry.mesh.triangles {
+        let q = tri.map(|i| sim.geometry.mesh.vertices[i as usize]);
         let n = opensourcecam::import::normal(q);
-        if n[2].abs() > 1e-10 && (q[0][2] - q[1][2]).abs().max((q[0][2] - q[2][2]).abs()) > 1e-8 {
-            slopes += 1;
-        }
-        if n[2].abs() < 1e-10 {
-            assert!(
-                (0..2).any(|axis| q.iter().all(|v| v[axis].abs() < 1e-8)
-                    || q.iter()
-                        .all(|v| (v[axis] - [p.stock.width, p.stock.height][axis]).abs() < 1e-8)),
-                "Internal block wall remained in continuous surface"
-            );
+        let dz = (q[0][2] - q[1][2]).abs().max((q[0][2] - q[2][2]).abs());
+        assert!(
+            n[2].abs() < 1e-10 || dz < 1e-8,
+            "Flat-endmill step was turned into a diagonal ramp: {q:?}"
+        );
+        if n[2].abs() < 1e-10
+            && (0..2).all(|axis| {
+                !q.iter().all(|v| v[axis].abs() < 1e-8)
+                    && !q
+                        .iter()
+                        .all(|v| (v[axis] - [p.stock.width, p.stock.height][axis]).abs() < 1e-8)
+            })
+        {
+            shoulders += 1;
         }
     }
-    assert!(slopes > 0);
+    assert!(shoulders > 0, "Pocket needs vertical internal shoulders");
+}
+
+#[test]
+fn rectangular_offset_pocket_enters_the_core_without_diagonal_slotting() {
+    let mut p = job();
+    let mut op = pocket(&p);
+    op.settings.pocket_pattern = PocketPattern::Offset;
+    op.settings.entry = Entry::Plunge;
+    p.operations = vec![op];
+    let path = cam::generate(&p).unwrap();
+    let mut cuts = 0;
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!(
+            (m.from.x - m.to.x).abs() < 1e-8 || (m.from.y - m.to.y).abs() < 1e-8,
+            "Unexpected diagonal through pocket stock: {m:?}"
+        );
+        cuts += 1;
+    }
+    assert!(cuts > 8);
 }

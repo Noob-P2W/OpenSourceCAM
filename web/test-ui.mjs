@@ -2,7 +2,9 @@ export async function ready(page){await page.locator('#status').filter({hasText:
  // Most machining regressions explicitly use the tray fixture. Production startup is empty.
  if(!await page.evaluate(async ()=>await (await import('./storage.js')).readSnapshot())){
   await page.locator('[data-process=milling]').click();await page.locator('#status').filter({hasText:'Milling workspace opened'}).waitFor();
-  await closeDialogs(page);await page.locator('.file-menu > summary').click();void acceptNextConfirmation(page);await page.locator('#demo').click();await page.locator('#status').filter({hasText:'Tray demo loaded'}).waitFor();await closeDialogs(page);if(await page.evaluate(async ()=>await (await import('./storage.js')).readSnapshot())){await page.reload();await page.locator('#status').filter({hasText:'Ready'}).waitFor()}else await page.locator('#home-button').click();
+  await closeDialogs(page);
+  const sample=await page.evaluate(async()=>{const core=await import('./pkg/opensourcecam.js');await core.default();return core.sample()});
+  void acceptNextConfirmation(page);await page.locator('#open').setInputFiles({name:'test-fixture.cam.json',mimeType:'application/json',buffer:Buffer.from(sample)});await page.locator('#status').filter({hasText:'Project opened'}).waitFor();await closeDialogs(page);if(await page.evaluate(async ()=>await (await import('./storage.js')).readSnapshot())){await page.reload();await page.locator('#status').filter({hasText:'Ready'}).waitFor()}else await page.locator('#home-button').click();
  }
 }
 export async function closeDialogs(page){await page.waitForFunction(()=>!document.getElementById('software-settings').disabled,{},{timeout:120000});for(let i=0;i<6;i++){const dialog=page.locator('dialog[open]').last();if(!await dialog.count())break;const id=await dialog.getAttribute('id');await dialog.locator('.dialog-close').click();await page.locator('#'+id).waitFor({state:'hidden'});}if(await page.locator('.file-menu').evaluate(el=>el.open))await page.locator('.file-menu > summary').click();}

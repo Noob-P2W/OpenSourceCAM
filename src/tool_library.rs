@@ -879,6 +879,35 @@ fn parameters(values: &BTreeMap<String, f64>, specs: Vec<Parameter>) -> Result<(
 }
 
 impl ToolLibrary {
+    /// Editable examples, with no measured controller/holder bindings.
+    pub fn milling_examples() -> Self {
+        use ToolKind::*;
+        let specs = [
+            (FlatEndMill, 3.),
+            (FlatEndMill, 6.),
+            (FlatEndMill, 10.),
+            (BallEndMill, 6.),
+            (BullNoseEndMill, 8.),
+            (FaceMill, 40.),
+            (Drill, 3.),
+            (Drill, 6.),
+            (SpotDrill, 6.),
+            (ChamferMill, 6.),
+            (ThreadMill, 4.),
+        ];
+        let tools = specs.into_iter().enumerate().map(|(i, (kind, diameter))| {
+            let mut tool = LibraryTool::new(i as u64 + 1, i as u32 + 1, kind);
+            tool.geometry.insert("diameter".into(), diameter);
+            if tool.geometry.contains_key("shaft_diameter") {
+                tool.geometry.insert("shaft_diameter".into(), diameter);
+            }
+            tool.name = format!("Example {diameter} mm {}", kind.label().to_lowercase());
+            tool.description = "Example tooling. Edit dimensions and cutting data for your actual tool and material.".into();
+            tool.presets[0].name = "Example cutting data".into();
+            tool
+        }).collect();
+        Self { tools }
+    }
     pub fn get(&self, id: u64) -> Result<&LibraryTool, String> {
         self.tools
             .iter()

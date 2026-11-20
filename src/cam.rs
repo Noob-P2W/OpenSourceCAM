@@ -130,6 +130,9 @@ impl Builder {
     }
 
     fn stock_height(&mut self, a: [f64; 2], b: [f64; 2]) -> Option<f64> {
+        if self.bodies.is_empty() {
+            return None;
+        }
         let mut height = f64::NEG_INFINITY;
         for e in &self.bodies {
             height = height.max(self.remaining.top(a, b, e.radius)? - e.low);
@@ -808,11 +811,12 @@ pub fn generate_with_cancel(
         b.cutter = crate::stock::footprint(project, index)?;
         b.certificate_error = op.settings.path_tolerance.unwrap_or(0.01) + 0.0002;
         b.stock_clearance = op.settings.stock_clearance;
-        b.bodies = if b.stock_clearance.is_some() {
-            crate::collision::envelopes(project, index)?
-        } else {
-            Vec::new()
-        };
+        b.bodies =
+            if b.stock_clearance.is_some() || project.process == crate::process::Process::Milling {
+                crate::collision::envelopes(project, index)?
+            } else {
+                Vec::new()
+            };
         if b.stock_clearance.is_some_and(|g| g > b.clearance) {
             return Err("Stock clearance gap cannot exceed operation clearance".into());
         }
@@ -1193,8 +1197,54 @@ pub fn generate_with_cancel(
             let x1 = op.x + op.width - offset;
             let y1 = op.y + op.height - offset;
             if op.strategy == Strategy::Pocket
+                && op.settings.pocket_pattern == crate::operation::PocketPattern::Offset
+            {
+                // Parallel inward offsets, traversed from the core outwards.
+                // Enter the core directly rather than slotting diagonally from
+                // the pocket corner through uncut material.
+                // Square offset corners need overlap in both axes; stepover is
+                // a maximum, capped here to prevent diagonal corner cusps.
+                let step = (tool.diameter * tool.step_over).min(r);
+                let core_inset = (((x1 - x0).min(y1 - y0) / 2.) - r * 0.5).max(0.);
+                let rings = (core_inset / step).ceil() as usize;
+                if rings > MAX_ROWS {
+                    return Err("Offset pocket exceeds 10,000 contours".into());
+                }
+                let inset = core_inset;
+                b.pocket_entry(
+                    [x0 + inset, y0 + inset, x1 - inset, y1 - inset],
+                    -(top + (layer - 1) as f64 * tool.step_down),
+                    z,
+                    op.settings.entry,
+                    op.settings.path_tolerance.unwrap_or(0.01),
+                )?;
+                let mut previous_y = y0 + inset;
+                for ring in (0..=rings).rev() {
+                    let inset = if rings == 0 {
+                        0.
+                    } else {
+                        core_inset * ring as f64 / rings as f64
+                    };
+                    let (a, c, d, e) = (x0 + inset, x1 - inset, y0 + inset, y1 - inset);
+                    // Orthogonal stepover links avoid diagonal slotting between laps.
+                    b.cut(a, previous_y, z)?;
+                    b.cut(a, d, z)?;
+                    let points = if op.settings.direction == crate::operation::Direction::Clockwise
+                    {
+                        [(a, e), (c, e), (c, d), (a, d)]
+                    } else {
+                        [(c, d), (c, e), (a, e), (a, d)]
+                    };
+                    if layer == layers && ring == 0 {
+                        b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
+                    }
+                    for (x, y) in points {
+                        b.cut(x, y, z)?;
+                    }
+                    previous_y = d;
+                }
+            } else if op.strategy == Strategy::Pocket
                 && op.settings.entry == crate::operation::Entry::Plunge
-                && op.settings.pocket_pattern == crate::operation::PocketPattern::Raster
                 && op.settings.raster == crate::operation::Raster::NegativeX
             {
                 b.enter(x1, y0, z)?;
@@ -1208,40 +1258,6 @@ pub fn generate_with_cancel(
                 )?;
             } else {
                 b.enter(x0, y0, z)?;
-            }
-            if op.strategy == Strategy::Pocket
-                && op.settings.pocket_pattern == crate::operation::PocketPattern::Offset
-            {
-                let cx = (x0 + x1) / 2.;
-                let cy = (y0 + y1) / 2.;
-                let hx = (x1 - x0) / 2.;
-                let hy = (y1 - y0) / 2.;
-                let rings = (hx.hypot(hy) / (tool.diameter * tool.step_over))
-                    .ceil()
-                    .max(1.) as usize;
-                if rings > MAX_ROWS {
-                    return Err("Offset pocket exceeds 10,000 contours".into());
-                }
-                b.cut(cx, cy, z)?;
-                for ring in 1..=rings {
-                    let k = ring as f64 / rings as f64;
-                    let a = cx - hx * k;
-                    let c = cx + hx * k;
-                    let d = cy - hy * k;
-                    let e = cy + hy * k;
-                    let points = if op.settings.direction == crate::operation::Direction::Clockwise
-                    {
-                        [(a, d), (a, e), (c, e), (c, d), (a, d)]
-                    } else {
-                        [(a, d), (c, d), (c, e), (a, e), (a, d)]
-                    };
-                    if layer == layers && ring == rings {
-                        b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
-                    }
-                    for (x, y) in points {
-                        b.cut(x, y, z)?
-                    }
-                }
             }
             if op.strategy == Strategy::Pocket
                 && op.settings.pocket_pattern == crate::operation::PocketPattern::Raster

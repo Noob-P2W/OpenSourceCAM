@@ -403,6 +403,8 @@ fn inferred_modes_and_generation_use_the_same_spindle_and_compensation_rules() {
         for spin in [false, true] {
             for mode in [MillingMode::Climb, MillingMode::Conventional] {
                 let mut p = job(strategy);
+                p.operations[0].settings.milling_mode = None; // legacy traversal inference
+
                 p.tool_library.tools[0].clockwise = spin;
                 p.operations[0].settings.direction =
                     if operation::clockwise_for(&p.operations[0], mode, spin) {

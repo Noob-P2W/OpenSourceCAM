@@ -163,7 +163,10 @@ impl Operation {
         self.strategy.is_curve()
             || (matches!(
                 self.strategy,
-                Strategy::InsideProfile | Strategy::OutsideProfile | Strategy::StockRough
+                Strategy::InsideProfile
+                    | Strategy::OutsideProfile
+                    | Strategy::StockRough
+                    | Strategy::Pocket
             ) && !self.settings.path.is_empty())
     }
 }

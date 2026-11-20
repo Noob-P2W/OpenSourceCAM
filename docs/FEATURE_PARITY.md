@@ -458,8 +458,9 @@ Closed loop entry rotation retains winding. Redundant offset-pocket boundary lap
 are omitted; finish and spring feeds remain separate. Native arc posting and all
 clearance/fixture checks remain active.
 
-Rectangular conservative stock now uses a continuous triangulated upper envelope,
-with shared vertex maxima and merged flat strips, rather than internal voxel walls.
+Conservative stock preserves merged horizontal terraces and vertical shoulders for
+flat/mixed cutter jobs. Curved-only jobs use a triangulated upper envelope with
+shared vertex maxima and merged flat strips.
 The conservative removal kernel and reported cell-volume bound remain unchanged;
 the rendered envelope can retain additional material. This is a 2.5D approximation,
 not solid CSG or an undercut simulation. Nonrectangular stock retains sampled columns.
@@ -482,3 +483,24 @@ with one undo step, and can show/hide selected paths. Editing opens the active
 operation. Selection is presentation state; operation order and NC are unchanged.
 Stock simulation continues to process the complete chronological operation sequence
 when path display is filtered.
+
+## Camera, geometry picking and starter tooling corrections
+
+Imported-vise configuration is docked in the Selection sidebar. Cursor orbit uses
+visible-surface depth; the view no longer refits during orbit or stock playback.
+Unavailable facing targets remain highlighted with their eligibility reason.
+Blank-click selection clears pending inspection highlights. The File menu no longer
+contains the tray demo command; test fixtures load through the ordinary file API.
+
+New browser milling workspaces include eleven editable example tools; existing
+libraries can add examples without replacing their assigned tools. New operation
+drafts default to Optimized, while stored direction choices retain their meaning.
+Open-floor picking keeps the Pocket strategy and selected boundary rather than
+switching to AreaRough. Selected pocket regions use offset/plunge paths; numeric
+pockets also support raster, ramp and helix settings. Rectangular offset pockets
+enter the core and use orthogonal links between parallel offsets. Air-span trimming
+and certified feed shortcuts retain complete tool/fixture clearance checks.
+
+Flat and mixed-cutter stock jobs preserve sharp vertical shoulders instead of
+interpolating ramps between unequal cell heights. Curved-only jobs retain the
+continuous upper envelope. Removal and volume still use conservative 2.5D cells.

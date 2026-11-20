@@ -211,8 +211,7 @@ keeps at most four assemblies, requests one at a time and preloads the next
 distinct tool. Only the current tool occupies GPU buffers; stock updates do not
 rebuild those buffers. A display translation places its tip at the shared cursor,
 with depth-tested solids in WebGL and depth-sorted faces in software fallback.
-The camera includes a retained swept tool envelope rather than following each
-move. Legacy jobs use their setup dimensions and are labeled as legacy tools.
+The camera freezes its scale and pivot until an explicit Fit command. Playback and tool changes never refit the view. Fit all can include the current path/tool envelope; orbit pivots on the visible surface beneath the pointer. Legacy jobs use their setup dimensions and are labeled as legacy tools.
 Display geometry does not alter collision envelopes, removal or posted tool offsets.
 
 ## Geometry targets and offset clearing
@@ -401,3 +400,16 @@ keeps a sparse sorted list of global move-end indices, so playback clips each
 buffer with binary search and total index storage remains proportional to moves.
 Hover changes material colors only. Timeline sections consume existing Rust timing;
 JavaScript does not estimate machining time or alter stock-removal scope.
+
+New browser milling workspaces include editable example tools for common cutter and
+holemaking types. Existing libraries can add these through an undoable Session edit,
+which uses ordinary library remapping and preserves assigned tools. Legacy library
+migration remains separate and retains its original single-tool bridge.
+
+A selected open pocket floor retains the Pocket strategy and its selected boundary.
+Its model-aware planar offset paths protect geometry above each cut level; this
+region mode currently uses plunge entry. Numeric rectangular pockets support
+plunge, ramp and helix entries. Conservative remaining-stock proofs can remove air
+spans and shorten links only when the complete tool and fixture route is clear.
+Flat-endmill simulation preserves vertical shoulders with merged terrace strips;
+curved-only jobs retain the upper-height surface approximation. Both remain 2.5D.

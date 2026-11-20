@@ -194,6 +194,8 @@ pub fn operation_template(
         depth: s.thickness.min(3.),
         ..Operation::default()
     };
+    op.settings.milling_mode = (p.process == crate::process::Process::Milling)
+        .then_some(crate::operation::MillingMode::Optimized);
     match strategy {
         Strategy::Drill
         | Strategy::DrillOnce
@@ -287,6 +289,10 @@ pub fn operation_template(
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeometryQuery {
     Faces,
+    PocketFaceDraft {
+        origin: [f64; 3],
+        direction: [f64; 3],
+    },
     ChainDraft {
         origin: [f64; 3],
         direction: [f64; 3],
@@ -433,6 +439,24 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             if strategy == crate::model::Strategy::Trace {
                 op.settings.trace_offset = true;
             }
+            crate::machining::link(&mut op, part);
+            Ok(json!(op))
+        }
+        GeometryQuery::PocketFaceDraft { origin, direction } => {
+            let value = geometry_query(
+                project,
+                GeometryQuery::SmoothFaceDraft {
+                    origin,
+                    direction,
+                    roughing: true,
+                },
+            )?;
+            let mut op: crate::model::Operation =
+                serde_json::from_value(value).map_err(|e| e.to_string())?;
+            op.strategy = crate::model::Strategy::Pocket;
+            op.name = op.strategy.label().into();
+            op.settings.clearing_boundary = Some(crate::operation::ClearingBoundary::Selected);
+            op.settings.pocket_pattern = crate::operation::PocketPattern::Offset;
             crate::machining::link(&mut op, part);
             Ok(json!(op))
         }
