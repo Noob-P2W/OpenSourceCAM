@@ -619,12 +619,25 @@ pub fn gcode(project: &Project) -> Result<String, String> {
                 }
             }
         }
+        // Match the native arc's XY precision on its entry block. Rounding a
+        // short fillet's tangent point to four decimals can change its starting
+        // radius enough to force a fallback to a series of straight cuts.
+        let xy_places = if native_arcs && arcs.contains_key(&(movement_index + 1)) {
+            6
+        } else {
+            4
+        };
         match movement.motion {
             Motion::Rapid => {
                 if (movement.from.z - movement.to.z).abs() > 1e-7 {
                     writeln!(output, "G0 Z{:.4}", movement.to.z).unwrap();
                 } else {
-                    writeln!(output, "G0 X{:.4} Y{:.4}", movement.to.x, movement.to.y).unwrap();
+                    writeln!(
+                        output,
+                        "G0 X{:.xy_places$} Y{:.xy_places$}",
+                        movement.to.x, movement.to.y
+                    )
+                    .unwrap();
                 }
             }
             motion => {
@@ -632,7 +645,7 @@ pub fn gcode(project: &Project) -> Result<String, String> {
                 let feed = movement.feed;
                 writeln!(
                     output,
-                    "G1 X{:.4} Y{:.4} Z{:.4} F{:.4}",
+                    "G1 X{:.xy_places$} Y{:.xy_places$} Z{:.4} F{:.4}",
                     movement.to.x, movement.to.y, movement.to.z, feed
                 )
                 .unwrap();
@@ -642,13 +655,13 @@ pub fn gcode(project: &Project) -> Result<String, String> {
             if (movement.from.z - movement.to.z).abs() > 1e-7 {
                 posted.z = round(movement.to.z, 4);
             } else {
-                posted.x = round(movement.to.x, 4);
-                posted.y = round(movement.to.y, 4);
+                posted.x = round(movement.to.x, xy_places);
+                posted.y = round(movement.to.y, xy_places);
             }
         } else {
             posted = crate::cam::Point3 {
-                x: round(movement.to.x, 4),
-                y: round(movement.to.y, 4),
+                x: round(movement.to.x, xy_places),
+                y: round(movement.to.y, xy_places),
                 z: round(movement.to.z, 4),
             };
         }

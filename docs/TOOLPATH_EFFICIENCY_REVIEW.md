@@ -97,6 +97,14 @@ greater than 30 degrees next to a feed block shorter than 0.5 mm drops from 6,14
 to 976. The cut still ends at the selected floor. The larger spacing reserve
 raises the programmed-feed estimate to about 1,139 s. These estimates omit the
 controller's acceleration and deceleration at junctions.
+
+The later smoothing pass fits longer chords through certified cells, uses the
+spare clearance from cutter-radius dilation for tangent fillets, and checks
+how contours link. The post also preserves the precision of small-arc tangent
+entries. On the supplied job, the posted count of joins over 5 degrees next
+to a feed block of 0.5 mm or less drops from 1,110 to zero in circular output.
+The programmed-feed estimate is about 1,074 s, and the selected floor remains
+−10 mm.
 The numeric outside test independently compares final sampled stock with the
 untrimmed cycle and checks low XY rapids against only earlier cutter sweeps.
 Fixture regressions cover an intervening hidden clamp and an obstruction to the

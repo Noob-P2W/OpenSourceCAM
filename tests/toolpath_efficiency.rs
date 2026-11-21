@@ -348,6 +348,30 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
                         "{mode:?} must smooth angled corners"
                     );
                 }
+                let sharp_joins = path
+                    .moves
+                    .windows(2)
+                    .filter(|pair| {
+                        let (l, r) = (&pair[0], &pair[1]);
+                        if l.motion != Motion::Cut
+                            || r.motion != Motion::Cut
+                            || (l.from.z - l.to.z).abs() > 1e-8
+                            || (r.from.z - r.to.z).abs() > 1e-8
+                        {
+                            return false;
+                        }
+                        let a = [l.to.x - l.from.x, l.to.y - l.from.y];
+                        let b = [r.to.x - r.from.x, r.to.y - r.from.y];
+                        let (a_len, b_len) = (a[0].hypot(a[1]), b[0].hypot(b[1]));
+                        a_len.min(b_len) <= 0.5
+                            && a_len * b_len > 1e-12
+                            && a[0] * b[0] + a[1] * b[1] < 30_f64.to_radians().cos() * a_len * b_len
+                    })
+                    .count();
+                assert!(
+                    sharp_joins < 25,
+                    "Stair-step turns returned in angled clearing: {sharp_joins}"
+                );
                 for arc in &path.arcs {
                     let from = path.moves[arc.start].from;
                     let to = path.moves[arc.end - 1].to;
@@ -367,7 +391,25 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
                     }
                 }
                 let circular = |line: &str| line.starts_with("G2 ") || line.starts_with("G3 ");
-                assert!(post::gcode(&p).unwrap().lines().any(circular));
+                let nc = post::gcode(&p).unwrap();
+                let mut tangent_entries = 0;
+                for (entry, _) in nc
+                    .lines()
+                    .zip(nc.lines().skip(1))
+                    .filter(|(line, next)| line.starts_with("G1 ") && circular(next))
+                {
+                    let x = entry
+                        .split_whitespace()
+                        .find_map(|word| word.strip_prefix('X'))
+                        .unwrap();
+                    assert_eq!(
+                        x.split_once('.').unwrap().1.len(),
+                        6,
+                        "Rounded tangent entry can force a small arc back to G1: {entry}"
+                    );
+                    tangent_entries += 1;
+                }
+                assert!(tangent_entries > 0);
                 p.post.linearize_arcs = true;
                 assert!(!post::gcode(&p).unwrap().lines().any(circular));
             }

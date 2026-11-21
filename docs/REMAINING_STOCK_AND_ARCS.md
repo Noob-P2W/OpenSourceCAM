@@ -89,14 +89,18 @@ Records retain the selected format when applied to another job.
 Existing projects and machine records with the old linear-only flag open in G1
 mode. Selecting a motion format explicitly takes precedence over the flag.
 
-Optimized, Climb and Conventional planar clearing use tangent circular fillets
-where the grid contains
-the entire triangle between the original corner and both tangent endpoints.
-The triangle certificate covers the true arc and its linear samples. Neighboring
-fillets share the available line length, and pass spacing reserves their maximum
-departure from the grid route. Protected or tightly spaced turns keep their
-original geometry. The controller still determines acceleration through the
-resulting arcs and how it stops at any remaining sharp corners.
+For angled planar clearing, a bounded fit combines groups of grid steps into
+longer chords. Every crossed cell must allow the cutter centre, and the signed
+projection and distance tests bound the chord's deviation from the source route.
+The stepover calculation reserves that deviation and room for the tangent fillets.
+A fillet must fit in checked cells or within the guaranteed clearance left by
+the cutter-radius dilation. Both checks cover the full arc and its linear samples.
+Links favor forward entry into the next contour and retain their curved motion
+unless a raised shortcut is worthwhile. At a near reversal, a checked lift and
+re-entry separates the two cuts when fixtures allow it. Tightly constrained turns
+retain the original motion. The post matches the arc's XY precision on its entry
+block so small fillets retain their rounded radius in the exported program. The
+controller determines the actual acceleration.
 
 ## Primary references
 

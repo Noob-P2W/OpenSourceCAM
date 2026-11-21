@@ -229,11 +229,16 @@ impl Builder {
     }
     /// Replace a long, already-cleared contour link only when the entire tool
     /// and fixture route is certified, and the replacement is actually faster.
-    fn cleared_link(&mut self, to: Point3, follow_mm: f64) -> Result<bool, String> {
+    fn cleared_link(
+        &mut self,
+        to: Point3,
+        follow_mm: f64,
+        allow_feed: bool,
+    ) -> Result<bool, String> {
         let Some(top) = self.stock_height([self.position.x, self.position.y], [to.x, to.y]) else {
             return Ok(false);
         };
-        if top <= to.z.min(self.position.z) + 1e-8 {
+        if allow_feed && top <= to.z.min(self.position.z) + 1e-8 {
             self.feed_cut(to.x, to.y, to.z)?;
             return Ok(true);
         }
@@ -241,6 +246,9 @@ impl Builder {
             return Ok(false);
         }
         let plan = self.entry_plan(to, Some(top));
+        if !allow_feed && plan.points[0].z <= to.z.max(self.position.z) + EPS {
+            return Ok(false);
+        }
         let mut previous = self.position;
         let mut seconds = 0.;
         for (i, point) in plan.points.iter().enumerate() {
@@ -253,6 +261,56 @@ impl Builder {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn last_cut_direction(&self) -> Option<[f64; 2]> {
+        let last = self.path.moves.last()?;
+        if last.motion != Motion::Cut
+            || last.operation != self.operation
+            || (last.to.z - last.from.z).abs() > EPS
+        {
+            return None;
+        }
+        if let Some(arc) = self
+            .path
+            .arcs
+            .last()
+            .filter(|a| a.end == self.path.moves.len())
+        {
+            let sign = arc.sweep.signum();
+            return Some([
+                -sign * (last.to.y - arc.center[1]),
+                sign * (last.to.x - arc.center[0]),
+            ]);
+        }
+        Some([last.to.x - last.from.x, last.to.y - last.from.y])
+    }
+
+    fn restart_at_reversal(&mut self, incoming: [f64; 2]) -> Result<(), String> {
+        if let Some(outgoing) = self.last_cut_direction() {
+            let length = outgoing[0].hypot(outgoing[1]) * incoming[0].hypot(incoming[1]);
+            let dot = outgoing[0] * incoming[0] + outgoing[1] * incoming[1];
+            if length > 1e-12 && dot < -0.996 * length {
+                // A near U-turn cannot be filleted within the bounded region.
+                // End the cut and lift at the cusp before re-entering there.
+                let tip = self.position;
+                let q = [tip.x, tip.y];
+                if self
+                    .fixtures
+                    .as_mut()
+                    .is_some_and(|f| f.top(q, q, &self.bodies).is_none_or(|z| z >= tip.z))
+                {
+                    return Ok(());
+                }
+                let from = self.stock_clearance.and_then(|_| self.stock_height(q, q));
+                let mut plan = self.entry_plan(tip, from);
+                let lift = plan.points[0].z.max((tip.z + 0.5).min(self.clearance));
+                plan.points[0].z = lift;
+                plan.points[1].z = lift;
+                self.follow_entry(plan)?;
+            }
+        }
+        Ok(())
     }
     fn facing_y_clear(
         &mut self,
@@ -926,7 +984,11 @@ pub fn generate_with_cancel(
         optimize_links: false,
         bodies: Vec::new(),
         fixtures: if project.operations.iter().any(|o| {
-            o.enabled && (o.settings.stock_clearance.is_some() || o.settings.optimize_links)
+            o.enabled
+                && (o.settings.stock_clearance.is_some()
+                    || o.settings.optimize_links
+                    || milling2d::planar_rough(o)
+                    || (o.strategy == Strategy::StockRough && o.model_link.is_some()))
         }) {
             Some(crate::collision::FixtureClearance::build(project, cancel)?)
         } else {

@@ -17,8 +17,9 @@ pub(crate) struct Clearing {
     origin: [f64; 2],
     spacing: usize,
     weights: [usize; 3],
-    bevel_steps: bool,
+    smooth_steps: bool,
     blend_deviation: f64,
+    clearance_halo: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -90,8 +91,9 @@ impl Clearing {
             origin: [-margin; 2],
             spacing,
             weights: [1; 3],
-            bevel_steps: false,
+            smooth_steps: false,
             blend_deviation: 0.,
+            clearance_halo: 0.,
         })
     }
     /// Reuse bounded offset loops and safe within-region links for planar clearing.
@@ -101,11 +103,11 @@ impl Clearing {
         radius: f64,
         stepover: f64,
         resolution: f64,
-        bevel_steps: bool,
+        smooth_steps: bool,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<Self, String> {
         let outer = rings.first().ok_or("Select a machining boundary")?;
-        let bevel_steps = bevel_steps
+        let smooth_steps = smooth_steps
             && rings.iter().chain(obstacles).any(|ring| {
                 ring.iter()
                     .zip(ring.iter().cycle().skip(1))
@@ -156,11 +158,16 @@ impl Clearing {
             return Err("No cutter-sized clearing region remains at this depth".into());
         }
         let diagonal = dx.hypot(dy);
+        // Each accepted cell has a raster witness at its exact X centre and
+        // somewhere within its Y interval. The furthest cell point is within
+        // (dx/2, dy) of that witness. Any remaining dilation is clearance
+        // outside the cell, after reserving posted coordinate precision.
+        let clearance_halo = (diagonal - (dx / 2.).hypot(dy) - 0.0002).max(0.);
         // At very small stepovers, keep the exact route instead of spending
         // the whole spacing budget on smoothing and generating excess laps.
         let spare = stepover - 2. * diagonal - dx.min(dy);
-        let bevel_steps = bevel_steps && spare > 0.;
-        let blend_deviation = if bevel_steps {
+        let smooth_steps = smooth_steps && spare > 0.;
+        let blend_deviation = if smooth_steps {
             (diagonal * 0.15).min(spare / 2.)
         } else {
             0.
@@ -172,10 +179,10 @@ impl Clearing {
             dx,
             dy,
             origin: lo,
-            // Reserve one diagonal for grid rounding and the combined bevel
+            // Reserve one diagonal for grid rounding and the combined straightening
             // and fillet deviations on adjacent passes.
             spacing: ((stepover
-                - if bevel_steps { 2. } else { 1. } * diagonal
+                - if smooth_steps { 2. } else { 1. } * diagonal
                 - 2. * blend_deviation)
                 / (dx.min(dy) / 1024.))
                 .floor()
@@ -188,8 +195,9 @@ impl Clearing {
                     (dx.hypot(dy) / unit).ceil() as usize,
                 ]
             },
-            bevel_steps,
+            smooth_steps,
             blend_deviation,
+            clearance_halo,
         })
     }
     pub(crate) fn exterior_only(&mut self, width: f64, height: f64) {
@@ -426,8 +434,18 @@ impl Clearing {
                         .min_by_key(|(_, n)| graph.metric(last, **n))
                         .unwrap()
                         .0;
-                    nodes.rotate_left(nearest);
-                    if let Some(link) = graph.route(last, nodes[0], budget)? {
+                    let best = if self.smooth_steps {
+                        graph.forward_link(chains.last().unwrap(), &nodes, nearest, budget)?
+                    } else {
+                        None
+                    };
+                    let (start, link) = if let Some((start, link)) = best {
+                        (start, Some(link))
+                    } else {
+                        (nearest, graph.route(last, nodes[nearest], budget)?)
+                    };
+                    nodes.rotate_left(start);
+                    if let Some(link) = link {
                         let chain = chains.last_mut().unwrap();
                         chain.extend(link.into_iter().skip(1));
                         nodes.push(nodes[0]);
@@ -455,8 +473,8 @@ impl Clearing {
         chains
             .into_iter()
             .map(|mut nodes| {
-                if self.bevel_steps {
-                    graph.bevel_steps(&mut nodes);
+                if self.smooth_steps {
+                    graph.straighten_steps(&mut nodes, [self.dx, self.dy], budget)?;
                 }
                 let mut result: Vec<Point3> = Vec::new();
                 for node in nodes {
@@ -552,7 +570,10 @@ impl Clearing {
             };
             // The complete minor arc lies in the triangle formed by the
             // tangent points and the original vertex, as do its G1 samples.
-            if graph.triangle_clear([grid(from), grid(v), grid(to)], turn.signum()) {
+            let deviation = trim * (angle / 4.).tan();
+            if deviation <= self.clearance_halo
+                || graph.triangle_clear([grid(from), grid(v), grid(to)], turn.signum())
+            {
                 return Some(Span {
                     from,
                     to,
@@ -591,6 +612,56 @@ struct Graph<'a> {
     components: &'a [usize],
 }
 impl Graph<'_> {
+    fn forward_link(
+        &self,
+        chain: &[usize],
+        ring: &[usize],
+        nearest: usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<Option<(usize, Vec<usize>)>, String> {
+        if chain.len() < 2 || ring.len() < 3 {
+            return Ok(None);
+        }
+        let last = chain[chain.len() - 1];
+        let previous = chain[chain.len() - 2];
+        let dot = |a, b, c| {
+            let [a, b, c] = [a, b, c].map(|n| self.coordinates(n));
+            (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])
+        };
+        let max_distance = self.metric(last, ring[nearest]) + 12;
+        let mut best = None;
+        let mut best_cost = usize::MAX;
+        for offset in [0, 1, -1, 2, -2, 4, -4, 8, -8, 12, -12] {
+            let i = (nearest as isize + offset).rem_euclid(ring.len() as isize) as usize;
+            let target = ring[i];
+            let next = ring[(i + 1) % ring.len()];
+            let distance = self.metric(last, target);
+            if distance > max_distance || distance >= best_cost {
+                continue;
+            }
+            for horizontal in [true, false] {
+                budget.tick()?;
+                let Some(link) = self.elbow(last, target, horizontal) else {
+                    continue;
+                };
+                let (out, incoming) = if link.len() == 1 {
+                    (next, previous)
+                } else {
+                    (link[1], link[link.len() - 2])
+                };
+                let turns = [dot(previous, last, out), dot(incoming, target, next)];
+                if turns.iter().any(|&t| t < 0) {
+                    continue;
+                }
+                let cost = distance + 2 * turns.iter().filter(|&&t| t == 0).count();
+                if cost < best_cost {
+                    best_cost = cost;
+                    best = Some((i, link));
+                }
+            }
+        }
+        Ok(best)
+    }
     fn triangle_clear(&self, triangle: [[f64; 2]; 3], winding: f64) -> bool {
         let bounds = |axis: usize| {
             let values = triangle.map(|p| p[axis]);
@@ -623,42 +694,99 @@ impl Graph<'_> {
         }
         true
     }
-    // Remove one right-angle vertex only when its replacement diagonal lies
-    // entirely in one protected free cell. Keep the loop seam and do not
-    // combine adjacent shortcuts into a longer, unproven chord.
-    fn bevel_steps(&self, nodes: &mut Vec<usize>) {
-        if nodes.len() < 3 {
-            return;
+    fn coordinates(&self, node: usize) -> [isize; 2] {
+        [
+            (node % (self.nx + 1)) as isize,
+            (node / (self.nx + 1)) as isize,
+        ]
+    }
+
+    /// Walk every cell interior hit by a chord between two grid vertices.
+    /// Integer crossing comparisons handle exact corner hits and keep the
+    /// same closed-cell rules as the original graph edges.
+    fn chord_clear(&self, start: usize, end: usize) -> bool {
+        let [ax, ay] = self.coordinates(start);
+        let [bx, by] = self.coordinates(end);
+        let [dx, dy] = [bx - ax, by - ay];
+        let [nx, ny] = [dx.abs(), dy.abs()];
+        if nx == 0 {
+            return (ay.min(by)..ay.max(by)).all(|y| self.cell(ax, y) || self.cell(ax - 1, y));
         }
-        let width = self.nx + 1;
-        let mut output = 1;
-        let mut i = 1;
-        while i + 1 < nodes.len() {
-            let a = nodes[i - 1];
-            let b = nodes[i];
-            let c = nodes[i + 1];
-            let (ax, ay) = (a % width, a / width);
-            let (cx, cy) = (c % width, c / width);
-            let bevel = ax.abs_diff(cx) == 1
-                && ay.abs_diff(cy) == 1
-                && self.metric(a, b) == 1
-                && self.metric(b, c) == 1
-                && self.cell(ax.min(cx) as isize, ay.min(cy) as isize);
-            if bevel {
-                nodes[output] = c;
-                output += 1;
-                i += 2;
-            } else {
-                nodes[output] = b;
-                output += 1;
-                i += 1;
+        if ny == 0 {
+            return (ax.min(bx)..ax.max(bx)).all(|x| self.cell(x, ay) || self.cell(x, ay - 1));
+        }
+        let mut x = ax - isize::from(dx < 0);
+        let mut y = ay - isize::from(dy < 0);
+        let mut next_x = 1;
+        let mut next_y = 1;
+        loop {
+            if !self.cell(x, y) {
+                return false;
+            }
+            if next_x == nx && next_y == ny {
+                return true;
+            }
+            let px = next_x * ny;
+            let py = next_y * nx;
+            if px <= py {
+                x += dx.signum();
+                next_x += 1;
+            }
+            if py <= px {
+                y += dy.signum();
+                next_y += 1;
             }
         }
-        if i < nodes.len() {
-            nodes[output] = nodes[i];
+    }
+
+    /// Fit several staircase treads at once. Ordered projections give a
+    /// two-sided distance bound to the source walk, so the existing half-cell
+    /// diagonal allowance still limits the displacement of each pass.
+    fn straighten_steps(
+        &self,
+        nodes: &mut Vec<usize>,
+        step: [f64; 2],
+        budget: &mut Budget<'_>,
+    ) -> Result<(), String> {
+        const WINDOW: usize = 20;
+        let point = |node| {
+            let [x, y] = self.coordinates(node);
+            [x as f64 * step[0], y as f64 * step[1]]
+        };
+        let deviation = step[0].hypot(step[1]) / 2.;
+        let mut start = 0;
+        let mut output = 1;
+        while start + 1 < nodes.len() {
+            let a = point(nodes[start]);
+            let mut end = start + 1;
+            for candidate in (start + 2..=(start + WINDOW).min(nodes.len() - 1)).rev() {
+                budget.tick()?;
+                let b = point(nodes[candidate]);
+                let d = [b[0] - a[0], b[1] - a[1]];
+                let length = d[0].hypot(d[1]);
+                if length <= 1e-9 {
+                    continue;
+                }
+                let mut previous = 0.;
+                let fits = nodes[start + 1..candidate].iter().all(|&node| {
+                    let p = point(node);
+                    let offset = [p[0] - a[0], p[1] - a[1]];
+                    let along = (offset[0] * d[0] + offset[1] * d[1]) / length;
+                    let in_order = along >= previous - 1e-9 && along <= length + 1e-9;
+                    previous = along;
+                    in_order && cross(d, offset).abs() <= (deviation + 1e-9) * length
+                });
+                if fits && self.chord_clear(nodes[start], nodes[candidate]) {
+                    end = candidate;
+                    break;
+                }
+            }
+            nodes[output] = nodes[end];
             output += 1;
+            start = end;
         }
         nodes.truncate(output);
+        Ok(())
     }
     fn metric(&self, a: usize, b: usize) -> usize {
         (a % (self.nx + 1)).abs_diff(b % (self.nx + 1))
@@ -788,11 +916,11 @@ impl Graph<'_> {
 }
 
 #[cfg(test)]
-mod bevel_tests {
+mod smoothing_tests {
     use super::*;
 
     #[test]
-    fn a_stair_step_can_only_beveled_through_a_free_cell() {
+    fn straightening_only_crosses_free_cells() {
         let graph = Graph {
             nx: 2,
             ny: 2,
@@ -805,8 +933,38 @@ mod bevel_tests {
             (vec![4, 5, 8], vec![4, 5, 8]),
             (vec![8, 5, 4], vec![8, 5, 4]),
         ] {
-            graph.bevel_steps(&mut path);
+            graph
+                .straighten_steps(
+                    &mut path,
+                    [1.; 2],
+                    &mut Budget::new(&std::sync::atomic::AtomicBool::new(false)),
+                )
+                .unwrap();
             assert_eq!(path, expected);
+        }
+    }
+
+    #[test]
+    fn several_stair_treads_fit_one_chord_within_the_grid_allowance() {
+        let mut free = [true; 16];
+        let stair = [0, 1, 6, 7, 12, 13, 18];
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        for obstructed in [false, true] {
+            free[5] = !obstructed;
+            let graph = Graph {
+                nx: 4,
+                ny: 4,
+                free: &free,
+                components: &[0; 16],
+            };
+            let mut path = stair.to_vec();
+            graph
+                .straighten_steps(&mut path, [1.; 2], &mut Budget::new(&cancel))
+                .unwrap();
+            assert_eq!(path == [0, 18], !obstructed);
+            assert!(path
+                .windows(2)
+                .all(|pair| graph.chord_clear(pair[0], pair[1])));
         }
     }
 
@@ -821,8 +979,9 @@ mod bevel_tests {
             origin: [0.; 2],
             spacing: 1,
             weights: [1; 3],
-            bevel_steps: true,
+            smooth_steps: true,
             blend_deviation: 0.1,
+            clearance_halo: 0.,
         };
         let graph = Graph {
             nx: 2,

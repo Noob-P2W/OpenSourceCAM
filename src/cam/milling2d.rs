@@ -20,7 +20,7 @@ fn curve(op: &Operation) -> Vec<[f64; 3]> {
     }
 }
 type FaceRegion = (Vec<Vec<[f64; 3]>>, f64);
-fn planar_rough(op: &Operation) -> bool {
+pub(super) fn planar_rough(op: &Operation) -> bool {
     op.strategy == Strategy::AreaRough
         || (matches!(op.strategy, Strategy::Pocket | Strategy::StockRough) && op.has_chain())
 }
@@ -311,7 +311,19 @@ pub(super) fn cut_chain(
     cut_spans(&spans, b, cancel)
 }
 
-fn emit_span(b: &mut Builder, span: Span) -> Result<(), String> {
+fn emit_span(b: &mut Builder, span: Span, smooth: bool) -> Result<(), String> {
+    if smooth {
+        let incoming = if let Some(arc) = span.arc {
+            let sign = arc.sweep.signum();
+            [
+                -sign * (span.from.y - arc.center[1]),
+                sign * (span.from.x - arc.center[0]),
+            ]
+        } else {
+            [span.to.x - span.from.x, span.to.y - span.from.y]
+        };
+        b.restart_at_reversal(incoming)?;
+    }
     if let Some(arc) = span.arc {
         // This is the same tolerance reserved in RemainingStock::apply.
         b.arc_xy(
@@ -348,6 +360,7 @@ pub(super) fn cut_spans(
     };
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
     let spacing = radius.max(0.25);
+    let smooth = spans.iter().any(|span| span.arc.is_some());
     let mut attached = false;
     let mut air = Vec::new();
     let mut air_length = 0.;
@@ -381,7 +394,7 @@ pub(super) fn cut_spans(
             let proof_radius = radius + span.arc.map_or(0., |arc| arc.sag);
             if b.remaining.is_clear(span.from, span.to, proof_radius, 0.) {
                 if let Some(cut) = pending.take() {
-                    emit_span(b, cut)?;
+                    emit_span(b, cut, smooth)?;
                 }
                 if attached {
                     air_length += span.from.distance(span.to);
@@ -396,9 +409,11 @@ pub(super) fn cut_spans(
                 cut.to = span.to;
                 continue;
             }
-            if attached && (air_length <= 4. * radius || !b.cleared_link(span.from, air_length)?) {
+            if attached
+                && (air_length <= 4. * radius || !b.cleared_link(span.from, air_length, !smooth)?)
+            {
                 for &link in &air {
-                    emit_span(b, link)?;
+                    emit_span(b, link, smooth)?;
                 }
             }
             air.clear();
@@ -410,7 +425,7 @@ pub(super) fn cut_spans(
             pending = Some(span);
         }
         if let Some(cut) = pending {
-            emit_span(b, cut)?;
+            emit_span(b, cut, smooth)?;
         }
     }
     b.retract()

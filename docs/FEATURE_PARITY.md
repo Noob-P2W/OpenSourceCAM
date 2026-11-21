@@ -528,10 +528,11 @@ shared with playback/simulation; these checks do not validate a native UI packag
 Planar offset distance fields use physical axis/diagonal distances to avoid excess
 laps from undersized straight-wall stepover; the 3D contact grid keeps its prior
 conservative spacing. Dense coverage regressions include rotated regions/islands.
-Planar clearing in every milling mode can blend short corners on angled geometry with
-tangent circular arcs. The generator proves the whole curve against its free
-region and accounts for neighboring blends in the stepover budget. Playback and
-linearized output use bounded samples of those same curves.
+Planar clearing in every milling mode fits longer verified spans through angled
+grid regions and blends their joins with tangent circular arcs. The generator
+accounts for neighboring blends in the stepover budget and avoids reversing
+inside a cut when a checked lift and re-entry is available. Playback and
+linearized output use bounded samples of those curves.
 Active machine setup and portable machine records select G1, G2/G3 or LinuxCNC
 G5 output. Flat curves in G5 mode use bounded cubic spans, with circular output
 for helices. Existing linear-only settings remain readable by the shared engine.
