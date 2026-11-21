@@ -382,9 +382,23 @@ fn area_roughing_steps_down_without_cutting_islands_or_floor() {
     let entries = path
         .moves
         .iter()
-        .filter(|m| m.motion == Motion::Plunge)
+        // Optimized links may make a short certified air approach instead of
+        // feeding around a long cleared contour. Count material/deep entries;
+        // the floor and full island-envelope checks above remain independent.
+        .filter(|m| m.motion == Motion::Plunge && m.from.distance(m.to) > 0.51)
         .count();
-    assert!(entries<=6,"Connected offset regions should stay down instead of plunging for every raster strip: {entries}");
+    assert!(
+        entries <= 6,
+        "Connected offset regions should not repeat deep entries for every raster strip: {entries}"
+    );
+    let mut stay_down = p.clone();
+    stay_down.operations[0].settings.milling_mode = Some(MillingMode::Climb);
+    stay_down.operations[0].settings.stock_clearance = Some(0.5);
+    let reference = cam::generate(&stay_down).unwrap();
+    assert!(
+        path.estimated_seconds < reference.estimated_seconds,
+        "Optimized hops must improve on the same local-clearance stay-down route"
+    );
     levels.sort_by(f64::total_cmp);
     assert_eq!(levels, vec![-4.5, -4., -2.]);
     p.operations[0].settings.height_offset = Some(-0.1);

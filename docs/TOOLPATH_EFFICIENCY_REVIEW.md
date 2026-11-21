@@ -88,6 +88,8 @@ alternate facing axis. All strategy cases also post through NC preflight and
 check native arcs. Dense probes verify rotated planar boundaries and islands,
 and successive offsets on straight and rotated walls stay within the requested
 maximum stepover.
+The connected-island fixture bounds deep entries and requires optimized hops to
+beat a stay-down reference using the same local-clearance setting.
 Existing suites verify retained features, surface contact,
 coverage, directions, entries, allowances, machine bounds and controller output.
 
