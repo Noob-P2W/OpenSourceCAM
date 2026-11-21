@@ -59,6 +59,9 @@ impl PostProcessor {
     pub fn ready(self, process: Process) -> bool {
         process == Process::Milling && self != Self::Klipper
     }
+    pub fn supports_splines(self) -> bool {
+        self == Self::LinuxCnc
+    }
     pub fn extension(self) -> &'static str {
         if self == Self::Klipper {
             "gcode"
@@ -107,9 +110,19 @@ pub enum Coolant {
     Flood,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionOutput {
+    Linear,
+    Circular,
+    Spline,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PostSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_output: Option<MotionOutput>,
     #[serde(default)]
     pub linearize_arcs: bool,
     #[serde(default)]
@@ -119,6 +132,20 @@ pub struct PostSettings {
     pub coolant: Coolant,
 }
 impl PostSettings {
+    pub fn motion_output(&self) -> MotionOutput {
+        self.motion_output.unwrap_or(if self.linearize_arcs {
+            MotionOutput::Linear
+        } else {
+            MotionOutput::Circular
+        })
+    }
+
+    fn arc_center_mode(&self) -> &'static str {
+        match self.motion_output() {
+            MotionOutput::Linear => "",
+            MotionOutput::Circular | MotionOutput::Spline => "G91.1\n",
+        }
+    }
     pub fn for_process(process: Process) -> Self {
         Self {
             processor: if process == Process::Printing3d {
@@ -136,6 +163,9 @@ impl PostSettings {
                 self.processor.label(),
                 process.label()
             ));
+        }
+        if self.motion_output() == MotionOutput::Spline && !self.processor.supports_splines() {
+            return Err("G5 cubic spline output requires the LinuxCNC postprocessor".into());
         }
         Ok(())
     }
@@ -220,7 +250,8 @@ fn manual_change(
     }
     writeln!(
         output,
-        "G21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}",
+        "G21\nG90\nG17\n{}G94\nG40\nG80\n{}",
+        project.post.arc_center_mode(),
         project.post.work_offset.code()
     )
     .unwrap();
@@ -319,7 +350,9 @@ fn validate_manual_routes(project: &Project, path: &crate::cam::Toolpath) -> Res
 pub fn gcode(project: &Project) -> Result<String, String> {
     let path = checked_path(project)?;
     let processor = project.post.processor;
-    let native_arcs = !project.post.linearize_arcs && crate::arcs::preflight(project, &path)?;
+    let motion_output = project.post.motion_output();
+    let native_arcs =
+        motion_output != MotionOutput::Linear && crate::arcs::preflight(project, &path)?;
     let percent = matches!(processor, PostProcessor::Mach3 | PostProcessor::LinuxCnc);
     let mut output = String::new();
     if percent {
@@ -358,7 +391,9 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         );
     }
     writeln!(output, "(Project: {})", comment(&project.name)).unwrap();
-    output.push_str("G21\nG90\nG17\nG91.1\nG94\nG40\nG49\nG80\n");
+    output.push_str("G21\nG90\nG17\n");
+    output.push_str(project.post.arc_center_mode());
+    output.push_str("G94\nG40\nG49\nG80\n");
     writeln!(output, "{}", project.post.work_offset.code()).unwrap();
     if matches!(processor, PostProcessor::Mach3 | PostProcessor::LinuxCnc) {
         output.push_str("G61\n");
@@ -391,8 +426,9 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         let record = first_record.ok_or("ATC requires a library tool")?;
         writeln!(
             output,
-            "T{} M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}\nG43 H{}",
+            "T{} M6\nG21\nG90\nG17\n{}G94\nG40\nG80\n{}\nG43 H{}",
             record.post.number,
+            project.post.arc_center_mode(),
             project.post.work_offset.code(),
             record
                 .post
@@ -481,8 +517,9 @@ pub fn gcode(project: &Project) -> Result<String, String> {
                     }
                     writeln!(
                         output,
-                        "M5\nM9\nT{} M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}\nG43 H{}\nG0 Z{:.4}",
+                        "M5\nM9\nT{} M6\nG21\nG90\nG17\n{}G94\nG40\nG80\n{}\nG43 H{}\nG0 Z{:.4}",
                         record.post.number,
+                        project.post.arc_center_mode(),
                         project.post.work_offset.code(),
                         record
                             .post
@@ -539,6 +576,17 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         if native_arcs {
             if let Some(arc) = arcs.get(&movement_index) {
                 let end = crate::arcs::endpoint(&path, arc);
+                if motion_output == MotionOutput::Spline {
+                    if let Some(splines) = crate::arcs::splines(project, &path, arc, posted) {
+                        for spline in splines {
+                            spline.write(&mut output, movement.feed);
+                        }
+                        posted.x = round(end.x, 6);
+                        posted.y = round(end.y, 6);
+                        skip_until = arc.end;
+                        continue;
+                    }
+                }
                 let line = format!(
                     "{} X{:.6} Y{:.6} Z{:.6} I{:.6} J{:.6} F{:.4}",
                     if arc.sweep < 0. { "G2" } else { "G3" },

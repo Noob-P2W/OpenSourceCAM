@@ -74,10 +74,23 @@ receive additional machine checks; inflated fixture envelopes contain the true
 arc between samples. Uncertain arc preflight keeps G1 output. Very small rounded
 entries or GRBL arc lines exceeding its buffer also keep G1 samples. Arbitrary
 polygon contours, conical spirals and conservative circumscribed outside corners
-are never blindly fitted to circles. **Linear moves only (G1)** in machine/post
-settings forces the original sampled output.
+are never blindly fitted to circles. **Motion output** is available in Active
+machine and in the **Postprocessor & changer** tab of Machine Library records.
+Records retain the selected format when applied to another job.
 
-Optimized planar clearing uses tangent circular fillets where its grid contains
+- **G1 · Linear moves** emits bounded linear feed samples and omits G91.1.
+- **G2/G3 · Circular interpolation** is the default and preserves verified
+  circles and helices on the existing milling posts.
+- **G5 · Cubic spline (LinuxCNC)** posts bounded XY cubic spans for eligible
+  flat arcs. Helices and ineligible cubics use verified circular output. The
+  same swept-arc preflight applies, and linear samples cover the cases that
+  cannot pass it. [LinuxCNC G5 reference](https://linuxcnc.org/docs/stable/html/gcode/g-code.html#gcode:g5)
+
+Existing projects and machine records with the old linear-only flag open in G1
+mode. Selecting a motion format explicitly takes precedence over the flag.
+
+Optimized, Climb and Conventional planar clearing use tangent circular fillets
+where the grid contains
 the entire triangle between the original corner and both tangent endpoints.
 The triangle certificate covers the true arc and its linear samples. Neighboring
 fillets share the available line length, and pass spacing reserves their maximum

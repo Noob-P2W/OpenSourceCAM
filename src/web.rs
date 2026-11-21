@@ -21,7 +21,7 @@ pub fn catalog() -> String {
         let parameters = |specs: Vec<crate::tool_library::Parameter>| -> Vec<_> { specs.iter().map(|p| serde_json::json!({"key":p.key,"label":p.label,"unit":p.unit,"min":p.min,"max":p.max})).collect() };
         serde_json::json!({"id":kind,"label":kind.label(),"group":kind.group(),"process":kind.process(),"geometry":parameters(kind.geometry()),"cutting":parameters(kind.cutting())})
     }).collect();
-    serde_json::json!({"processes":processes,"tools":tools,"machines":crate::machine_library::builtins(),"posts":crate::post::PostProcessor::ALL.iter().map(|p|serde_json::json!({"id":p,"label":p.label()})).collect::<Vec<_>>(),"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
+    serde_json::json!({"processes":processes,"tools":tools,"machines":crate::machine_library::builtins(),"posts":crate::post::PostProcessor::ALL.iter().map(|p|serde_json::json!({"id":p,"label":p.label(),"cubic_splines":p.supports_splines()})).collect::<Vec<_>>(),"strategies":crate::model::Strategy::ALL.iter().map(|s| serde_json::json!({"id":s,"label":s.label()})).collect::<Vec<_>>()}).to_string()
 }
 #[wasm_bindgen]
 pub fn blank() -> String {

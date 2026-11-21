@@ -340,6 +340,14 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
                     path.arcs.len() > 100,
                     "Angled clearing should produce tangential arcs"
                 );
+                for mode in [MillingMode::Climb, MillingMode::Conventional] {
+                    let mut other = p.clone();
+                    other.operations[0].settings.milling_mode = Some(mode);
+                    assert!(
+                        cam::generate(&other).unwrap().arcs.len() > 100,
+                        "{mode:?} must smooth angled corners"
+                    );
+                }
                 for arc in &path.arcs {
                     let from = path.moves[arc.start].from;
                     let to = path.moves[arc.end - 1].to;

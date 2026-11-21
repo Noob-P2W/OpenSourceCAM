@@ -4,7 +4,7 @@ use opensourcecam::{
     commands,
     model::{Project, Strategy},
     operation::{Direction, Entry, MillingMode, PocketPattern},
-    post::{self, PostProcessor},
+    post::{self, MotionOutput, PostProcessor},
     tool_library::{LibraryTool, ToolKind},
 };
 fn job(strategy: Strategy) -> Project {
@@ -45,6 +45,101 @@ fn words(line: &str) -> std::collections::BTreeMap<char, f64> {
                 .map(|n| (letter.chars().next().unwrap(), n))
         })
         .collect()
+}
+
+#[test]
+fn linuxcnc_splines_stay_within_the_arc_envelope_and_keep_helices_circular() {
+    for direction in [Direction::Clockwise, Direction::Counterclockwise] {
+        let mut p = job(Strategy::CircularPocket);
+        p.operations[0].settings.milling_mode = None;
+        p.operations[0].settings.direction = direction;
+        p.post.processor = PostProcessor::LinuxCnc;
+        p.post.motion_output = Some(MotionOutput::Spline);
+        let nc = post::gcode(&p).unwrap();
+        let centre = [p.operations[0].x, p.operations[0].y];
+        let mut pos = [0.; 3];
+        let (mut splines, mut helices) = (0, 0);
+        for line in nc.lines() {
+            let code = line.split_whitespace().next().unwrap_or("");
+            if !matches!(code, "G0" | "G1" | "G2" | "G3" | "G5") {
+                continue;
+            }
+            let w = words(line);
+            let end = ['X', 'Y', 'Z'].map(|axis| {
+                w.get(&axis)
+                    .copied()
+                    .unwrap_or(pos[(axis as u8 - b'X') as usize])
+            });
+            if matches!(code, "G2" | "G3") && (end[2] - pos[2]).abs() > 1e-7 {
+                helices += 1;
+            }
+            if code == "G5" {
+                splines += 1;
+                assert!(!w.contains_key(&'Z'));
+                let arc_radius = (end[0] - centre[0]).hypot(end[1] - centre[1]);
+                let controls = [
+                    [pos[0], pos[1]],
+                    [pos[0] + w[&'I'], pos[1] + w[&'J']],
+                    [end[0] + w[&'P'], end[1] + w[&'Q']],
+                    [end[0], end[1]],
+                ];
+                for i in 0..=100 {
+                    let t = i as f64 / 100.;
+                    let u = 1. - t;
+                    let q = [0, 1].map(|j| {
+                        u.powi(3) * controls[0][j]
+                            + 3. * u * u * t * controls[1][j]
+                            + 3. * u * t * t * controls[2][j]
+                            + t.powi(3) * controls[3][j]
+                    });
+                    let radius = (q[0] - centre[0]).hypot(q[1] - centre[1]);
+                    assert!((radius - arc_radius).abs() < 0.00016, "{line}");
+                }
+                let tangent_cross = (pos[0] - centre[0]) * w[&'J'] - (pos[1] - centre[1]) * w[&'I'];
+                assert_eq!(tangent_cross < 0., direction == Direction::Clockwise);
+            }
+            pos = end;
+        }
+        assert!(splines > 0 && helices > 0);
+    }
+}
+
+#[test]
+fn motion_output_round_trips_with_each_machine_and_preserves_legacy_g1() {
+    use opensourcecam::machine_library::{self, MachineRecord};
+    let mut p = job(Strategy::CircularPocket);
+    p.post.linearize_arcs = true;
+    let has_curves = |nc: &str| {
+        nc.lines().any(|line| {
+            ["G2 ", "G3 ", "G5 "]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+        })
+    };
+    let legacy = post::gcode(&p).unwrap();
+    assert!(!has_curves(&legacy));
+    assert!(!legacy.contains("G91.1"));
+    for (processor, mode) in [
+        (PostProcessor::Grbl, MotionOutput::Linear),
+        (PostProcessor::Mach3, MotionOutput::Circular),
+        (PostProcessor::LinuxCnc, MotionOutput::Spline),
+    ] {
+        p.post.processor = processor;
+        p.post.motion_output = Some(mode);
+        let record = MachineRecord::from_project(&p).unwrap();
+        let records = machine_library::parse(&serde_json::to_string(&record).unwrap()).unwrap();
+        let mut applied = job(Strategy::CircularPocket);
+        records[0].apply(&mut applied).unwrap();
+        assert_eq!(applied.post.motion_output(), mode);
+        assert_eq!(
+            has_curves(&post::gcode(&applied).unwrap()),
+            mode != MotionOutput::Linear
+        );
+    }
+    p.post.processor = PostProcessor::Grbl;
+    assert!(post::gcode(&p)
+        .unwrap_err()
+        .contains("requires the LinuxCNC postprocessor"));
 }
 fn check_nc(p: &Project) {
     let path = cam::generate(p).unwrap();

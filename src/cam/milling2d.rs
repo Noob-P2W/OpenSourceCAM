@@ -135,7 +135,7 @@ fn area_paths(
         tool.diameter / 2. + op.settings.radial_allowance,
         tool.diameter * tool.step_over.min(0.5),
         op.settings.surface_step.unwrap_or(0.25),
-        op.settings.optimize_links,
+        p.process == crate::process::Process::Milling,
         cancel,
     )?;
     if op.strategy == Strategy::StockRough {
