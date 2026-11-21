@@ -8,7 +8,7 @@ try {
  await ribbon(page,'Actions','Stock simulation');assert.equal(await page.locator('#conservative-stock').isChecked(),true);await closeDialogs(page);
  await ribbon(page,'Libraries','Active machine');
  const motion=page.getByLabel('Motion output',{exact:true});
- assert.equal(await motion.locator('option[value=spline]').isDisabled(),true);
+ assert.equal(await motion.locator('option[value=spline]').evaluate(option=>option.disabled),true);
  await motion.selectOption('linear');await motion.blur();
  await page.waitForFunction(async()=>JSON.parse(await (await import('./storage.js')).readSnapshot()).post.motion_output==='linear');
  await page.getByLabel('Postprocessor',{exact:true}).selectOption('linux_cnc');
