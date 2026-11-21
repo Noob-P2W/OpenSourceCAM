@@ -383,7 +383,10 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
 
 #[test]
 fn straight_offsets_use_the_stepover_without_exceeding_its_maximum() {
-    let p = cases::numeric(Strategy::AreaRough);
+    let mut p = cases::numeric(Strategy::AreaRough);
+    // Exact contours use the full spacing budget. Optimized contours reserve
+    // extra room for bevel deviation, tested on rotated walls below.
+    p.operations[0].settings.milling_mode = Some(MillingMode::Climb);
     let tool = p.operation_tool(&p.operations[0]).unwrap();
     let path = cam::generate(&p).unwrap();
     // Compare successive offsets from one wall, rather than opposite sides
@@ -415,6 +418,7 @@ fn straight_offsets_use_the_stepover_without_exceeding_its_maximum() {
     for angle in [15_f64, 30., 45., 75.] {
         let (s, c) = angle.to_radians().sin_cos();
         let mut rotated = p.clone();
+        rotated.operations[0].settings.milling_mode = Some(MillingMode::Optimized);
         rotated.operations[0].settings.path = [(-15., -20.), (15., -20.), (15., 20.), (-15., 20.)]
             .map(|(x, y)| [30. + x * c - y * s, 45. + x * s + y * c, -3.])
             .to_vec();

@@ -13,6 +13,11 @@ fixtures are original geometry; the supplied private model is not included.
   keeps rounding within the requested maximum. Cutter dilation, the
   50% stepover cap, protected islands and original clearance checks remain. The
   3D contact field retains its earlier conservative erosion spacing.
+- Optimized planar clearing bevels short grid stair steps on angled boundaries.
+  A diagonal must stay inside a single cell that the model permits the cutter
+  to sweep. Adjacent passes reserve space for both bevels in the stepover
+  calculation. The shared generator supplies the resulting coordinates to the
+  preview, stock simulation, fixture checks and NC post.
 - Numeric outside clearing uses the same conservative air-span trimming as planar
   clearing. Complete oversized laps outside the physical blank are omitted; the
   retained rectangle and circumscribed corners are unchanged. Requested finishing
@@ -81,6 +86,10 @@ so its reduction below is a sequence improvement rather than a faster finish cut
 
 The supplied model's selected outside-clearing case improved from 1173.67 s to
 993.37 s (15.4%), with the same final plane. Its private geometry remains local.
+With planar stair-step beveling, the same job uses 6,580 moves instead of 8,505.
+The conservative spacing for bevels raises the programmed-feed estimate to
+1098.79 s while keeping the selected floor. The table records the efficiency
+release before the beveling follow-up.
 The numeric outside test independently compares final sampled stock with the
 untrimmed cycle and checks low XY rapids against only earlier cutter sweeps.
 Fixture regressions cover an intervening hidden clamp and an obstruction to the

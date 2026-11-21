@@ -17,6 +17,7 @@ pub(crate) struct Clearing {
     origin: [f64; 2],
     spacing: usize,
     weights: [usize; 3],
+    bevel_steps: bool,
 }
 impl Clearing {
     pub(crate) fn build(
@@ -57,6 +58,7 @@ impl Clearing {
             origin: [-margin; 2],
             spacing,
             weights: [1; 3],
+            bevel_steps: false,
         })
     }
     /// Reuse bounded offset loops and safe within-region links for planar clearing.
@@ -66,9 +68,16 @@ impl Clearing {
         radius: f64,
         stepover: f64,
         resolution: f64,
+        bevel_steps: bool,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<Self, String> {
         let outer = rings.first().ok_or("Select a machining boundary")?;
+        let bevel_steps = bevel_steps
+            && rings.iter().chain(obstacles).any(|ring| {
+                ring.iter()
+                    .zip(ring.iter().cycle().skip(1))
+                    .any(|(a, b)| (a[0] - b[0]).abs() > 1e-7 && (a[1] - b[1]).abs() > 1e-7)
+            });
         let lo: [f64; 2] =
             std::array::from_fn(|a| outer.iter().map(|p| p[a]).fold(f64::INFINITY, f64::min));
         let hi: [f64; 2] =
@@ -120,9 +129,10 @@ impl Clearing {
             dx,
             dy,
             origin: lo,
-            // A level crosses a whole grid cell at once. Reserve one diagonal
-            // so rounding cannot widen successive offsets beyond the maximum.
-            spacing: ((stepover - dx.hypot(dy)) / (dx.min(dy) / 1024.))
+            // Reserve one diagonal for grid rounding and, when beveling, one
+            // more for the combined deviation on adjacent offset passes.
+            spacing: ((stepover - if bevel_steps { 2. } else { 1. } * dx.hypot(dy))
+                / (dx.min(dy) / 1024.))
                 .floor()
                 .max(1.) as usize,
             weights: {
@@ -133,6 +143,7 @@ impl Clearing {
                     (dx.hypot(dy) / unit).ceil() as usize,
                 ]
             },
+            bevel_steps,
         })
     }
     pub(crate) fn exterior_only(&mut self, width: f64, height: f64) {
@@ -397,7 +408,10 @@ impl Clearing {
         }
         Ok(chains
             .into_iter()
-            .map(|nodes| {
+            .map(|mut nodes| {
+                if self.bevel_steps {
+                    graph.bevel_steps(&mut nodes);
+                }
                 let mut result: Vec<Point3> = Vec::new();
                 for node in nodes {
                     let p = self.point(node, z);
@@ -434,6 +448,43 @@ struct Graph<'a> {
     components: &'a [usize],
 }
 impl Graph<'_> {
+    // Remove one right-angle vertex only when its replacement diagonal lies
+    // entirely in one protected free cell. Keep the loop seam and do not
+    // combine adjacent shortcuts into a longer, unproven chord.
+    fn bevel_steps(&self, nodes: &mut Vec<usize>) {
+        if nodes.len() < 3 {
+            return;
+        }
+        let width = self.nx + 1;
+        let mut output = 1;
+        let mut i = 1;
+        while i + 1 < nodes.len() {
+            let a = nodes[i - 1];
+            let b = nodes[i];
+            let c = nodes[i + 1];
+            let (ax, ay) = (a % width, a / width);
+            let (cx, cy) = (c % width, c / width);
+            let bevel = ax.abs_diff(cx) == 1
+                && ay.abs_diff(cy) == 1
+                && self.metric(a, b) == 1
+                && self.metric(b, c) == 1
+                && self.cell(ax.min(cx) as isize, ay.min(cy) as isize);
+            if bevel {
+                nodes[output] = c;
+                output += 1;
+                i += 2;
+            } else {
+                nodes[output] = b;
+                output += 1;
+                i += 1;
+            }
+        }
+        if i < nodes.len() {
+            nodes[output] = nodes[i];
+            output += 1;
+        }
+        nodes.truncate(output);
+    }
     fn metric(&self, a: usize, b: usize) -> usize {
         (a % (self.nx + 1)).abs_diff(b % (self.nx + 1))
             + (a / (self.nx + 1)).abs_diff(b / (self.nx + 1))
@@ -558,5 +609,29 @@ impl Graph<'_> {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod bevel_tests {
+    use super::*;
+
+    #[test]
+    fn a_stair_step_can_only_beveled_through_a_free_cell() {
+        let graph = Graph {
+            nx: 2,
+            ny: 2,
+            free: &[true, true, true, false],
+            components: &[0; 4],
+        };
+        for (mut path, expected) in [
+            (vec![0, 1, 4], vec![0, 4]),
+            (vec![4, 1, 0], vec![4, 0]),
+            (vec![4, 5, 8], vec![4, 5, 8]),
+            (vec![8, 5, 4], vec![8, 5, 4]),
+        ] {
+            graph.bevel_steps(&mut path);
+            assert_eq!(path, expected);
+        }
     }
 }
