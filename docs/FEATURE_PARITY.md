@@ -528,3 +528,7 @@ shared with playback/simulation; these checks do not validate a native UI packag
 Planar offset distance fields use physical axis/diagonal distances to avoid excess
 laps from undersized straight-wall stepover; the 3D contact grid keeps its prior
 conservative spacing. Dense coverage regressions include rotated regions/islands.
+Optimized planar clearing can blend short corners on angled geometry with
+tangent circular arcs. The generator proves the whole curve against its free
+region and accounts for neighboring blends in the stepover budget. Playback and
+linearized output use bounded samples of those same curves.

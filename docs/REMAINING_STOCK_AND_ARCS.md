@@ -77,6 +77,14 @@ polygon contours, conical spirals and conservative circumscribed outside corners
 are never blindly fitted to circles. **Linear moves only (G1)** in machine/post
 settings forces the original sampled output.
 
+Optimized planar clearing uses tangent circular fillets where its grid contains
+the entire triangle between the original corner and both tangent endpoints.
+The triangle certificate covers the true arc and its linear samples. Neighboring
+fillets share the available line length, and pass spacing reserves their maximum
+departure from the grid route. Protected or tightly spaced turns keep their
+original geometry. The controller still determines acceleration through the
+resulting arcs and how it stops at any remaining sharp corners.
+
 ## Primary references
 
 - [Autodesk: stock transfer for rest machining](https://help.autodesk.com/cloudhelp/ENU/Fusion-CAM/files/MFG-REST-MACHINING-SETUP-STOCK-TRANSFER.htm)

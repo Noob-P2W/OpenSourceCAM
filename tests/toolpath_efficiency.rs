@@ -335,6 +335,34 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
             }
             let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
             let path = cam::generate(&p).unwrap();
+            if angle == 30. && strategy == Strategy::StockRough {
+                assert!(
+                    path.arcs.len() > 100,
+                    "Angled clearing should produce tangential arcs"
+                );
+                for arc in &path.arcs {
+                    let from = path.moves[arc.start].from;
+                    let to = path.moves[arc.end - 1].to;
+                    assert_eq!(from.z, to.z);
+                    let r = (from.x - arc.center[0]).hypot(from.y - arc.center[1]);
+                    let phase = (from.y - arc.center[1]).atan2(from.x - arc.center[0]);
+                    for j in 0..=24 {
+                        let theta = phase + arc.sweep * j as f64 / 24.;
+                        let q = [
+                            arc.center[0] + r * theta.cos(),
+                            arc.center[1] + r * theta.sin(),
+                        ];
+                        assert!(
+                            !inside(q, &outer) && margin(q, &outer) >= radius - 1e-8,
+                            "True arc entered the retained island envelope at {q:?}"
+                        );
+                    }
+                }
+                let circular = |line: &str| line.starts_with("G2 ") || line.starts_with("G3 ");
+                assert!(post::gcode(&p).unwrap().lines().any(circular));
+                p.post.linearize_arcs = true;
+                assert!(!post::gcode(&p).unwrap().lines().any(circular));
+            }
             let cuts: Vec<_> = path
                 .moves
                 .iter()

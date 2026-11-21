@@ -1025,7 +1025,7 @@ pub fn generate_with_cancel(
                         &mut surface_budget,
                         op.settings.optimize_links.then_some(b.position),
                     )? {
-                        milling2d::cut_chain(&chain, &mut b, cancel)?;
+                        milling2d::cut_spans(&chain, &mut b, cancel)?;
                     }
                 }
                 if !same_tool_next(project, index)? {

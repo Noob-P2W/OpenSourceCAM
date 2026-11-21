@@ -90,6 +90,13 @@ With planar stair-step beveling, the same job uses 6,580 moves instead of 8,505.
 The conservative spacing for bevels raises the programmed-feed estimate to
 1098.79 s while keeping the selected floor. The table records the efficiency
 release before the beveling follow-up.
+
+With tangent fillets, the same job posts about 5,470 G2/G3 arcs. Comparing the
+actual line directions and arc tangents in NC, the number of direction changes
+greater than 30 degrees next to a feed block shorter than 0.5 mm drops from 6,145
+to 976. The cut still ends at the selected floor. The larger spacing reserve
+raises the programmed-feed estimate to about 1,139 s. These estimates omit the
+controller's acceleration and deceleration at junctions.
 The numeric outside test independently compares final sampled stock with the
 untrimmed cycle and checks low XY rapids against only earlier cutter sweeps.
 Fixture regressions cover an intervening hidden clamp and an obstruction to the

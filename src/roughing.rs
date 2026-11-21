@@ -18,6 +18,38 @@ pub(crate) struct Clearing {
     spacing: usize,
     weights: [usize; 3],
     bevel_steps: bool,
+    blend_deviation: f64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Span {
+    pub from: Point3,
+    pub to: Point3,
+    pub arc: Option<CornerArc>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CornerArc {
+    pub center: [f64; 2],
+    pub sweep: f64,
+    pub sag: f64,
+}
+
+impl Span {
+    pub fn line(from: Point3, to: Point3) -> Self {
+        Self {
+            from,
+            to,
+            arc: None,
+        }
+    }
+    pub fn at_z(self, z: f64) -> Self {
+        Self {
+            from: Point3 { z, ..self.from },
+            to: Point3 { z, ..self.to },
+            ..self
+        }
+    }
 }
 impl Clearing {
     pub(crate) fn build(
@@ -59,6 +91,7 @@ impl Clearing {
             spacing,
             weights: [1; 3],
             bevel_steps: false,
+            blend_deviation: 0.,
         })
     }
     /// Reuse bounded offset loops and safe within-region links for planar clearing.
@@ -122,6 +155,16 @@ impl Clearing {
         if heights.iter().all(|v| *v == f64::INFINITY) {
             return Err("No cutter-sized clearing region remains at this depth".into());
         }
+        let diagonal = dx.hypot(dy);
+        // At very small stepovers, keep the exact route instead of spending
+        // the whole spacing budget on smoothing and generating excess laps.
+        let spare = stepover - 2. * diagonal - dx.min(dy);
+        let bevel_steps = bevel_steps && spare > 0.;
+        let blend_deviation = if bevel_steps {
+            (diagonal * 0.15).min(spare / 2.)
+        } else {
+            0.
+        };
         Ok(Self {
             heights,
             nx,
@@ -129,9 +172,11 @@ impl Clearing {
             dx,
             dy,
             origin: lo,
-            // Reserve one diagonal for grid rounding and, when beveling, one
-            // more for the combined deviation on adjacent offset passes.
-            spacing: ((stepover - if bevel_steps { 2. } else { 1. } * dx.hypot(dy))
+            // Reserve one diagonal for grid rounding and the combined bevel
+            // and fillet deviations on adjacent passes.
+            spacing: ((stepover
+                - if bevel_steps { 2. } else { 1. } * diagonal
+                - 2. * blend_deviation)
                 / (dx.min(dy) / 1024.))
                 .floor()
                 .max(1.) as usize,
@@ -144,6 +189,7 @@ impl Clearing {
                 ]
             },
             bevel_steps,
+            blend_deviation,
         })
     }
     pub(crate) fn exterior_only(&mut self, width: f64, height: f64) {
@@ -199,7 +245,7 @@ impl Clearing {
         reverse: bool,
         budget: &mut Budget,
         entry: Option<Point3>,
-    ) -> Result<Vec<Vec<Point3>>, String> {
+    ) -> Result<Vec<Vec<Span>>, String> {
         let free: Vec<_> = self.heights.iter().map(|h| *h <= z + 1e-7).collect();
         let mut distance = vec![usize::MAX; free.len()];
         let mut heap = BinaryHeap::new();
@@ -406,7 +452,7 @@ impl Clearing {
                 chains.push(nodes);
             }
         }
-        Ok(chains
+        chains
             .into_iter()
             .map(|mut nodes| {
                 if self.bevel_steps {
@@ -426,10 +472,107 @@ impl Clearing {
                     }
                     result.push(p)
                 }
-                result
+                self.fillet(&result, &graph, budget)
             })
-            .collect())
+            .collect()
     }
+
+    fn fillet(
+        &self,
+        points: &[Point3],
+        graph: &Graph<'_>,
+        budget: &mut Budget,
+    ) -> Result<Vec<Span>, String> {
+        let Some(&first) = points.first() else {
+            return Ok(Vec::new());
+        };
+        let mut cursor = first;
+        let mut spans = Vec::new();
+        for triple in points.windows(3) {
+            budget.tick()?;
+            let [a, vertex, b] = [triple[0], triple[1], triple[2]];
+            if let Some(arc) = self.corner(a, vertex, b, graph) {
+                spans.push(Span::line(cursor, arc.from));
+                spans.push(arc);
+                cursor = arc.to;
+            } else {
+                spans.push(Span::line(cursor, vertex));
+                cursor = vertex;
+            }
+        }
+        if points.len() > 1 {
+            spans.push(Span::line(cursor, *points.last().unwrap()));
+        }
+        Ok(spans)
+    }
+
+    fn corner(&self, a: Point3, v: Point3, b: Point3, graph: &Graph<'_>) -> Option<Span> {
+        if self.blend_deviation <= 0. {
+            return None;
+        }
+        let l1 = a.distance(v);
+        let l2 = v.distance(b);
+        if l1.min(l2) <= 1e-7 {
+            return None;
+        }
+        let u = [(v.x - a.x) / l1, (v.y - a.y) / l1];
+        let w = [(b.x - v.x) / l2, (b.y - v.y) / l2];
+        let turn = cross(u, w).atan2(u[0] * w[0] + u[1] * w[1]);
+        let angle = turn.abs();
+        if !(0.05..=2.62).contains(&angle) {
+            return None;
+        }
+
+        // Two neighboring blends can each use at most 48% of a shared leg.
+        // Limit the arc's distance from the corner and its grid search size.
+        let mut trim = (0.48 * l1.min(l2))
+            .min(self.blend_deviation / (angle / 4.).tan())
+            .min(2.8 * self.dx.min(self.dy));
+        for _ in 0..5 {
+            let r = trim / (angle / 2.).tan();
+            // Very small arcs offer little benefit and may be rejected by posts.
+            if r < 0.03 || trim < 0.005 {
+                break;
+            }
+            let from = Point3 {
+                x: v.x - trim * u[0],
+                y: v.y - trim * u[1],
+                z: v.z,
+            };
+            let to = Point3 {
+                x: v.x + trim * w[0],
+                y: v.y + trim * w[1],
+                z: v.z,
+            };
+            let grid = |p: Point3| {
+                [
+                    (p.x - self.origin[0]) / self.dx,
+                    (p.y - self.origin[1]) / self.dy,
+                ]
+            };
+            // The complete minor arc lies in the triangle formed by the
+            // tangent points and the original vertex, as do its G1 samples.
+            if graph.triangle_clear([grid(from), grid(v), grid(to)], turn.signum()) {
+                return Some(Span {
+                    from,
+                    to,
+                    arc: Some(CornerArc {
+                        center: [
+                            from.x - turn.signum() * r * u[1],
+                            from.y + turn.signum() * r * u[0],
+                        ],
+                        sweep: turn,
+                        sag: r * (1. - (angle / 2.).cos()),
+                    }),
+                });
+            }
+            trim *= 0.5;
+        }
+        None
+    }
+}
+fn cross(a: [f64; 2], b: [f64; 2]) -> f64 {
+    a[0] * b[1] - a[1] * b[0]
 }
 fn area(nodes: &[usize], width: usize) -> f64 {
     nodes
@@ -448,6 +591,38 @@ struct Graph<'a> {
     components: &'a [usize],
 }
 impl Graph<'_> {
+    fn triangle_clear(&self, triangle: [[f64; 2]; 3], winding: f64) -> bool {
+        let bounds = |axis: usize| {
+            let values = triangle.map(|p| p[axis]);
+            let lo = values.into_iter().fold(f64::INFINITY, f64::min);
+            let hi = values.into_iter().fold(f64::NEG_INFINITY, f64::max);
+            (lo.floor() as isize)..(hi.ceil() as isize)
+        };
+        for y in bounds(1) {
+            for x in bounds(0) {
+                if self.cell(x, y) {
+                    continue;
+                }
+                let (x, y) = (x as f64, y as f64);
+                let square = [[x, y], [x + 1., y], [x + 1., y + 1.], [x, y + 1.]];
+                // The bounding ranges supply the square's two separating axes.
+                // Test the triangle's three remaining axes. Boundary contact
+                // is allowed as with the original cell-edge routes.
+                let separated = (0..3).any(|i| {
+                    let a = triangle[i];
+                    let b = triangle[(i + 1) % 3];
+                    square.iter().all(|q| {
+                        winding * cross([b[0] - a[0], b[1] - a[1]], [q[0] - a[0], q[1] - a[1]])
+                            <= 1e-10
+                    })
+                });
+                if !separated {
+                    return false;
+                }
+            }
+        }
+        true
+    }
     // Remove one right-angle vertex only when its replacement diagonal lies
     // entirely in one protected free cell. Keep the loop seam and do not
     // combine adjacent shortcuts into a longer, unproven chord.
@@ -632,6 +807,55 @@ mod bevel_tests {
         ] {
             graph.bevel_steps(&mut path);
             assert_eq!(path, expected);
+        }
+    }
+
+    #[test]
+    fn a_fillet_is_tangent_and_stays_out_of_the_blocked_cell() {
+        let clearing = Clearing {
+            heights: vec![],
+            nx: 2,
+            ny: 2,
+            dx: 1.,
+            dy: 1.,
+            origin: [0.; 2],
+            spacing: 1,
+            weights: [1; 3],
+            bevel_steps: true,
+            blend_deviation: 0.1,
+        };
+        let graph = Graph {
+            nx: 2,
+            ny: 2,
+            free: &[true, false, true, true],
+            components: &[0; 4],
+        };
+        let point = |x, y| Point3 { x, y, z: -1. };
+        let a = point(0., 1.);
+        let vertex = point(1., 1.);
+        for (b, direction) in [(point(1., 2.), 1.), (point(1., 0.), -1.)] {
+            let fillet = clearing.corner(a, vertex, b, &graph);
+            if direction < 0. {
+                // This blend would enter the blocked lower-right cell when
+                // traversed from the right. The lower-left cell is free.
+                let blocked = clearing.corner(point(2., 1.), vertex, b, &graph);
+                assert!(blocked.is_none());
+            }
+            let span = fillet.unwrap();
+            let arc = span.arc.unwrap();
+            let r = (span.from.x - arc.center[0]).hypot(span.from.y - arc.center[1]);
+            assert!((span.from.x - arc.center[0]).abs() < 1e-10);
+            assert!((span.to.y - arc.center[1]).abs() < 1e-10);
+            assert!((span.to.x - arc.center[0] - r).abs() < 1e-10);
+            assert!((arc.sweep - direction * std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+            let phase = (span.from.y - arc.center[1]).atan2(span.from.x - arc.center[0]);
+            for i in 0..=20 {
+                let theta = phase + arc.sweep * i as f64 / 20.;
+                let x = arc.center[0] + r * theta.cos();
+                let y = arc.center[1] + r * theta.sin();
+                assert!(x <= 1. + 1e-10);
+                assert!((y - 1.) * direction >= -1e-10);
+            }
         }
     }
 }

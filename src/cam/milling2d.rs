@@ -1,6 +1,6 @@
 //! Bounded 2D tool-center cycles. All paths use the ordinary move, travel and fixture checks.
 use super::*;
-use crate::{model::Operation, operation::Direction};
+use crate::{model::Operation, operation::Direction, roughing::Span};
 use std::sync::atomic::{AtomicBool, Ordering};
 fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
@@ -66,7 +66,7 @@ fn area_paths(
     level: f64,
     cancel: &AtomicBool,
     entry: Option<Point3>,
-) -> Result<Vec<Vec<Point3>>, String> {
+) -> Result<Vec<Vec<Span>>, String> {
     let (mut rings, z) = face_region(op)?;
     let contour_clearing = op.strategy == Strategy::StockRough && op.has_chain();
     let retained = contour_clearing.then(|| rings[0].clone());
@@ -287,18 +287,18 @@ pub(super) fn model_exterior(
     p: &Project,
     op: &Operation,
     cancel: &AtomicBool,
-) -> Result<Vec<Vec<Point3>>, String> {
+) -> Result<Vec<Vec<Span>>, String> {
     area_paths(p, op, -op.depth, cancel, None)
 }
 pub(super) fn clear_model_exterior(
-    chains: &[Vec<Point3>],
+    chains: &[Vec<Span>],
     z: f64,
     b: &mut Builder,
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     for chain in chains {
-        let layer = chain.iter().map(|q| Point3 { z, ..*q }).collect::<Vec<_>>();
-        cut_chain(&layer, b, cancel)?;
+        let layer: Vec<_> = chain.iter().map(|span| span.at_z(z)).collect();
+        cut_spans(&layer, b, cancel)?;
     }
     b.retract()
 }
@@ -307,89 +307,113 @@ pub(super) fn cut_chain(
     b: &mut Builder,
     cancel: &AtomicBool,
 ) -> Result<(), String> {
-    // Rotate a closed loop without reversing its milling direction or crossing
-    // its retained island. The entry segment uses normal clearance checks.
-    let rotated;
-    let chain = if chain.len() > 3 && chain[0].distance(*chain.last().unwrap()) < 1e-7 {
-        let n = chain.len() - 1;
-        let nearest = (0..n)
-            .min_by(|a, c| {
-                b.position
-                    .distance(chain[*a])
-                    .total_cmp(&b.position.distance(chain[*c]))
-            })
-            .unwrap();
-        rotated = (0..=n)
-            .map(|i| chain[(nearest + i) % n])
-            .collect::<Vec<_>>();
-        &rotated[..]
-    } else {
-        chain
-    };
+    let spans: Vec<_> = chain.windows(2).map(|p| Span::line(p[0], p[1])).collect();
+    cut_spans(&spans, b, cancel)
+}
 
+fn emit_span(b: &mut Builder, span: Span) -> Result<(), String> {
+    if let Some(arc) = span.arc {
+        // This is the same tolerance reserved in RemainingStock::apply.
+        b.arc_xy(
+            arc.center,
+            arc.sweep,
+            span.to.z,
+            b.certificate_error - 0.0002,
+        )
+    } else {
+        b.feed_cut(span.to.x, span.to.y, span.to.z)
+    }
+}
+
+pub(super) fn cut_spans(
+    spans: &[Span],
+    b: &mut Builder,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    // A closed chain may start at a different span boundary without reversing
+    // the milling direction or splitting an analytical arc.
+    let start = if spans.len() >= 3 && spans[0].from.distance(spans.last().unwrap().to) < 1e-7 {
+        spans
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, c)| {
+                b.position
+                    .distance(a.from)
+                    .total_cmp(&b.position.distance(c.from))
+            })
+            .unwrap()
+            .0
+    } else {
+        0
+    };
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
-    // A connected clearing path can contain many complete laps in already-cut
-    // stock. Trim only spans proved empty by the conservative stock certificate.
-    // Bound subdivision so long air links do not hide short engagement zones.
     let spacing = radius.max(0.25);
     let mut attached = false;
     let mut air = Vec::new();
     let mut air_length = 0.;
-    for edge in chain.windows(2) {
-        let count = (edge[0].distance(edge[1]) / spacing).ceil().max(1.) as usize;
+    for &edge in spans[start..].iter().chain(&spans[..start]) {
+        // Classify arcs as a whole. Inflate the chord by its sagitta to cover
+        // the true swept arc, including a controller's native interpolation.
+        let count = if edge.arc.is_some() {
+            1
+        } else {
+            (edge.from.distance(edge.to) / spacing).ceil().max(1.) as usize
+        };
         if count > MAX_ROWS {
             return Err("Clearing span exceeds its subdivision budget".into());
         }
-        let mut cut_end: Option<Point3> = None;
+        let mut pending: Option<Span> = None;
         for i in 0..count {
             cancelled(cancel)?;
-            let point = |t: f64| Point3 {
-                x: edge[0].x + (edge[1].x - edge[0].x) * t,
-                y: edge[0].y + (edge[1].y - edge[0].y) * t,
-                z: edge[0].z + (edge[1].z - edge[0].z) * t,
+            let span = if count == 1 {
+                edge
+            } else {
+                let point = |t: f64| Point3 {
+                    x: edge.from.x + (edge.to.x - edge.from.x) * t,
+                    y: edge.from.y + (edge.to.y - edge.from.y) * t,
+                    z: edge.from.z + (edge.to.z - edge.from.z) * t,
+                };
+                Span::line(
+                    point(i as f64 / count as f64),
+                    point((i + 1) as f64 / count as f64),
+                )
             };
-            let a = point(i as f64 / count as f64);
-            let c = point((i + 1) as f64 / count as f64);
-            if b.remaining.is_clear(a, c, radius, 0.) {
-                if let Some(q) = cut_end.take() {
-                    b.feed_cut(q.x, q.y, q.z)?;
+            let proof_radius = radius + span.arc.map_or(0., |arc| arc.sag);
+            if b.remaining.is_clear(span.from, span.to, proof_radius, 0.) {
+                if let Some(cut) = pending.take() {
+                    emit_span(b, cut)?;
                 }
                 if attached {
-                    air_length += a.distance(c);
+                    air_length += span.from.distance(span.to);
                     if air.len() >= MAX_MOVES {
                         return Err("Clearing air links exceed the path point budget".into());
                     }
-                    air.push(c);
+                    air.push(span);
                 }
                 continue;
             }
-            if cut_end.is_some() {
-                cut_end = Some(c);
+            if let Some(cut) = pending.as_mut() {
+                cut.to = span.to;
                 continue;
             }
-            if attached && (air_length <= 4. * radius || !b.cleared_link(a, air_length)?) {
-                // Keep the original obstacle-safe route when a straight
-                // shortcut cannot be certified, without another plunge.
-                for q in &air {
-                    b.feed_cut(q.x, q.y, q.z)?;
+            if attached && (air_length <= 4. * radius || !b.cleared_link(span.from, air_length)?) {
+                for &link in &air {
+                    emit_span(b, link)?;
                 }
             }
             air.clear();
             air_length = 0.;
             if !attached {
-                // enter() checks the entire approach against remaining stock
-                // and retains fixture/travel checks for every rapid move.
-                b.enter(a.x, a.y, a.z)?;
+                b.enter(span.from.x, span.from.y, span.from.z)?;
                 attached = true;
             }
-            cut_end = Some(c);
+            pending = Some(span);
         }
-        if let Some(q) = cut_end {
-            b.feed_cut(q.x, q.y, q.z)?;
+        if let Some(cut) = pending {
+            emit_span(b, cut)?;
         }
     }
-    b.retract()?;
-    Ok(())
+    b.retract()
 }
 fn contour_target(op: &Operation) -> Option<f64> {
     (op.has_chain()
@@ -845,7 +869,7 @@ pub(super) fn generate(
                     cancel,
                     op.settings.optimize_links.then_some(b.position),
                 )? {
-                    cut_chain(&chain, b, cancel)?;
+                    cut_spans(&chain, b, cancel)?;
                 }
                 continue;
             }
