@@ -16,6 +16,7 @@ pub(crate) struct Clearing {
     dy: f64,
     origin: [f64; 2],
     spacing: usize,
+    weights: [usize; 3],
 }
 impl Clearing {
     pub(crate) fn build(
@@ -55,6 +56,7 @@ impl Clearing {
             dy,
             origin: [-margin; 2],
             spacing,
+            weights: [1; 3],
         })
     }
     /// Reuse bounded offset loops and safe within-region links for planar clearing.
@@ -118,7 +120,15 @@ impl Clearing {
             dx,
             dy,
             origin: lo,
-            spacing: (stepover / (dx.max(dy) * 2_f64.sqrt())).floor().max(1.) as usize,
+            spacing: (stepover / (dx.min(dy) / 1024.)).floor().max(1.) as usize,
+            weights: {
+                let unit = dx.min(dy) / 1024.;
+                [
+                    (dx / unit).ceil() as usize,
+                    (dy / unit).ceil() as usize,
+                    (dx.hypot(dy) / unit).ceil() as usize,
+                ]
+            },
         })
     }
     pub(crate) fn exterior_only(&mut self, width: f64, height: f64) {
@@ -177,33 +187,50 @@ impl Clearing {
     ) -> Result<Vec<Vec<Point3>>, String> {
         let free: Vec<_> = self.heights.iter().map(|h| *h <= z + 1e-7).collect();
         let mut distance = vec![usize::MAX; free.len()];
-        let mut queue = VecDeque::new();
-        // Eight-neighbour erosion bounds diagonal spacing as well as straight runs.
+        let mut heap = BinaryHeap::new();
+        // Planar offsets use physical axis/diagonal distances, avoiding the
+        // unnecessary sqrt(2) reduction of straight-wall stepover. The 3D
+        // contact field retains its conservative square-cell erosion metric.
+        let [wx, wy, diagonal] = self.weights;
         for y in 0..self.ny {
             for x in 0..self.nx {
                 let id = y * self.nx + x;
                 if !free[id] {
                     distance[id] = 0;
-                    queue.push_back(id)
+                    heap.push(Reverse((0, id)));
                 } else if x == 0 || y == 0 || x + 1 == self.nx || y + 1 == self.ny {
-                    distance[id] = 1;
-                    queue.push_back(id)
+                    distance[id] = wx.min(wy);
+                    heap.push(Reverse((distance[id], id)));
                 }
             }
         }
-        while let Some(id) = queue.pop_front() {
+        while let Some(Reverse((d, id))) = heap.pop() {
             budget.tick()?;
+            if d != distance[id] {
+                continue;
+            }
             let (x, y) = (id % self.nx, id / self.nx);
             for yy in y.saturating_sub(1)..=(y + 1).min(self.ny - 1) {
                 for xx in x.saturating_sub(1)..=(x + 1).min(self.nx - 1) {
+                    let weight = if xx == x {
+                        wy
+                    } else if yy == y {
+                        wx
+                    } else {
+                        diagonal
+                    };
                     let next = yy * self.nx + xx;
-                    if distance[next] > distance[id] + 1 {
-                        distance[next] = distance[id] + 1;
-                        queue.push_back(next)
+                    let candidate = d
+                        .checked_add(weight)
+                        .ok_or("Offset distance field exceeds its numeric range")?;
+                    if distance[next] > candidate {
+                        distance[next] = candidate;
+                        heap.push(Reverse((distance[next], next)));
                     }
                 }
             }
         }
+        let mut queue = VecDeque::new();
         let mut components = vec![usize::MAX; free.len()];
         let mut component = 0;
         for seed in 0..free.len() {

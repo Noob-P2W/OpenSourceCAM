@@ -525,3 +525,6 @@ starting depth. Bidirectional facing may use the longer axis after fixture check
 explicit one-way rasters retain their direction. Implicit Optimized clearance
 includes hidden fixture geometry. Controller preflight and analytical arcs remain
 shared with playback/simulation; these checks do not validate a native UI package.
+Planar offset distance fields use physical axis/diagonal distances to avoid excess
+laps from undersized straight-wall stepover; the 3D contact grid keeps its prior
+conservative spacing. Dense coverage regressions include rotated regions/islands.

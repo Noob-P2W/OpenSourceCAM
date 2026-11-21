@@ -7,6 +7,11 @@ fixtures are original geometry; the supplied private model is not included.
 
 ## Changes
 
+- Planar offsets measure horizontal, vertical and diagonal distance in physical
+  units rather than shortening straight-wall stepover by a square-grid factor.
+  A bounded weighted distance field reduces excess laps. Cutter dilation, the
+  50% stepover cap, protected islands and original clearance checks remain. The
+  3D contact field retains its earlier conservative erosion spacing.
 - Numeric outside clearing uses the same conservative air-span trimming as planar
   clearing. Complete oversized laps outside the physical blank are omitted; the
   retained rectangle and circumscribed corners are unchanged. Requested finishing
@@ -67,19 +72,21 @@ so its reduction below is a sequence improvement rather than a faster finish cut
 | Contour engraving | 8.20 | 8.20 | 0.0% |
 | Chamfer milling | 8.15 | 8.15 | 0.0% |
 | Planar finishing | 68.96 | 68.96 | 0.0% |
-| 2D offset clearing | 172.43 | 172.43 | 0.0% |
-| Outside clearing (selected plane) | 991.59 | 961.71 | 3.0% |
-| Outside clearing (two operations) | 1370.82 | 1330.87 | 2.9% |
-| 2D offset clearing (selected plane) | 172.43 | 172.43 | 0.0% |
-| 2D offset clearing (two operations) | 269.09 | 269.09 | 0.0% |
+| 2D offset clearing | 172.43 | 123.45 | 28.4% |
+| Outside clearing (selected plane) | 991.59 | 689.62 | 30.5% |
+| Outside clearing (two operations) | 1370.82 | 971.08 | 29.2% |
+| 2D offset clearing (selected plane) | 172.43 | 123.45 | 28.4% |
+| 2D offset clearing (two operations) | 269.09 | 204.04 | 24.2% |
 
 The supplied model's selected outside-clearing case improved from 1173.67 s to
-1106.43 s (5.7%), with the same final plane. Its private geometry remains local.
+833.14 s (29.0%), with the same final plane. Its private geometry remains local.
 The numeric outside test independently compares final sampled stock with the
 untrimmed cycle and checks low XY rapids against only earlier cutter sweeps.
 Fixture regressions cover an intervening hidden clamp and an obstruction to the
 alternate facing axis. All strategy cases also post through NC preflight and
-check native arcs. Existing suites verify retained features, surface contact,
+check native arcs. Dense probes verify rotated planar boundaries and islands,
+and successive offsets on one wall check physical stepover with grid rounding.
+Existing suites verify retained features, surface contact,
 coverage, directions, entries, allowances, machine bounds and controller output.
 
 An unchanged row means this review found no justified cycle shortening in that

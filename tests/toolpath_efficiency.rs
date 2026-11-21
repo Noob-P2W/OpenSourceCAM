@@ -296,3 +296,120 @@ fn outside_clearing_keeps_each_requested_spring_pass_and_finish_feed() {
         );
     }
 }
+
+#[test]
+fn physical_offset_spacing_covers_rotated_regions_and_islands() {
+    let rectangle = |w: f64, h: f64, angle: f64| {
+        let (s, c) = angle.to_radians().sin_cos();
+        [
+            (-w / 2., -h / 2.),
+            (w / 2., -h / 2.),
+            (w / 2., h / 2.),
+            (-w / 2., h / 2.),
+        ]
+        .map(|(x, y)| [30. + x * c - y * s, 45. + x * s + y * c, -3.])
+        .to_vec()
+    };
+    let inside = |q: [f64; 2], ring: &[[f64; 3]]| {
+        (0..ring.len()).all(|i| {
+            let a = ring[i];
+            let b = ring[(i + 1) % ring.len()];
+            (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]) >= -1e-9
+        })
+    };
+    let margin = |q: [f64; 2], ring: &[[f64; 3]]| {
+        (0..ring.len())
+            .map(|i| opensourcecam::planar::distance(q, ring[i], ring[(i + 1) % ring.len()]))
+            .fold(f64::INFINITY, f64::min)
+    };
+    for angle in [0., 15., 30., 45., 75.] {
+        for strategy in [Strategy::AreaRough, Strategy::StockRough] {
+            let mut p = cases::numeric(strategy);
+            let outer = rectangle(30., 40., angle);
+            let island = rectangle(8., 8., angle);
+            p.operations[0].settings.path = outer.clone();
+            p.operations[0].settings.closed = true;
+            p.operations[0].settings.height_offset = Some(0.);
+            if strategy == Strategy::AreaRough {
+                p.operations[0].settings.islands = vec![island.clone()];
+            }
+            let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+            let path = cam::generate(&p).unwrap();
+            let cuts: Vec<_> = path
+                .moves
+                .iter()
+                .filter(|m| {
+                    m.motion == Motion::Cut
+                        && (m.from.z + 3.).abs() < 1e-8
+                        && (m.to.z + 3.).abs() < 1e-8
+                })
+                .collect();
+            let mut checked = 0;
+            for x in 0..60 {
+                for y in 0..90 {
+                    let q = [x as f64 + 0.5, y as f64 + 0.5];
+                    let reachable = if strategy == Strategy::AreaRough {
+                        inside(q, &outer)
+                            && margin(q, &outer) > radius + 0.75
+                            && !inside(q, &island)
+                            && margin(q, &island) > radius + 0.75
+                    } else {
+                        !inside(q, &outer) && margin(q, &outer) > radius + 0.75
+                    };
+                    if !reachable {
+                        continue;
+                    }
+                    checked += 1;
+                    let d = cuts
+                        .iter()
+                        .map(|m| {
+                            opensourcecam::planar::distance(
+                                q,
+                                [m.from.x, m.from.y, 0.],
+                                [m.to.x, m.to.y, 0.],
+                            )
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    assert!(
+                        d <= radius + 1e-7,
+                        "{strategy:?}, {angle} deg left an uncut region at {q:?}: nearest cut {d}"
+                    );
+                }
+            }
+            assert!(checked > 100);
+        }
+    }
+}
+
+#[test]
+fn straight_offsets_use_the_requested_stepover_with_grid_rounding() {
+    let p = cases::numeric(Strategy::AreaRough);
+    let tool = p.operation_tool(&p.operations[0]).unwrap();
+    let path = cam::generate(&p).unwrap();
+    // Compare successive offsets from one wall, rather than opposite sides
+    // of the terminal core or the ends of nested rectangular loops.
+    let mut rows: Vec<_> = path
+        .moves
+        .iter()
+        .filter(|m| {
+            m.motion == Motion::Cut
+                && (m.to.z + 3.).abs() < 1e-8
+                && (m.from.y - m.to.y).abs() < 1e-8
+                && (m.to.x - m.from.x).abs() > 8.
+                && m.to.y < p.operations[0].y + p.operations[0].height / 2.
+        })
+        .map(|m| m.to.y)
+        .collect();
+    rows.sort_by(f64::total_cmp);
+    rows.dedup_by(|a, b| (*a - *b).abs() < 1e-7);
+    let requested = tool.diameter * tool.step_over;
+    let gaps: Vec<_> = rows.windows(2).map(|q| q[1] - q[0]).collect();
+    assert!(
+        gaps.iter().any(|d| *d >= requested * 0.85),
+        "Offsets still underuse the requested stepover"
+    );
+    assert!(
+        gaps.iter().all(|d| *d <= requested + 0.25 + 1e-6),
+        "Offset spacing exceeds its grid rounding bound"
+    );
+}
