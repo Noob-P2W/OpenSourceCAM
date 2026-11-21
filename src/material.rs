@@ -102,7 +102,7 @@ impl RemainingStock {
         }
     }
     pub(crate) fn apply(&mut self, m: &Move, tool: Option<Footprint>, error: f64) {
-        if m.motion != Motion::Rapid {
+        if matches!(m.motion, Motion::Cut | Motion::Plunge) {
             if let Some(t) = tool {
                 self.cut(m.from, m.to, t, error);
             }

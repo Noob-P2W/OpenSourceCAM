@@ -7,12 +7,12 @@ rebuilds this state, including each operation's actual tool and depth.
 ## Clearance and rest clearing
 
 Set **Remaining-stock clearance · mm** in an operation's **Heights & accuracy**
-tab to allow local rapid moves above the remaining material. Leave it blank to
-retain full setup clearance. The gap must be at least 0.05 mm and no greater than
+tab to allow local rapid moves above the remaining material. With Optimized milling, a blank uses a proven local 0.5 mm gap. Climb/conventional
+mode with a blank field retains full setup clearance. The gap must be at least 0.05 mm and no greater than
 the operation clearance. Cutting tool, shaft and defined holder envelopes all
 contribute. Fixture surface projections use a cached spatial tree, including
-hidden fixtures. Full clearance is retained between operations/tool changes and
-at program end. Export retains the existing swept fixture and machine checks.
+hidden fixtures. Full clearance is retained for real tool changes and program end; consecutive
+same-tool optimized operations may retain proven local clearance. Export retains the existing swept fixture and machine checks.
 
 A bounded grid stores an upper height for every entire cell, rather than assuming
 a cell is empty after its centre is cut. Flat, ball and conical cutter profiles

@@ -392,7 +392,7 @@ bounded and is not an adaptive/constant-engagement algorithm.
 
 Operation labels use machining terms consistently: Face milling, 2D pocket
 clearing (rectangular/circular geometry), 2D contour (internal/external), Outside
-clearing, Slot milling, Planar finishing, Bore milling, Circular milling, Thread
+clearing, Slot milling, Planar finishing, Bore finishing, Circular milling, Thread
 milling, Contour engraving, Chamfer milling, Drilling, Peck drilling, 3D offset clearing
 and Parallel finishing. Strategy IDs and user-supplied operation names remain
 portable. Legacy trochoidal pocket/trace strategies retain their generators and
@@ -504,3 +504,13 @@ and certified feed shortcuts retain complete tool/fixture clearance checks.
 Flat and mixed-cutter stock jobs preserve sharp vertical shoulders instead of
 interpolating ramps between unequal cell heights. Curved-only jobs retain the
 continuous upper envelope. Removal and volume still use conservative 2.5D cells.
+
+## Sequential milling and stock contact
+
+See [MILLING_SEQUENCE_REVIEW.md](MILLING_SEQUENCE_REVIEW.md). Optimized milling now
+uses proven local approaches and same-tool transitions; planar finishing can link
+clear spans without repeated retracts. Playback includes configured change-station
+travel and a configurable exchange-time estimate; actual NC still uses the
+controller/operator handshake. Shared stock contact colors distinguish uncut,
+rough-machined and finish-pass surfaces and reset on seeking. The existing Bore
+cycle is labeled Bore finishing; circular pocket clearing explains helical entry.

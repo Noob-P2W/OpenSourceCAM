@@ -48,6 +48,8 @@ pub enum ClearingBoundary {
 pub struct Settings {
     #[serde(skip)]
     pub optimize_entry: bool,
+    #[serde(skip)]
+    pub optimize_links: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stock_clearance: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

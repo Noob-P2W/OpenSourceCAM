@@ -213,8 +213,10 @@ fn atc_restores_xy_after_m6_even_when_the_next_tool_uses_the_same_hole() {
         op.y = 20.0;
     }
     let code = post::gcode(&p).unwrap();
-    assert!(code.contains("T1 M6\nG43 H1\nG0 Z5.0000\nG0 X0.0000 Y0.0000\n"));
-    assert!(code.contains("T2 M6\nG43 H2\nG0 Z5.0000\nG0 X20.0000 Y20.0000\n"));
+    assert!(code.contains(
+        "T1 M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H1\nG0 Z5.0000\nG0 X0.0000 Y0.0000\n"
+    ));
+    assert!(code.contains("T2 M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H2\nG0 Z5.0000\nG0 X20.0000 Y20.0000\n"));
 }
 
 #[test]
@@ -234,8 +236,8 @@ fn operation_tools_drive_radius_pecks_feeds_and_tool_changes() {
     changer.controller_managed = true;
     let code = post::gcode(&p).unwrap();
     assert_eq!(code.matches(" M6\n").count(), 2);
-    assert!(code.contains("T1 M6\nG43 H1\n"));
-    assert!(code.contains("T2 M6\nG43 H2\n"));
+    assert!(code.contains("T1 M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H1\n"));
+    assert!(code.contains("T2 M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H2\n"));
     assert!(code.contains("F80.0000"));
     p.post.processor = post::PostProcessor::Grbl;
     assert!(post::gcode(&p)
@@ -399,7 +401,7 @@ fn manual_changes_stop_at_configured_position_restore_offsets_and_need_no_atc() 
     }
     let code = post::gcode(&p).unwrap();
     assert!(code.contains("G0 Z25.0000\nG0 X10.0000 Y10.0000\n(MANUAL CHANGE"));
-    assert!(code.contains("T2\nM0\nG21\nG90\nG17\nG91.1\nG94\nG54\nG43 H2\nG0 Z5.0000"));
+    assert!(code.contains("T2\nM0\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H2\nG0 Z5.0000"));
     assert!(!code.contains("M6"));
     let pause = code.find("\nM0\n").unwrap();
     assert!(code[..pause].rfind("M5").is_some());
@@ -411,7 +413,7 @@ fn manual_changes_stop_at_configured_position_restore_offsets_and_need_no_atc() 
         .contains("hal_manualtoolchange"));
     p.machine.as_mut().unwrap().tool_changer.controller_managed = true;
     let code = post::gcode(&p).unwrap();
-    assert!(code.contains("T2 M6\nG21\nG90\nG17\nG91.1\nG94\nG54\nG43 H2"));
+    assert!(code.contains("T2 M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\nG54\nG43 H2"));
     p.tool_library.tools[1].post.length_offset = None;
     assert!(post::gcode(&p).unwrap_err().contains("calibrated H"));
 }

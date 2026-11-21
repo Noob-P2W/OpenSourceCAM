@@ -35,7 +35,7 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
     match action {
         Command::Recognize => Ok(json!(crate::features::recognize_project(p)?)),
         Command::Generate => {
-            let path = post::checked_geometry_path(p)?;
+            let path = post::playback_path(p, post::checked_geometry_path(p)?)?;
             Ok(path_value(&path))
         }
         Command::Export => Ok(json!(post::gcode(p)?)),
@@ -51,8 +51,8 @@ pub fn path_value(path: &cam::Toolpath) -> Value {
     let mut elapsed = 0.;
     let moves:Vec<_>=path.moves.iter().map(|m|{
         let start=elapsed;
-        elapsed+=m.from.distance(m.to)/m.feed*60.;
-        json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":m.motion==cam::Motion::Rapid,"operation":m.operation,"start_seconds":start,"end_seconds":elapsed})
+        elapsed+=m.seconds();
+        json!({"from":[m.from.x,m.from.y,m.from.z],"to":[m.to.x,m.to.y,m.to.z],"rapid":matches!(m.motion,cam::Motion::Rapid|cam::Motion::ToolChange{..}),"tool_change":matches!(m.motion,cam::Motion::ToolChange{..}),"change_position_known":if let cam::Motion::ToolChange{route_known,..}=m.motion {Some(route_known)} else {None},"operation":m.operation,"start_seconds":start,"end_seconds":elapsed})
     }).collect();
     json!({"moves":moves,"seconds":path.estimated_seconds,"cut":path.cut_length,"analytical_arcs":path.arcs.len()})
 }
@@ -76,7 +76,7 @@ pub struct StockFrame {
 impl PlaybackPreview {
     pub fn new(project: &Project) -> Result<Self, String> {
         Ok(Self {
-            path: post::checked_geometry_path(project)?,
+            path: post::playback_path(project, post::checked_geometry_path(project)?)?,
             frame: std::cell::RefCell::new(None),
         })
     }
@@ -136,6 +136,7 @@ impl PlaybackPreview {
                 2_000_000
             };
             let mesh = grid.mesh_rows(rows.clone(), max, &cancel)?;
+            let surface_roles = grid.surface_roles(&mesh);
             state.triangles[strip] = mesh.triangles.len();
             if state.triangles.iter().sum::<usize>() > max {
                 return Err("Stock preview surface exceeds its triangle budget".into());
@@ -151,7 +152,7 @@ impl PlaybackPreview {
                     vertices.extend(n);
                 }
             }
-            patches.push(json!({"strip":strip,"offset":offset,"length":vertices.len()-offset}));
+            patches.push(json!({"strip":strip,"offset":offset,"length":vertices.len()-offset,"surface_roles":surface_roles}));
             grid.dirty[rows].fill(false);
         }
         let (removed, remaining) = grid.volumes();
@@ -172,7 +173,9 @@ impl PlaybackPreview {
             resolution,
             &AtomicBool::new(false),
         )?;
-        Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
+        Ok(
+            json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh,"surface_roles":sim.surface_roles}),
+        )
     }
 }
 /// Defaults for an operation settings draft; committing still validates the job.
@@ -584,7 +587,7 @@ pub fn simulate_project_mode(
     limit: u64,
     conservative: bool,
 ) -> Result<Value, String> {
-    let path = post::checked_geometry_path(project)?;
+    let path = post::playback_path(project, post::checked_geometry_path(project)?)?;
     let sim = stock::simulate_mode(
         project,
         &path,
@@ -594,7 +597,9 @@ pub fn simulate_project_mode(
         limit,
         conservative,
     )?;
-    Ok(json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh}))
+    Ok(
+        json!({"summary":sim.summary,"heights":sim.heights,"mesh":sim.geometry.mesh,"surface_roles":sim.surface_roles}),
+    )
 }
 
 pub fn stock_obj(project: &Project, progress: f64, resolution: usize) -> Result<String, String> {
@@ -615,7 +620,7 @@ pub fn stock_obj_mode(
     limit: u64,
     conservative: bool,
 ) -> Result<String, String> {
-    let path = post::checked_geometry_path(project)?;
+    let path = post::playback_path(project, post::checked_geometry_path(project)?)?;
     let simulation = stock::simulate_mode(
         project,
         &path,

@@ -6,8 +6,9 @@ needs a tool-change configuration supported by the controller.
 In Setup → Machine → Tool changes, choose manual changes and set the change
 position in **work coordinates**. Its Z must be at or above travel clearance.
 The post checks the approach/return moves against configured travel limits and
-fixture envelopes. Tool changes and operator waiting time are excluded from the
-cutting-path playback timeline.
+fixture envelopes. Playback now includes checked change travel and a configurable exchange-time
+estimate. A manual NC M0 still waits for the operator; the estimate does not
+automatically resume a real machine.
 
 Assign each tool a distinct tool number and a calibrated H length-offset register
 in the tool library. These are controller measurements, not the catalogue's nominal

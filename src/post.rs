@@ -220,7 +220,7 @@ fn manual_change(
     }
     writeln!(
         output,
-        "G21\nG90\nG17\nG91.1\nG94\n{}",
+        "G21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}",
         project.post.work_offset.code()
     )
     .unwrap();
@@ -234,7 +234,12 @@ fn manual_change(
     Ok(())
 }
 fn validate_manual_routes(project: &Project, path: &crate::cam::Toolpath) -> Result<(), String> {
-    if !manual(project) {
+    if !manual(project)
+        && !project.machine.as_ref().is_some_and(|m| {
+            m.tool_changer.mode == crate::machine::ChangeMode::MillingAtc
+                && m.tool_changer.manual_position.is_some()
+        })
+    {
         return Ok(());
     }
     use crate::cam::{Motion, Move, Point3};
@@ -359,11 +364,7 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         output.push_str("G61\n");
     }
     output.push_str("M9\n");
-    let first = project
-        .operations
-        .iter()
-        .find(|op| op.enabled)
-        .ok_or("No enabled operations")?;
+    let first = &project.operations[path.moves.first().ok_or("No generated moves")?.operation];
     let first_tool = project.operation_tool(first)?;
     let first_record = project.library_tool(Some(first))?;
     let initial_coolant = tool_coolant(project, first)?;
@@ -390,8 +391,9 @@ pub fn gcode(project: &Project) -> Result<String, String> {
         let record = first_record.ok_or("ATC requires a library tool")?;
         writeln!(
             output,
-            "T{} M6\nG43 H{}",
+            "T{} M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}\nG43 H{}",
             record.post.number,
+            project.post.work_offset.code(),
             record
                 .post
                 .length_offset
@@ -460,11 +462,28 @@ pub fn gcode(project: &Project) -> Result<String, String> {
                 if manual {
                     manual_change(&mut output, project, op)?;
                 } else {
+                    if let Some(p) = project
+                        .machine
+                        .as_ref()
+                        .and_then(|m| m.tool_changer.manual_position)
+                    {
+                        writeln!(
+                            output,
+                            "G0 Z{:.4}\nM5\nM9\nG0 Z{:.4}\nG0 X{:.4} Y{:.4}",
+                            project.travel_clearance(),
+                            p[2],
+                            p[0],
+                            p[1]
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(output, "G0 Z{:.4}", project.travel_clearance()).unwrap();
+                    }
                     writeln!(
                         output,
-                        "G0 Z{:.4}\nM5\nM9\nT{} M6\nG43 H{}\nG0 Z{:.4}",
-                        project.travel_clearance(),
+                        "M5\nM9\nT{} M6\nG21\nG90\nG17\nG91.1\nG94\nG40\nG80\n{}\nG43 H{}\nG0 Z{:.4}",
                         record.post.number,
+                        project.post.work_offset.code(),
                         record
                             .post
                             .length_offset
@@ -736,4 +755,114 @@ fn round(value: f64, places: usize) -> f64 {
     format!("{value:.places$}")
         .parse()
         .expect("Formatted coordinate")
+}
+
+/// Playback includes the configured approach, exchange estimate and return.
+/// Controller-managed M6 internals are not invented when no position is supplied.
+pub fn playback_path(
+    project: &Project,
+    mut path: crate::cam::Toolpath,
+) -> Result<crate::cam::Toolpath, String> {
+    use crate::cam::{Motion, Move, Point3};
+    let Some(machine) = project.machine.as_ref() else {
+        return Ok(path);
+    };
+    let original = std::mem::take(&mut path.moves);
+    let mut mapping = Vec::with_capacity(original.len() + 1);
+    let mut routes = crate::cam::Toolpath {
+        arcs: vec![],
+        moves: vec![],
+        cut_length: 0.,
+        rapid_length: 0.,
+        estimated_seconds: 0.,
+    };
+    let mut previous: Option<usize> = None;
+    for m in original {
+        if let Some(old) = previous {
+            if project.operations[old].tool_id.or(project.active_tool)
+                != project.operations[m.operation]
+                    .tool_id
+                    .or(project.active_tool)
+            {
+                let start = m.from;
+                let clearance = project.travel_clearance();
+                let p = machine
+                    .tool_changer
+                    .manual_position
+                    .unwrap_or([start.x, start.y, clearance]);
+                if p.iter().any(|v| !v.is_finite()) || p[2] < clearance {
+                    return Err(
+                        "Tool-change position must be finite and at or above travel clearance"
+                            .into(),
+                    );
+                }
+                let high = Point3 {
+                    x: start.x,
+                    y: start.y,
+                    z: p[2],
+                };
+                let station = Point3 {
+                    x: p[0],
+                    y: p[1],
+                    z: p[2],
+                };
+                let low = Point3 {
+                    z: clearance,
+                    ..station
+                };
+                let mut push = |from: Point3,
+                                to: Point3,
+                                operation: usize,
+                                motion: Motion|
+                 -> Result<(), String> {
+                    if from.distance(to) < 1e-9 && !matches!(motion, Motion::ToolChange { .. }) {
+                        return Ok(());
+                    }
+                    let movement = Move {
+                        from,
+                        to,
+                        operation,
+                        motion,
+                        feed: machine.rapid_feed,
+                    };
+                    machine.check_point(from)?;
+                    machine.check_point(to)?;
+                    machine.check_move(&movement)?;
+                    path.estimated_seconds += movement.seconds();
+                    if movement.motion == Motion::Rapid {
+                        path.rapid_length += from.distance(to);
+                        routes.moves.push(movement.clone());
+                    }
+                    path.moves.push(movement);
+                    Ok(())
+                };
+                push(start, high, old, Motion::Rapid)?;
+                push(high, station, old, Motion::Rapid)?;
+                push(
+                    station,
+                    station,
+                    old,
+                    Motion::ToolChange {
+                        seconds: machine.tool_changer.change_seconds,
+                        route_known: machine.tool_changer.manual_position.is_some(),
+                    },
+                )?;
+                push(station, low, m.operation, Motion::Rapid)?;
+                push(low, start, m.operation, Motion::Rapid)?;
+            }
+        }
+        mapping.push(path.moves.len());
+        previous = Some(m.operation);
+        path.moves.push(m);
+        if path.moves.len() > 200_000 {
+            return Err("Tool-change playback exceeds the path move limit".into());
+        }
+    }
+    mapping.push(path.moves.len());
+    for arc in &mut path.arcs {
+        arc.start = mapping[arc.start];
+        arc.end = mapping[arc.end - 1] + 1;
+    }
+    crate::collision::check(project, &routes)?;
+    Ok(path)
 }

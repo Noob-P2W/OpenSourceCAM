@@ -46,7 +46,8 @@ fn job(strategy: Strategy) -> Project {
 #[test]
 fn each_new_cycle_has_finite_feed_moves_reaches_depth_and_retracts() {
     for strategy in Strategy::ALL.into_iter().filter(|s| s.is_new_2d()) {
-        let p = job(strategy);
+        let mut p = job(strategy);
+        p.operations[0].settings.milling_mode = Some(opensourcecam::operation::MillingMode::Climb);
         let path = cam::generate(&p).unwrap_or_else(|e| panic!("{strategy:?}: {e}"));
         assert!(path.moves.iter().any(|m| m.motion == Motion::Cut));
         let depth = path.moves.iter().map(|m| m.to.z).fold(0., f64::min);

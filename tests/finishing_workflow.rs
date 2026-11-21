@@ -505,7 +505,7 @@ fn strategy_names_describe_methods_without_changing_saved_ids() {
         ),
         (Strategy::Pocket, "2D pocket clearing", "pocket"),
         (Strategy::Facing, "Face milling", "facing"),
-        (Strategy::Bore, "Bore milling", "bore"),
+        (Strategy::Bore, "Bore finishing", "bore"),
     ] {
         assert_eq!(strategy.label(), label);
         assert_eq!(serde_json::to_value(strategy).unwrap(), id);

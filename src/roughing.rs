@@ -174,6 +174,15 @@ impl Clearing {
         reverse: bool,
         budget: &mut Budget,
     ) -> Result<Vec<Vec<Point3>>, String> {
+        self.layer_from(z, reverse, budget, None)
+    }
+    pub(crate) fn layer_from(
+        &self,
+        z: f64,
+        reverse: bool,
+        budget: &mut Budget,
+        entry: Option<Point3>,
+    ) -> Result<Vec<Vec<Point3>>, String> {
         let free: Vec<_> = self.heights.iter().map(|h| *h <= z + 1e-7).collect();
         let mut distance = vec![usize::MAX; free.len()];
         let mut queue = VecDeque::new();
@@ -345,6 +354,19 @@ impl Clearing {
                         chain.extend(nodes.into_iter().skip(1));
                         continue;
                     }
+                }
+                if let Some(entry) = entry {
+                    let nearest = nodes
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            self.point(**a, z)
+                                .distance(entry)
+                                .total_cmp(&self.point(**b, z).distance(entry))
+                        })
+                        .unwrap()
+                        .0;
+                    nodes.rotate_left(nearest);
                 }
                 nodes.push(nodes[0]);
                 chains.push(nodes);

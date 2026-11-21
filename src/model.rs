@@ -94,7 +94,7 @@ impl Strategy {
             Self::SmoothRough => "Trochoidal pocket milling",
             Self::Slot => "Slot milling",
             Self::Trace => "Trace milling",
-            Self::Bore => "Bore milling",
+            Self::Bore => "Bore finishing",
             Self::Circular => "Circular milling",
             Self::Thread => "Thread milling",
             Self::Engrave => "Contour engraving",

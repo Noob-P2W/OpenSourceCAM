@@ -137,6 +137,11 @@ pub struct ToolChanger {
     pub controller_managed: bool,
     #[serde(default)]
     pub manual_position: Option<[f64; 3]>,
+    #[serde(default = "default_change_seconds")]
+    pub change_seconds: f64,
+}
+fn default_change_seconds() -> f64 {
+    30.
 }
 impl Default for ToolChanger {
     fn default() -> Self {
@@ -145,6 +150,7 @@ impl Default for ToolChanger {
             capacity: 20,
             controller_managed: false,
             manual_position: None,
+            change_seconds: default_change_seconds(),
         }
     }
 }
@@ -518,6 +524,12 @@ impl MachineSetup {
         {
             return Err("Manual tool-change position must contain finite work coordinates".into());
         }
+        range(
+            self.tool_changer.change_seconds,
+            0.1,
+            3600.,
+            "Tool-change time estimate",
+        )?;
         if !(1..=9999).contains(&self.tool_changer.capacity) {
             return Err("Tool changer capacity must be between 1 and 9999".into());
         }

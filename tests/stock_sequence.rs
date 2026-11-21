@@ -105,6 +105,9 @@ fn local_rapid_links_only_cross_previously_removed_material_and_save_travel() {
     interior.settings.pocket_pattern = PocketPattern::Raster;
     interior.settings.raster = opensourcecam::operation::Raster::PositiveX;
     p.operations.push(interior);
+    for op in &mut p.operations {
+        op.settings.milling_mode = Some(opensourcecam::operation::MillingMode::Climb);
+    }
     let full = cam::generate(&p).unwrap();
     for op in &mut p.operations {
         op.settings.stock_clearance = Some(0.5);

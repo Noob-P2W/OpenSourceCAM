@@ -37,8 +37,9 @@ impl Point3 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Motion {
+    ToolChange { seconds: f64, route_known: bool },
     Rapid,
     Cut,
     Plunge,
@@ -51,6 +52,15 @@ pub struct Move {
     pub to: Point3,
     pub motion: Motion,
     pub operation: usize,
+}
+
+impl Move {
+    pub fn seconds(&self) -> f64 {
+        match self.motion {
+            Motion::ToolChange { seconds, .. } => seconds,
+            _ => self.from.distance(self.to) / self.feed * 60.,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +111,9 @@ impl Builder {
             return Ok(());
         }
         let rate = match motion {
+            Motion::ToolChange { .. } => {
+                return Err("Tool-change pauses belong to the playback sequence".into())
+            }
             Motion::Rapid => {
                 self.path.rapid_length += distance;
                 self.rapid
@@ -705,6 +718,15 @@ pub fn validate(project: &Project) -> Result<(), String> {
     generate(project).map(|_| ())
 }
 
+fn same_tool_next(project: &Project, index: usize) -> Result<bool, String> {
+    let current = &project.operations[index];
+    let Some(next) = project.operations[index + 1..].iter().find(|o| o.enabled) else {
+        return Ok(false);
+    };
+    Ok(current.settings.optimize_links
+        && next.settings.optimize_links
+        && current.tool_id.or(project.active_tool) == next.tool_id.or(project.active_tool))
+}
 pub fn generate(project: &Project) -> Result<Toolpath, String> {
     generate_with_cancel(project, &std::sync::atomic::AtomicBool::new(false))
 }
@@ -731,6 +753,7 @@ pub fn generate_with_cancel(
                 {
                     op.settings.optimize_entry = true;
                 }
+                op.settings.optimize_links = mode == crate::operation::MillingMode::Optimized;
                 let clockwise = project.library_tool(Some(op))?.is_none_or(|t| t.clockwise);
                 let cw = crate::operation::clockwise_for(op, mode, clockwise);
                 op.settings.direction = if cw {
@@ -810,7 +833,11 @@ pub fn generate_with_cancel(
             .map_err(|e| format!("Operation {} ({}): {e}", index + 1, op.name))?;
         b.cutter = crate::stock::footprint(project, index)?;
         b.certificate_error = op.settings.path_tolerance.unwrap_or(0.01) + 0.0002;
-        b.stock_clearance = op.settings.stock_clearance;
+        b.stock_clearance = op.settings.stock_clearance.or_else(|| {
+            op.settings
+                .optimize_links
+                .then_some(0.5_f64.min(b.clearance))
+        });
         b.bodies =
             if b.stock_clearance.is_some() || project.process == crate::process::Process::Milling {
                 crate::collision::envelopes(project, index)?
@@ -850,9 +877,11 @@ pub fn generate_with_cancel(
 
         if op.strategy.is_new_2d() || op.has_chain() {
             milling2d::generate(project, op, index, &mut b, cancel)?;
-            b.clearance = project.travel_clearance();
-            b.stock_clearance = None;
-            b.retract()?;
+            if !same_tool_next(project, index)? {
+                b.clearance = project.travel_clearance();
+                b.stock_clearance = None;
+                b.retract()?;
+            }
             continue;
         }
         let depth = op.depth - op.settings.axial_allowance;
@@ -919,9 +948,11 @@ pub fn generate_with_cancel(
                     b.retract()?;
                 }
             }
-            b.clearance = project.travel_clearance();
-            b.stock_clearance = None;
-            b.retract()?;
+            if !same_tool_next(project, index)? {
+                b.clearance = project.travel_clearance();
+                b.stock_clearance = None;
+                b.retract()?;
+            }
             continue;
         }
         if op.strategy.is_drilling() {
@@ -990,9 +1021,11 @@ pub fn generate_with_cancel(
                     Motion::Rapid,
                 )?;
             }
-            b.clearance = project.travel_clearance();
-            b.stock_clearance = None;
-            b.retract()?;
+            if !same_tool_next(project, index)? {
+                b.clearance = project.travel_clearance();
+                b.stock_clearance = None;
+                b.retract()?;
+            }
             continue;
         }
         // The complete exterior silhouette is independent of cut height. Build
@@ -1314,10 +1347,14 @@ pub fn generate_with_cancel(
             }
             b.retract()?;
         }
-        b.clearance = project.travel_clearance();
-        b.stock_clearance = None;
-        b.retract()?;
+        if !same_tool_next(project, index)? {
+            b.clearance = project.travel_clearance();
+            b.stock_clearance = None;
+            b.retract()?;
+        }
     }
+    b.stock_clearance = None;
+    b.clearance = project.travel_clearance();
     b.retract()?;
     if let Some(machine) = &project.machine {
         // Include both endpoints: the first clearance point can be outside travel

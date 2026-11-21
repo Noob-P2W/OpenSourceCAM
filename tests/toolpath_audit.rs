@@ -299,6 +299,7 @@ fn drilling_and_peck_drilling_and_entry_modes_keep_rapids_in_proven_air() {
     for entry in [Entry::Plunge, Entry::Ramp, Entry::Helix] {
         let mut p = job(Strategy::Pocket);
         p.operations[0].settings.entry = entry;
+        p.operations[0].settings.milling_mode = Some(opensourcecam::operation::MillingMode::Climb);
         p.operations[0].settings.raster = Raster::Bidirectional;
         let path = cam::generate(&p).unwrap();
         assert!(path
@@ -457,7 +458,7 @@ fn measured_preset_ramp_limits_are_used_instead_of_hidden_constants() {
 fn tapered_wall_finishing_uses_a_continuous_bore_strategy() {
     let mut p = job(Strategy::Circular);
     p.operations[0].settings.taper_angle = Some(5.);
-    assert!(cam::generate(&p).unwrap_err().contains("Bore milling"));
+    assert!(cam::generate(&p).unwrap_err().contains("Bore finishing"));
     p.operations[0].strategy = Strategy::Bore;
     cam::generate(&p).unwrap();
 }

@@ -454,15 +454,28 @@ pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envel
             });
         }
     } else {
-        let length = match project.machine.as_ref().map(|m| &m.tooling) {
-            Some(crate::machine::Tooling::Milling { stickout, .. }) => *stickout,
+        let (length, flute, shank) = match project.machine.as_ref().map(|m| &m.tooling) {
+            Some(crate::machine::Tooling::Milling {
+                stickout,
+                flute_length,
+                shank_diameter,
+                ..
+            }) => (*stickout, flute_length.min(*stickout), *shank_diameter),
             _ => return Err("Fixture verification needs a defined milling tool length".into()),
         };
+        let wider_shank = shank > tool.diameter && length > flute;
         result.push(Envelope {
-            radius: tool.diameter / 2.0,
-            low: 0.0,
-            high: length,
+            radius: tool.diameter / 2.,
+            low: 0.,
+            high: if wider_shank { flute } else { length },
         });
+        if wider_shank {
+            result.push(Envelope {
+                radius: shank / 2.,
+                low: flute,
+                high: length,
+            });
+        }
     }
     Ok(result)
 }
@@ -943,5 +956,28 @@ mod tests {
         assert!(check_with_cancel(&project, &path, &cancel)
             .unwrap_err()
             .contains("cancelled"));
+    }
+}
+
+#[cfg(test)]
+mod legacy_envelope_regression {
+    #[test]
+    fn measured_legacy_shank_is_included_when_wider_than_the_cutting_tool() {
+        let mut p = crate::model::Project::default();
+        p.tool.diameter = 3.;
+        p.machine.as_mut().unwrap().tooling = crate::machine::Tooling::Milling {
+            kind: crate::machine::CutterKind::EndMill,
+            flute_length: 10.,
+            overall_length: 60.,
+            stickout: 30.,
+            shank_diameter: 12.,
+        };
+        let env = super::envelopes(&p, 0).unwrap();
+        assert!(env
+            .iter()
+            .any(|e| e.radius == 6. && e.low == 10. && e.high == 30.));
+        assert!(env
+            .iter()
+            .any(|e| e.radius == 1.5 && e.low == 0. && e.high == 10.));
     }
 }

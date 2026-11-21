@@ -54,6 +54,7 @@ def web():
         run('node', 'web/finishing-workflow-smoke.mjs', env=env)
         run('node', 'web/area-roughing-smoke.mjs', env=env)
         run('node', 'web/stock-arcs-smoke.mjs', env=env)
+        run('node', 'web/milling-sequence-smoke.mjs', env=env)
         run('node', 'web/automation-smoke.mjs', env=env)
         run('node', 'web/operation-colors-smoke.mjs', env=env)
         run('node', 'web/inspection-smoke.mjs', env=env)

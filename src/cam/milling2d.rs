@@ -65,6 +65,7 @@ fn area_paths(
     op: &Operation,
     level: f64,
     cancel: &AtomicBool,
+    entry: Option<Point3>,
 ) -> Result<Vec<Vec<Point3>>, String> {
     let (mut rings, z) = face_region(op)?;
     let contour_clearing = op.strategy == Strategy::StockRough && op.has_chain();
@@ -141,7 +142,7 @@ fn area_paths(
     }
     let mut budget = crate::surface::Budget::new(cancel);
     let reverse = op.settings.direction == Direction::Clockwise;
-    clearing.layer(level, reverse, &mut budget)
+    clearing.layer_from(level, reverse, &mut budget, entry)
 }
 fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
     let points = curve(op);
@@ -286,7 +287,7 @@ pub(super) fn model_exterior(
     op: &Operation,
     cancel: &AtomicBool,
 ) -> Result<Vec<Vec<Point3>>, String> {
-    area_paths(p, op, -op.depth, cancel)
+    area_paths(p, op, -op.depth, cancel, None)
 }
 pub(super) fn clear_model_exterior(
     chains: &[Vec<Point3>],
@@ -473,7 +474,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             if (-z / tool.step_down).ceil() > MAX_LAYERS as f64 {
                 return Err("Too many area roughing depth passes".into());
             }
-            area_paths(p, op, z, &AtomicBool::new(false))?;
+            area_paths(p, op, z, &AtomicBool::new(false), None)?;
         } else {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
         }
@@ -635,7 +636,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         let taper = op.settings.taper_angle.unwrap_or(0.);
         if op.strategy == Strategy::Circular && taper != 0. {
             return Err(
-                "Use Bore milling for tapered walls; Circular milling requires a cylindrical wall"
+                "Use Bore finishing for tapered walls; Circular milling requires a cylindrical wall"
                     .into(),
             );
         }
@@ -841,7 +842,13 @@ pub(super) fn generate(
                 z
             };
             if planar_rough(op) {
-                for chain in area_paths(p, op, level, cancel)? {
+                for chain in area_paths(
+                    p,
+                    op,
+                    level,
+                    cancel,
+                    op.settings.optimize_links.then_some(b.position),
+                )? {
                     cut_chain(&chain, b, cancel)?;
                 }
                 continue;
@@ -853,11 +860,27 @@ pub(super) fn generate(
                 {
                     std::mem::swap(&mut a, &mut c);
                 }
-                b.enter(a[0], a[1], level)?;
-                b.feed_cut(c[0], c[1], level)?;
-                b.retract()?;
+                let target = Point3 {
+                    x: a[0],
+                    y: a[1],
+                    z: level,
+                };
+                // A finishing raster may stay down only through proven air.
+                // Include the shaft/holder and fixtures, never just endpoints.
+                let stay = op.settings.optimize_links
+                    && op.settings.raster == crate::operation::Raster::Bidirectional
+                    && (b.position.z - level).abs() < 1e-7
+                    && b.stock_height([b.position.x, b.position.y], a)
+                        .is_some_and(|h| h <= level + 1e-8);
+                if stay {
+                    b.feed_cut(a[0], a[1], level)?;
+                } else {
+                    b.enter(a[0], a[1], level)?;
+                }
+                b.feed_cut(c[0], c[1], target.z)?;
             }
         }
+        b.retract()?;
         b.feed = tool.feed;
         return Ok(());
     }

@@ -36,6 +36,7 @@ pub struct Simulation {
     pub summary: Summary,
     pub geometry: Arc<Geometry>,
     pub heights: Vec<f64>,
+    pub surface_roles: Vec<u8>,
 }
 
 struct TargetColumn {
@@ -291,7 +292,9 @@ fn calculate_mode(
         fixture_contact,
         notes,
     };
+    let surface_roles = grid.surface_roles(&mesh);
     Ok(Simulation {
+        surface_roles,
         summary,
         geometry: Arc::new(Geometry {
             bodies: Vec::new(),
@@ -452,6 +455,11 @@ pub(crate) struct Grid {
     floors: Vec<f64>,
     initial: Vec<f64>,
     tools: Vec<Footprint>,
+    top_roles: Vec<u8>,
+    wall_roles: Vec<u8>,
+    wall_range: Vec<[f64; 2]>,
+    roles: Vec<(bool, bool, f64)>,
+    operation: usize,
     pub progress: f64,
     time: f64,
     index: usize,
@@ -551,6 +559,33 @@ impl Grid {
             heights,
             floors,
             tools,
+            top_roles: vec![0; nx * ny],
+            wall_roles: vec![0; nx * ny],
+            wall_range: vec![[0.; 2]; nx * ny],
+            roles: project
+                .operations
+                .iter()
+                .map(|o| {
+                    use crate::model::Strategy::*;
+                    let wall = matches!(
+                        o.strategy,
+                        InsideProfile | OutsideProfile | Bore | Circular | Chamfer
+                    );
+                    let finish =
+                        wall || matches!(o.strategy, SurfaceSmooth | ParallelFinish | Engrave);
+                    let flute = project.library_tool(Some(o)).ok().flatten().map_or_else(
+                        || match project.machine.as_ref().map(|m| &m.tooling) {
+                            Some(crate::machine::Tooling::Milling { flute_length, .. }) => {
+                                *flute_length
+                            }
+                            _ => 0.,
+                        },
+                        |t| t.dimension("flute_length"),
+                    );
+                    (finish, wall, flute)
+                })
+                .collect(),
+            operation: 0,
             progress: 0.,
             time: 0.,
             index: 0,
@@ -581,9 +616,9 @@ impl Grid {
                 return Err("Stock preview cancelled".into());
             }
             let m = &path.moves[self.index];
-            let duration = m.from.distance(m.to) / m.feed * 60.;
+            let duration = m.seconds();
             let end = self.elapsed + duration;
-            if m.motion != Motion::Rapid && duration > 0. {
+            if matches!(m.motion, Motion::Cut | Motion::Plunge) && duration > 0. {
                 let a = ((self.time - self.elapsed) / duration).clamp(0., 1.);
                 let b = ((until - self.elapsed) / duration).clamp(0., 1.);
                 if b > a {
@@ -598,6 +633,7 @@ impl Grid {
                         .ok_or("Invalid toolpath operation index")?;
                     let from = interpolate(a);
                     let to = interpolate(b);
+                    self.operation = m.operation;
                     self.cut(from, to, tool, limit, cancel)?;
                     if let Some(c) = &mut self.certificate {
                         c.cut(from, to, tool, self.errors[m.operation]);
@@ -636,6 +672,11 @@ impl Grid {
         cancel: &AtomicBool,
     ) -> Result<(), String> {
         let r = tool.radius;
+        let (finish, wall, flute) = self
+            .roles
+            .get(self.operation)
+            .copied()
+            .unwrap_or((false, false, 0.));
         let y0 = (((a.y.min(b.y) - r) / self.dy - 0.5).ceil().max(0.) as usize).min(self.ny);
         let y1 = (((a.y.max(b.y) + r) / self.dy - 0.5).floor()).min((self.ny - 1) as f64);
         if y1 < y0 as f64 {
@@ -660,7 +701,7 @@ impl Grid {
                     return Err("Stock preview exhausted its traversal budget; use a higher calculation budget or smaller update".into());
                 }
                 let id = y * self.nx + x;
-                if self.heights[id] <= a.z.min(b.z).max(self.floors[id]) {
+                if !finish && self.heights[id] <= a.z.min(b.z).max(self.floors[id]) {
                     continue;
                 }
                 self.evaluations += 1;
@@ -676,7 +717,21 @@ impl Grid {
                     tool.cone,
                 ) {
                     let height = self.heights[id].min(h.max(self.floors[id]));
-                    if height < self.heights[id] {
+                    let changed = height < self.heights[id];
+                    let contact = h <= self.heights[id] + 0.0002;
+                    if contact && finish {
+                        self.top_roles[id] = 2;
+                    } else if changed {
+                        self.top_roles[id] = 1;
+                    }
+                    if changed {
+                        self.wall_roles[id] = 1;
+                    }
+                    if contact && wall {
+                        self.wall_roles[id] = 2;
+                        self.wall_range[id] = [a.z.min(b.z), a.z.max(b.z) + flute];
+                    }
+                    if changed || (contact && finish) {
                         self.heights[id] = height;
                         for row in y.saturating_sub(1)..=(y + 1).min(self.ny - 1) {
                             self.dirty[row] = true;
@@ -739,7 +794,11 @@ impl Grid {
                 let start = x;
                 let h = heights[y * nx + x];
                 let floor = floors[y * nx + x];
-                while x < nx && heights[y * nx + x] == h && floors[y * nx + x] == floor {
+                while x < nx
+                    && heights[y * nx + x] == h
+                    && floors[y * nx + x] == floor
+                    && self.top_roles[y * nx + x] == self.top_roles[y * nx + start]
+                {
                     x += 1;
                 }
                 if h > floor + 1e-9 {
@@ -876,7 +935,11 @@ impl Grid {
                 x += 1;
                 // Merge flat strips rather than emit a cube for every sample.
                 if vertex(x, y) == z[0] && vertex(x, y + 1) == z[1] {
-                    while x < nx && vertex(x + 1, y) == z[0] && vertex(x + 1, y + 1) == z[1] {
+                    while x < nx
+                        && vertex(x + 1, y) == z[0]
+                        && vertex(x + 1, y + 1) == z[1]
+                        && self.top_roles[y * nx + x] == self.top_roles[y * nx + start]
+                    {
                         x += 1;
                     }
                 }
@@ -929,6 +992,52 @@ impl Grid {
             }
         }
         Ok(mesh)
+    }
+    /// Surface provenance at this heightfield resolution, not a finish/tolerance measurement.
+    pub(crate) fn surface_roles(&self, mesh: &Mesh) -> Vec<u8> {
+        mesh.triangles
+            .iter()
+            .map(|t| {
+                let p = t.map(|i| mesh.vertices[i as usize]);
+                let n = crate::import::normal(p);
+                let c: [f64; 3] = std::array::from_fn(|a| p.iter().map(|v| v[a]).sum::<f64>() / 3.);
+                if n[2] < 0. {
+                    return 0;
+                }
+                let vertical = n[2].abs() < 1e-9;
+                let length = n[0].hypot(n[1]).max(1e-20);
+                let x = (c[0]
+                    + if vertical {
+                        n[0] / length * self.dx * 0.25
+                    } else {
+                        0.
+                    })
+                    / self.dx;
+                let y = (c[1]
+                    + if vertical {
+                        n[1] / length * self.dy * 0.25
+                    } else {
+                        0.
+                    })
+                    / self.dy;
+                if x < 0. || y < 0. || x >= self.nx as f64 || y >= self.ny as f64 {
+                    return 0;
+                }
+                let id = y.floor() as usize * self.nx + x.floor() as usize;
+                if vertical {
+                    if self.wall_roles[id] == 2
+                        && (c[2] < self.wall_range[id][0] - 1e-6
+                            || c[2] > self.wall_range[id][1] + 1e-6)
+                    {
+                        1
+                    } else {
+                        self.wall_roles[id]
+                    }
+                } else {
+                    self.top_roles[id]
+                }
+            })
+            .collect()
     }
     pub fn display_heights(&self) -> &[f64] {
         if self.conservative {
