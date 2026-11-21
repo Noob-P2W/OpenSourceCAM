@@ -105,3 +105,5 @@ body:has(#inspector .vise-dock[open]) .canvas-host{margin-right:0}
 @media(min-width:700px) and (max-width:1099px){body[data-geometry-picking=true][data-feature-inspect=true] .workbench{grid-template-columns:var(--browser-width,260px) minmax(0,1fr)}}
 /* A stacked vise inspector is below the project/view row, outside its resize handle. */
 @media(min-width:700px) and (max-width:1099px){body:has(#inspector .vise-dock[open]) .browser-resizer{bottom:36dvh}}
+
+.stock-legend{position:absolute;right:10px;bottom:10px;display:flex;gap:10px;background:var(--panel);padding:5px 8px;border-radius:4px;font-size:10px;pointer-events:none}.stock-legend[hidden]{display:none}.stock-legend span:before{content:'';display:inline-block;width:9px;height:9px;margin-right:4px;background:#7394a8}.stock-legend [data-role=rough]:before{background:#e6962e}.stock-legend [data-role=finish]:before{background:#33bf82}

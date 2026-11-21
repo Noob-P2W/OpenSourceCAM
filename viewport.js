@@ -59,6 +59,11 @@ export class Viewport {
   for(const triangle of mesh.triangles){const p=triangle.map(i=>vertices[i]);const u=p[1].map((v,i)=>v-p[0][i]),v=p[2].map((v,i)=>v-p[0][i]);let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];const length=Math.hypot(...n)||1;n=n.map(x=>x/length);for(const vertex of p){data.set(vertex,offset);data.set(n,offset+3);offset+=6}}
   return this.upload(data,color,false,retain);
  }
+ stockColor(role){return role===0?[.45,.58,.66]:role===1?[.9,.59,.18]:role===2?[.2,.75,.51]:[.45,.7,.4]}
+ stockMesh(mesh,roles){
+  if(!roles)return this.mesh(mesh,v=>v,this.stockColor());
+  for(const role of [0,1,2]){const triangles=mesh.triangles.filter((_,i)=>roles[i]===role);if(triangles.length)this.mesh({vertices:mesh.vertices,triangles},v=>v,this.stockColor(role)).stockRole=role}
+ }
  setTool(tool){
   if(this.toolSource===tool)return;
   for(const item of this.toolBuffers||[])this.release(item);
@@ -80,7 +85,7 @@ export class Viewport {
 
   this.triangleCount=this.buffers.reduce((n,b)=>n+b.count/3,0);
   const stockStart=this.buffers.length;
-  if(simulation?.mesh)this.mesh(simulation.mesh,v=>v,[.45,.7,.4]);
+  if(simulation?.mesh)this.stockMesh(simulation.mesh,simulation.surface_roles);
   else if(simulation?.heights){const [nx,ny]=simulation.summary.resolution,[dx,dy]=simulation.summary.cell_size;const mesh={vertices:[],triangles:[]};for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const z=simulation.heights[y*nx+x],i=mesh.vertices.length;mesh.vertices.push([x*dx,y*dy,z],[(x+1)*dx,y*dy,z],[(x+1)*dx,(y+1)*dy,z],[x*dx,(y+1)*dy,z]);mesh.triangles.push([i,i+1,i+2],[i,i+2,i+3])}this.mesh(mesh,v=>v,[.45,.7,.4])}
   this.stockBuffers=this.buffers.slice(stockStart);
   if(simulation?.patches)this.updateStockPatches(simulation,true);else{this.stockCpu=null;this.stockFrameSource=null}
@@ -91,7 +96,7 @@ export class Viewport {
  stageStockFrame(frame){
   const sameFrame=this.stockFrameSource===frame,reset=!this.stockCpu||this.stockFrameEpoch!==frame.epoch||this.stockFrameResolution!==frame.resolution||(frame.reset&&!sameFrame);
   if(reset){this.stockCpu=new Map();this.stockDirty=new Set();this.stockReset=true}
-  if(!sameFrame)for(const patch of frame.patches){this.stockCpu.set(patch.strip,frame.vertices.slice(patch.offset,patch.offset+patch.length));this.stockDirty.add(patch.strip)}
+  if(!sameFrame)for(const patch of frame.patches){this.stockCpu.set(patch.strip,{vertices:frame.vertices.slice(patch.offset,patch.offset+patch.length),roles:patch.surface_roles});this.stockDirty.add(patch.strip)}
   this.stockFrameSource=frame;this.stockFrameEpoch=frame.epoch;this.stockFrameResolution=frame.resolution;
  }
  updateStockPatches(frame,rebuild=false){
@@ -99,9 +104,15 @@ export class Viewport {
   this.stageStockFrame(frame);
   const all=this.stockReset||rebuild||!this.stockPieces.size;if(all){for(const item of this.stockBuffers)remove(item);this.stockBuffers=[];this.stockPieces.clear()}
   const strips=all?this.stockCpu.keys():this.stockDirty;
-  for(const strip of strips){const old=this.stockPieces.get(strip);if(old){remove(old);this.stockBuffers.splice(this.stockBuffers.indexOf(old),1)}const item=this.upload(this.stockCpu.get(strip),[.45,.7,.4]);this.stockPieces.set(strip,item);this.stockBuffers.push(item)}
+  for(const strip of strips){
+   for(const item of this.stockPieces.get(strip)||[]){remove(item);this.stockBuffers.splice(this.stockBuffers.indexOf(item),1)}
+   const {vertices,roles}=this.stockCpu.get(strip),items=[];
+   if(!roles){items.push(this.upload(vertices,this.stockColor()))}
+   else for(const role of [0,1,2]){const data=[];for(let i=0;i<roles.length;i++)if(roles[i]===role)for(let j=i*18;j<(i+1)*18;j++)data.push(vertices[j]);if(data.length){const item=this.upload(Float32Array.from(data),this.stockColor(role));item.stockRole=role;items.push(item)}}
+   this.stockPieces.set(strip,items);this.stockBuffers.push(...items);
+  }
   this.stockDirty.clear();this.stockReset=false;
-  this.canvas.dataset.stockTriangles=String(this.stockBuffers.reduce((n,item)=>n+item.count/3,0));
+  this.canvas.dataset.stockRoles=[...new Set(this.stockBuffers.map(i=>i.stockRole).filter(v=>v!=null))].sort().join(',');this.canvas.dataset.stockTriangles=String(this.stockBuffers.reduce((n,item)=>n+item.count/3,0));
  }
  updatePath(path,filter){
   const key=filter instanceof Set?[...filter].sort((a,b)=>a-b).join(','):String(filter);
@@ -128,6 +139,7 @@ export class Viewport {
    if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.unavailable?[1,.35,.2]:highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.unavailable?[.9,.15,.05]:highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
   }
 
+  if(!this.stockLegend){this.stockLegend=document.createElement('div');this.stockLegend.className='stock-legend';this.stockLegend.innerHTML='<span data-role="uncut">Uncut</span><span data-role="rough">Rough-machined</span><span data-role="finish">Finish pass</span>';this.stockLegend.title='Tool-contact history at the selected simulation resolution; not a surface-finish or tolerance measurement.';canvas.parentElement.append(this.stockLegend)}this.stockLegend.hidden=!simulation;
   // Both the model's tip and the old marker use the shared estimated-time cursor.
   const time=path?Math.max(0,Math.min(100,progress))/100*path.seconds:0;
   let completed=0;
@@ -136,7 +148,7 @@ export class Viewport {
   const fraction=move?(completed===path.moves.length?1:Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)))):0;
   const cursor=move?move.from.map((v,i)=>v+(move.to[i]-v)*fraction):null;
   const showCursor=cursor&&(filter===null||(filter instanceof Set?filter.has(move.operation):move.operation===filter));
-  const tool=showCursor?toolForOperation?.(move.operation):null;this.setTool(tool||null);
+  canvas.dataset.toolChange=String(!!move?.tool_change);const tool=showCursor&&!move?.tool_change?toolForOperation?.(move.operation):null;this.setTool(tool||null);
   if(tool){if(!this.toolEnvelope)this.toolEnvelope={min:[...tool.min],max:[...tool.max]};else for(let i=0;i<3;i++){this.toolEnvelope.min[i]=Math.min(this.toolEnvelope.min[i],tool.min[i]);this.toolEnvelope.max[i]=Math.max(this.toolEnvelope.max[i],tool.max[i])}}
   // Only explicit Fit changes framing. Playback, tool changes and orbit must not refit.
   let frame=this.includeReferences?this.allBounds:this.bounds;
@@ -175,6 +187,6 @@ export class Viewport {
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
   canvas.dataset.selectionCopies=String((this.highlightItems||[]).filter(b=>!b.lines).reduce((n,b)=>n+b.count/3,0));canvas.dataset.referenceTriangles=String(this.buffers.filter(b=>b.reference).reduce((n,b)=>n+b.count/3,0));canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
   canvas.dataset.markerVisible=String(!!showCursor&&!tool);canvas.dataset.toolTriangles=String((this.toolBuffers||[]).reduce((n,item)=>n+item.count/3,0));canvas.dataset.toolId=tool?String(tool.library_id??'legacy'):'';canvas.dataset.toolTip=showCursor?cursor.join(','):'';canvas.dataset.toolOperation=showCursor?String(move.operation):'';
-  return {timelineOperation:move?.operation??null,triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
+  return {toolChange:!!move?.tool_change,changePositionKnown:move?.change_position_known,timelineOperation:move?.operation??null,triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};
  }
 }
