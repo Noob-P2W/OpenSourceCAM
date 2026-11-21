@@ -120,7 +120,11 @@ impl Clearing {
             dx,
             dy,
             origin: lo,
-            spacing: (stepover / (dx.min(dy) / 1024.)).floor().max(1.) as usize,
+            // A level crosses a whole grid cell at once. Reserve one diagonal
+            // so rounding cannot widen successive offsets beyond the maximum.
+            spacing: ((stepover - dx.hypot(dy)) / (dx.min(dy) / 1024.))
+                .floor()
+                .max(1.) as usize,
             weights: {
                 let unit = dx.min(dy) / 1024.;
                 [

@@ -382,7 +382,7 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
 }
 
 #[test]
-fn straight_offsets_use_the_requested_stepover_with_grid_rounding() {
+fn straight_offsets_use_the_stepover_without_exceeding_its_maximum() {
     let p = cases::numeric(Strategy::AreaRough);
     let tool = p.operation_tool(&p.operations[0]).unwrap();
     let path = cam::generate(&p).unwrap();
@@ -405,11 +405,48 @@ fn straight_offsets_use_the_requested_stepover_with_grid_rounding() {
     let requested = tool.diameter * tool.step_over;
     let gaps: Vec<_> = rows.windows(2).map(|q| q[1] - q[0]).collect();
     assert!(
-        gaps.iter().any(|d| *d >= requested * 0.85),
+        gaps.iter().any(|d| *d >= requested * 0.8),
         "Offsets still underuse the requested stepover"
     );
     assert!(
-        gaps.iter().all(|d| *d <= requested + 0.25 + 1e-6),
-        "Offset spacing exceeds its grid rounding bound"
+        gaps.iter().all(|d| *d <= requested + 1e-6),
+        "Offset spacing exceeds the requested maximum"
     );
+    for angle in [15_f64, 30., 45., 75.] {
+        let (s, c) = angle.to_radians().sin_cos();
+        let mut rotated = p.clone();
+        rotated.operations[0].settings.path = [(-15., -20.), (15., -20.), (15., 20.), (-15., 20.)]
+            .map(|(x, y)| [30. + x * c - y * s, 45. + x * s + y * c, -3.])
+            .to_vec();
+        rotated.operations[0].settings.closed = true;
+        let path = cam::generate(&rotated).unwrap();
+        let local = |q: cam::Point3| {
+            [
+                (q.x - 30.) * c + (q.y - 45.) * s,
+                -(q.x - 30.) * s + (q.y - 45.) * c,
+            ]
+        };
+        let mut offsets = Vec::new();
+        for m in path.moves.iter().filter(|m| {
+            m.motion == Motion::Cut && (m.to.z + 3.).abs() < 1e-8 && (m.from.z + 3.).abs() < 1e-8
+        }) {
+            let a = local(m.from);
+            let b = local(m.to);
+            if (b[0] - a[0]).abs() < 1e-8 || a[0] * b[0] > 1e-8 {
+                continue;
+            }
+            let t = (-a[0] / (b[0] - a[0])).clamp(0., 1.);
+            let d = a[1] + t * (b[1] - a[1]);
+            if d < 0. {
+                offsets.push(d);
+            }
+        }
+        offsets.sort_by(f64::total_cmp);
+        offsets.dedup_by(|a, b| (*a - *b).abs() < 1e-7);
+        assert!(offsets.len() > 2);
+        assert!(
+            offsets.windows(2).all(|q| q[1] - q[0] <= requested + 1e-6),
+            "{angle} deg offsets exceed maximum: {offsets:?}"
+        );
+    }
 }
