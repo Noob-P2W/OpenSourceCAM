@@ -514,3 +514,14 @@ travel and a configurable exchange-time estimate; actual NC still uses the
 controller/operator handshake. Shared stock contact colors distinguish uncut,
 rough-machined and finish-pass surfaces and reset on seeking. The existing Bore
 cycle is labeled Bore finishing; circular pocket clearing explains helical entry.
+
+## Generated-motion efficiency review
+
+See [TOOLPATH_EFFICIENCY_REVIEW.md](TOOLPATH_EFFICIENCY_REVIEW.md) for before/after
+measurements across all 20 strategies. Numeric exterior and 3D clearing share
+stock-certified air trimming and compare long feed links with checked local
+lift/rapid approaches. Prior whole-stock facing supplies subsequent roughing's
+starting depth. Bidirectional facing may use the longer axis after fixture checks;
+explicit one-way rasters retain their direction. Implicit Optimized clearance
+includes hidden fixture geometry. Controller preflight and analytical arcs remain
+shared with playback/simulation; these checks do not validate a native UI package.

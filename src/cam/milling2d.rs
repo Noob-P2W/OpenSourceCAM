@@ -301,7 +301,11 @@ pub(super) fn clear_model_exterior(
     }
     b.retract()
 }
-fn cut_chain(chain: &[Point3], b: &mut Builder, cancel: &AtomicBool) -> Result<(), String> {
+pub(super) fn cut_chain(
+    chain: &[Point3],
+    b: &mut Builder,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
     // Rotate a closed loop without reversing its milling direction or crossing
     // its retained island. The entry segment uses normal clearance checks.
     let rotated;
@@ -362,20 +366,11 @@ fn cut_chain(chain: &[Point3], b: &mut Builder, cancel: &AtomicBool) -> Result<(
                 cut_end = Some(c);
                 continue;
             }
-            if attached {
-                let shortcut = air_length > 4. * radius
-                    && b.stock_height([b.position.x, b.position.y], [a.x, a.y])
-                        .is_some_and(|h| h <= a.z.min(b.position.z) + 1e-8);
-                if shortcut {
-                    // The whole tool/holder route and fixtures are clear. Feed
-                    // across the cleared floor; do not rapid while touching it.
-                    b.feed_cut(a.x, a.y, a.z)?;
-                } else {
-                    // Keep the original obstacle-safe route when a straight
-                    // shortcut cannot be certified, without another plunge.
-                    for q in &air {
-                        b.feed_cut(q.x, q.y, q.z)?;
-                    }
+            if attached && (air_length <= 4. * radius || !b.cleared_link(a, air_length)?) {
+                // Keep the original obstacle-safe route when a straight
+                // shortcut cannot be certified, without another plunge.
+                for q in &air {
+                    b.feed_cut(q.x, q.y, q.z)?;
                 }
             }
             air.clear();
@@ -831,13 +826,13 @@ pub(super) fn generate(
             b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
         }
         let layers = if planar_rough(op) {
-            ((-z / tool.step_down).ceil() as usize).max(1)
+            (((-z - material_top(p, index)).max(0.) / tool.step_down).ceil() as usize).max(1)
         } else {
             1
         };
         for layer in 1..=layers {
             let level = if planar_rough(op) {
-                -(layer as f64 * tool.step_down).min(-z)
+                -(material_top(p, index) + layer as f64 * tool.step_down).min(-z)
             } else {
                 z
             };

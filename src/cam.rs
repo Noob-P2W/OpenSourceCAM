@@ -16,11 +16,12 @@ fn cleared_top(project: &Project, index: usize) -> f64 {
         .fold(0., f64::max)
 }
 fn material_top(project: &Project, index: usize) -> f64 {
+    let cleared = cleared_top(project, index);
     project.operations[index]
         .settings
         .start_depth
-        .unwrap_or(0.)
-        .min(cleared_top(project, index))
+        .unwrap_or(cleared)
+        .min(cleared)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -92,6 +93,7 @@ struct Builder {
     cutter: Option<crate::stock::Footprint>,
     certificate_error: f64,
     stock_clearance: Option<f64>,
+    optimize_links: bool,
     bodies: Vec<crate::collision::Envelope>,
     fixtures: Option<crate::collision::FixtureClearance>,
     ramp_angle: f64,
@@ -99,6 +101,11 @@ struct Builder {
     ramp_feed: f64,
     lead_in_feed: f64,
     lead_out_feed: f64,
+}
+
+struct EntryPlan {
+    points: [Point3; 4],
+    certified: bool,
 }
 
 impl Builder {
@@ -169,30 +176,111 @@ impl Builder {
         self.go(Point3 { z, ..self.position }, Motion::Rapid)
     }
     fn enter(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
+        let top = self
+            .stock_clearance
+            .and_then(|_| self.stock_height([self.position.x, self.position.y], [x, y]));
+        let plan = self.entry_plan(Point3 { x, y, z }, top);
+        self.follow_entry(plan)
+    }
+    fn entry_plan(&mut self, target: Point3, top: Option<f64>) -> EntryPlan {
+        let Point3 { x, y, z } = target;
         let mut travel = self.clearance;
+        let mut certified = false;
         if let Some(gap) = self.stock_clearance {
-            if let Some(top) = self.stock_height([self.position.x, self.position.y], [x, y]) {
+            if let Some(top) = top {
                 let local = (top + gap).max(z);
                 if local <= self.clearance {
                     travel = local;
+                    certified = true;
                 }
             }
         }
-        self.go(
-            Point3 {
-                z: travel,
-                ..self.position
-            },
-            Motion::Rapid,
-        )?;
-        self.go(Point3 { x, y, z: travel }, Motion::Rapid)?;
+        let mut approach = travel;
         if let Some(gap) = self.stock_clearance {
             if let Some(top) = self.stock_height([x, y], [x, y]) {
-                let approach = (top + gap).max(z).min(travel);
-                self.go(Point3 { x, y, z: approach }, Motion::Rapid)?;
+                approach = (top + gap).max(z).min(travel);
             }
         }
-        self.go(Point3 { x, y, z }, Motion::Plunge)
+        EntryPlan {
+            points: [
+                Point3 {
+                    z: travel,
+                    ..self.position
+                },
+                Point3 { x, y, z: travel },
+                Point3 { x, y, z: approach },
+                target,
+            ],
+            certified,
+        }
+    }
+    fn follow_entry(&mut self, plan: EntryPlan) -> Result<(), String> {
+        for (i, point) in plan.points.into_iter().enumerate() {
+            self.go(
+                point,
+                if i == 3 {
+                    Motion::Plunge
+                } else {
+                    Motion::Rapid
+                },
+            )?;
+        }
+        Ok(())
+    }
+    /// Replace a long, already-cleared contour link only when the entire tool
+    /// and fixture route is certified, and the replacement is actually faster.
+    fn cleared_link(&mut self, to: Point3, follow_mm: f64) -> Result<bool, String> {
+        let Some(top) = self.stock_height([self.position.x, self.position.y], [to.x, to.y]) else {
+            return Ok(false);
+        };
+        if top <= to.z.min(self.position.z) + 1e-8 {
+            self.feed_cut(to.x, to.y, to.z)?;
+            return Ok(true);
+        }
+        if !self.optimize_links {
+            return Ok(false);
+        }
+        let plan = self.entry_plan(to, Some(top));
+        let mut previous = self.position;
+        let mut seconds = 0.;
+        for (i, point) in plan.points.iter().enumerate() {
+            let rate = if i == 3 { self.plunge } else { self.rapid };
+            seconds += previous.distance(*point) / rate * 60.;
+            previous = *point;
+        }
+        if plan.certified && seconds + 0.02 < follow_mm / self.feed * 60. {
+            self.follow_entry(plan)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    fn facing_y_clear(
+        &mut self,
+        width: f64,
+        height: f64,
+        radius: f64,
+        rows: usize,
+        z: f64,
+    ) -> bool {
+        let Some(fixtures) = &mut self.fixtures else {
+            return true;
+        };
+        let outside = -radius - 0.5;
+        let far = height + radius + 0.5;
+        for row in 0..=rows {
+            let x = width * row as f64 / rows as f64;
+            if fixtures
+                .top([x, outside], [x, far], &self.bodies)
+                .is_none_or(|h| h > z + 1e-8)
+            {
+                return false;
+            }
+        }
+        [outside, far].into_iter().all(|y| {
+            fixtures
+                .top([0., y], [width, y], &self.bodies)
+                .is_some_and(|h| h <= z + 1e-8)
+        })
     }
     fn cut(&mut self, x: f64, y: f64, z: f64) -> Result<(), String> {
         self.go(Point3 { x, y, z }, Motion::Cut)
@@ -290,6 +378,18 @@ impl Builder {
         clockwise: bool,
         tolerance: f64,
     ) -> Result<(), String> {
+        for p in Self::outside_points(bounds, offset, z, clockwise, tolerance)? {
+            self.cut(p.x, p.y, p.z)?;
+        }
+        Ok(())
+    }
+    fn outside_points(
+        bounds: [f64; 4],
+        offset: f64,
+        z: f64,
+        clockwise: bool,
+        tolerance: f64,
+    ) -> Result<Vec<Point3>, String> {
         let [x0, y0, x1, y1] = bounds;
         let sweep = std::f64::consts::FRAC_PI_2;
         let angle = (2. * (offset / (offset + tolerance)).acos()).min(std::f64::consts::TAU / 24.);
@@ -314,18 +414,39 @@ impl Builder {
                 (x0, y0, std::f64::consts::PI),
             ]
         };
-        self.cut(x0, y0 - offset, z)?;
+        let mut points = vec![Point3 {
+            x: x0,
+            y: y0 - offset,
+            z,
+        }];
         for (cx, cy, start) in corners {
-            self.cut(cx + offset * start.cos(), cy + offset * start.sin(), z)?;
+            points.push(Point3 {
+                x: cx + offset * start.cos(),
+                y: cy + offset * start.sin(),
+                z,
+            });
             let sign = if clockwise { -1. } else { 1. };
             for i in 0..segments {
                 let a = start + sign * (i as f64 + 0.5) * delta;
-                self.cut(cx + outer * a.cos(), cy + outer * a.sin(), z)?;
+                points.push(Point3 {
+                    x: cx + outer * a.cos(),
+                    y: cy + outer * a.sin(),
+                    z,
+                });
             }
             let end = start + sign * sweep;
-            self.cut(cx + offset * end.cos(), cy + offset * end.sin(), z)?;
+            points.push(Point3 {
+                x: cx + offset * end.cos(),
+                y: cy + offset * end.sin(),
+                z,
+            });
         }
-        self.cut(x0, y0 - offset, z)
+        points.push(Point3 {
+            x: x0,
+            y: y0 - offset,
+            z,
+        });
+        Ok(points)
     }
     fn circle(
         &mut self,
@@ -802,12 +923,11 @@ pub fn generate_with_cancel(
         cutter: None,
         certificate_error: 0.,
         stock_clearance: None,
+        optimize_links: false,
         bodies: Vec::new(),
-        fixtures: if project
-            .operations
-            .iter()
-            .any(|o| o.enabled && o.settings.stock_clearance.is_some())
-        {
+        fixtures: if project.operations.iter().any(|o| {
+            o.enabled && (o.settings.stock_clearance.is_some() || o.settings.optimize_links)
+        }) {
             Some(crate::collision::FixtureClearance::build(project, cancel)?)
         } else {
             None
@@ -838,6 +958,7 @@ pub fn generate_with_cancel(
                 .optimize_links
                 .then_some(0.5_f64.min(b.clearance))
         });
+        b.optimize_links = op.settings.optimize_links;
         b.bodies =
             if b.stock_clearance.is_some() || project.process == crate::process::Process::Milling {
                 crate::collision::envelopes(project, index)?
@@ -897,24 +1018,21 @@ pub fn generate_with_cancel(
                 let clearing =
                     crate::roughing::Clearing::build(&field, project, op, &mut surface_budget)?;
                 for layer in 1..=layers {
-                    let z = -(layer as f64 * tool.step_down).min(depth) + 0.0002;
-                    for chain in clearing.layer(
+                    let z = -(top + layer as f64 * tool.step_down).min(depth) + 0.0002;
+                    for chain in clearing.layer_from(
                         z,
                         op.settings.direction == crate::operation::Direction::Clockwise,
                         &mut surface_budget,
+                        op.settings.optimize_links.then_some(b.position),
                     )? {
-                        if let Some(first) = chain.first() {
-                            b.enter(first.x, first.y, z)?;
-                            for point in chain.iter().skip(1) {
-                                b.cut(point.x, point.y, z)?;
-                            }
-                            b.retract()?;
-                        }
+                        milling2d::cut_chain(&chain, &mut b, cancel)?;
                     }
                 }
-                b.clearance = project.travel_clearance();
-                b.stock_clearance = None;
-                b.retract()?;
+                if !same_tool_next(project, index)? {
+                    b.clearance = project.travel_clearance();
+                    b.stock_clearance = None;
+                    b.retract()?;
+                }
                 continue;
             }
             let rows = field.rows(project, op, &mut surface_budget)?;
@@ -1045,11 +1163,29 @@ pub fn generate_with_cancel(
                 if op.settings.radial_allowance > 0.0 {
                     return Err("Whole-blank facing does not accept radial stock to leave".into());
                 }
-                let outside = -r - 0.5;
-                let far = project.stock.width + r + 0.5;
-                let rows = (project.stock.height / (tool.diameter * tool.step_over))
+                let optimized_raster = b.optimize_links
+                    && op.settings.raster == crate::operation::Raster::Bidirectional;
+                let candidate_rows = (project.stock.width / (tool.diameter * tool.step_over))
                     .ceil()
                     .max(1.0) as usize;
+                let along_y = optimized_raster
+                    && project.stock.height > project.stock.width
+                    && candidate_rows <= MAX_ROWS
+                    && b.facing_y_clear(
+                        project.stock.width,
+                        project.stock.height,
+                        r,
+                        candidate_rows,
+                        z,
+                    );
+                let (length, width) = if along_y {
+                    (project.stock.height, project.stock.width)
+                } else {
+                    (project.stock.width, project.stock.height)
+                };
+                let outside = -r - 0.5;
+                let far = length + r + 0.5;
+                let rows = (width / (tool.diameter * tool.step_over)).ceil().max(1.) as usize;
                 if rows > MAX_ROWS {
                     return Err("Facing exceeds 10,000 rows".into());
                 }
@@ -1063,24 +1199,37 @@ pub fn generate_with_cancel(
                     if layer == layers {
                         b.feed = op.settings.finish_feed.unwrap_or(feed);
                     }
-                    for row in 0..=rows {
-                        let y = project.stock.height * row as f64 / rows as f64;
+                    let across = if along_y { b.position.x } else { b.position.y };
+                    let along = if along_y { b.position.y } else { b.position.x };
+                    let reverse_rows = optimized_raster && across > width / 2.;
+                    let reverse_first = optimized_raster && along > length / 2.;
+                    for ordinal in 0..=rows {
+                        let row = if reverse_rows {
+                            rows - ordinal
+                        } else {
+                            ordinal
+                        };
+                        let y = width * row as f64 / rows as f64;
                         let (start, end) =
                             if op.settings.raster == crate::operation::Raster::NegativeX {
                                 (far, outside)
                             } else if op.settings.raster == crate::operation::Raster::PositiveX
-                                || row % 2 == 0
+                                || ((ordinal % 2 == 0) != reverse_first)
                             {
                                 (outside, far)
                             } else {
                                 (far, outside)
                             };
-                        if row == 0 || op.settings.raster != crate::operation::Raster::Bidirectional
+                        let point = |u, v| if along_y { (v, u) } else { (u, v) };
+                        let a = point(start, y);
+                        let c = point(end, y);
+                        if ordinal == 0
+                            || op.settings.raster != crate::operation::Raster::Bidirectional
                         {
-                            b.enter(start, y, z)?;
+                            b.enter(a.0, a.1, z)?;
                         }
-                        b.cut(start, y, z)?;
-                        b.cut(end, y, z)?;
+                        b.cut(a.0, a.1, z)?;
+                        b.cut(c.0, c.1, z)?;
                     }
                     b.retract()?;
                 }
@@ -1112,23 +1261,46 @@ pub fn generate_with_cancel(
                 if rings > MAX_ROWS {
                     return Err("Outside clearing exceeds 10,000 contours".into());
                 }
-                b.enter(op.x, op.y - outer, z)?;
+                if !b.optimize_links {
+                    b.enter(op.x, op.y - outer, z)?;
+                }
+                let mut chain = Vec::new();
                 for ring in 0..=rings {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err("Machining cancelled".into());
+                    }
                     let offset = outer - (outer - final_offset) * ring as f64 / rings as f64;
                     if layer == layers && ring == rings {
+                        if b.optimize_links
+                            && !chain.is_empty()
+                            && op.settings.finish_feed.is_some()
+                        {
+                            milling2d::cut_chain(&chain, &mut b, cancel)?;
+                            chain.clear();
+                        }
                         b.feed = op.settings.finish_feed.unwrap_or(tool.feed);
                     }
-                    b.outside_contour(
-                        [op.x, op.y, op.x + op.width, op.y + op.height],
-                        offset,
-                        z,
-                        op.settings.direction == crate::operation::Direction::Clockwise,
-                        op.settings.path_tolerance.unwrap_or(0.01),
-                    )?;
+                    let bounds = [op.x, op.y, op.x + op.width, op.y + op.height];
+                    let cw = op.settings.direction == crate::operation::Direction::Clockwise;
+                    let tolerance = op.settings.path_tolerance.unwrap_or(0.01);
+                    if b.optimize_links {
+                        chain.extend(Builder::outside_points(bounds, offset, z, cw, tolerance)?);
+                        if chain.len() > MAX_MOVES {
+                            return Err("Outside clearing exceeds its path point budget".into());
+                        }
+                    } else {
+                        b.outside_contour(bounds, offset, z, cw, tolerance)?;
+                    }
+                }
+                if b.optimize_links && !chain.is_empty() {
+                    milling2d::cut_chain(&chain, &mut b, cancel)?;
                 }
                 if layer == layers {
                     let feed = b.feed;
                     b.feed = op.settings.finish_feed.unwrap_or(feed);
+                    if b.optimize_links && op.settings.spring_passes > 0 {
+                        b.enter(op.x, op.y - final_offset, z)?;
+                    }
                     for _ in 0..op.settings.spring_passes {
                         b.outside_contour(
                             [op.x, op.y, op.x + op.width, op.y + op.height],

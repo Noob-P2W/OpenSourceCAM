@@ -168,14 +168,6 @@ impl Clearing {
             z,
         }
     }
-    pub(crate) fn layer(
-        &self,
-        z: f64,
-        reverse: bool,
-        budget: &mut Budget,
-    ) -> Result<Vec<Vec<Point3>>, String> {
-        self.layer_from(z, reverse, budget, None)
-    }
     pub(crate) fn layer_from(
         &self,
         z: f64,
