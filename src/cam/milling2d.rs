@@ -129,6 +129,19 @@ fn area_paths(
     if z > 1e-7 {
         return Err("2D offset clearing bottom must be at or below stock top".into());
     }
+    let mut budget = crate::surface::Budget::new(cancel);
+    if contour_clearing
+        && p.process == crate::process::Process::Milling
+        && obstacles
+            .iter()
+            .chain(&rings[1..])
+            .map(Vec::len)
+            .sum::<usize>()
+            <= crate::exterior::MAX_EDGES
+    {
+        obstacles.extend(rings.drain(1..));
+        return crate::exterior::paths(p, op, &rings[0], &obstacles, level, &mut budget);
+    }
     let mut clearing = crate::roughing::Clearing::planar(
         &rings,
         &obstacles,
@@ -141,7 +154,6 @@ fn area_paths(
     if op.strategy == Strategy::StockRough {
         clearing.exterior_only(p.stock.width, p.stock.height);
     }
-    let mut budget = crate::surface::Budget::new(cancel);
     let reverse = op.settings.direction == Direction::Clockwise;
     clearing.layer_from(level, reverse, &mut budget, entry)
 }
@@ -298,7 +310,7 @@ pub(super) fn clear_model_exterior(
 ) -> Result<(), String> {
     for chain in chains {
         let layer: Vec<_> = chain.iter().map(|span| span.at_z(z)).collect();
-        cut_spans(&layer, b, cancel)?;
+        cut_clearing_spans(&layer, b, cancel, true)?;
     }
     b.retract()
 }
@@ -311,26 +323,46 @@ pub(super) fn cut_chain(
     cut_spans(&spans, b, cancel)
 }
 
-fn emit_span(b: &mut Builder, span: Span, smooth: bool) -> Result<(), String> {
+fn span_tangent(span: Span) -> [f64; 2] {
+    if let Some(arc) = span.arc {
+        let sign = arc.sweep.signum();
+        [
+            -sign * (span.from.y - arc.center[1]),
+            sign * (span.from.x - arc.center[0]),
+        ]
+    } else {
+        [span.to.x - span.from.x, span.to.y - span.from.y]
+    }
+}
+
+fn emit_span(b: &mut Builder, span: Span, smooth: bool, outside: bool) -> Result<(), String> {
     if smooth {
-        let incoming = if let Some(arc) = span.arc {
-            let sign = arc.sweep.signum();
-            [
-                -sign * (span.from.y - arc.center[1]),
-                sign * (span.from.x - arc.center[0]),
-            ]
-        } else {
-            [span.to.x - span.from.x, span.to.y - span.from.y]
-        };
-        b.restart_at_reversal(incoming)?;
+        b.restart_at_reversal(
+            span_tangent(span),
+            outside.then(|| {
+                span.arc.map_or_else(
+                    || span.from.distance(span.to),
+                    |arc| {
+                        arc.sweep.abs()
+                            * (span.from.x - arc.center[0]).hypot(span.from.y - arc.center[1])
+                    },
+                )
+            }),
+        )?;
     }
     if let Some(arc) = span.arc {
-        // This is the same tolerance reserved in RemainingStock::apply.
+        // Outside offsets reserve a fixed interpolation error for the
+        // cutter-clearance proof, including the G1 approximation.
+        let tolerance = b.certificate_error - 0.0002;
         b.arc_xy(
             arc.center,
             arc.sweep,
             span.to.z,
-            b.certificate_error - 0.0002,
+            if outside {
+                tolerance.min(crate::exterior::SAG)
+            } else {
+                tolerance
+            },
         )
     } else {
         b.feed_cut(span.to.x, span.to.y, span.to.z)
@@ -341,6 +373,15 @@ pub(super) fn cut_spans(
     spans: &[Span],
     b: &mut Builder,
     cancel: &AtomicBool,
+) -> Result<(), String> {
+    cut_clearing_spans(spans, b, cancel, false)
+}
+
+fn cut_clearing_spans(
+    spans: &[Span],
+    b: &mut Builder,
+    cancel: &AtomicBool,
+    outside: bool,
 ) -> Result<(), String> {
     // A closed chain may start at a different span boundary without reversing
     // the milling direction or splitting an analytical arc.
@@ -360,7 +401,7 @@ pub(super) fn cut_spans(
     };
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
     let spacing = radius.max(0.25);
-    let smooth = spans.iter().any(|span| span.arc.is_some());
+    let smooth = outside || spans.iter().any(|span| span.arc.is_some());
     let mut attached = false;
     let mut air = Vec::new();
     let mut air_length = 0.;
@@ -394,7 +435,7 @@ pub(super) fn cut_spans(
             let proof_radius = radius + span.arc.map_or(0., |arc| arc.sag);
             if b.remaining.is_clear(span.from, span.to, proof_radius, 0.) {
                 if let Some(cut) = pending.take() {
-                    emit_span(b, cut, smooth)?;
+                    emit_span(b, cut, smooth, outside)?;
                 }
                 if attached {
                     air_length += span.from.distance(span.to);
@@ -413,7 +454,7 @@ pub(super) fn cut_spans(
                 && (air_length <= 4. * radius || !b.cleared_link(span.from, air_length, !smooth)?)
             {
                 for &link in &air {
-                    emit_span(b, link, smooth)?;
+                    emit_span(b, link, smooth, outside)?;
                 }
             }
             air.clear();
@@ -425,10 +466,13 @@ pub(super) fn cut_spans(
             pending = Some(span);
         }
         if let Some(cut) = pending {
-            emit_span(b, cut, smooth)?;
+            emit_span(b, cut, smooth, outside)?;
         }
     }
-    b.retract()
+    if !outside {
+        b.retract()?;
+    }
+    Ok(())
 }
 fn contour_target(op: &Operation) -> Option<f64> {
     (op.has_chain()
@@ -884,7 +928,7 @@ pub(super) fn generate(
                     cancel,
                     op.settings.optimize_links.then_some(b.position),
                 )? {
-                    cut_spans(&chain, b, cancel)?;
+                    cut_clearing_spans(&chain, b, cancel, op.strategy == Strategy::StockRough)?;
                 }
                 continue;
             }

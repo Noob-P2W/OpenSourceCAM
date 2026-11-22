@@ -286,12 +286,33 @@ impl Builder {
         Some([last.to.x - last.from.x, last.to.y - last.from.y])
     }
 
-    fn restart_at_reversal(&mut self, incoming: [f64; 2]) -> Result<(), String> {
+    fn restart_at_reversal(
+        &mut self,
+        incoming: [f64; 2],
+        outside_length: Option<f64>,
+    ) -> Result<(), String> {
         if let Some(outgoing) = self.last_cut_direction() {
             let length = outgoing[0].hypot(outgoing[1]) * incoming[0].hypot(incoming[1]);
             let dot = outgoing[0] * incoming[0] + outgoing[1] * incoming[1];
-            if length > 1e-12 && dot < -0.996 * length {
-                // A near U-turn cannot be filleted within the bounded region.
+            let short_reversal = outside_length.is_some_and(|distance| {
+                let last = self.path.moves.last().unwrap();
+                let previous_length = self
+                    .path
+                    .arcs
+                    .last()
+                    .filter(|arc| arc.end == self.path.moves.len())
+                    .map_or_else(
+                        || last.from.distance(last.to),
+                        |arc| {
+                            arc.sweep.abs()
+                                * (last.to.x - arc.center[0]).hypot(last.to.y - arc.center[1])
+                        },
+                    );
+                distance.min(previous_length) <= 0.5 + EPS
+            });
+            let limit = if short_reversal { -0.5 } else { -0.996 };
+            if length > 1e-12 && dot < limit * length {
+                // Break a sharp reversal that survived the offset and link planning.
                 // End the cut and lift at the cusp before re-entering there.
                 let tip = self.position;
                 let q = [tip.x, tip.y];

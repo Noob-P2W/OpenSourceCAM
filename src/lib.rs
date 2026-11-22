@@ -5,6 +5,7 @@ pub mod cam;
 pub mod collision;
 pub mod commands;
 pub mod contour;
+mod exterior;
 pub mod faces;
 pub mod features;
 pub mod files;

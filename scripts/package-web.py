@@ -27,6 +27,7 @@ shutil.copy2(ROOT / 'licenses/third-party/OCCT-exception.txt', site / 'cad/licen
 three = ROOT / 'web/node_modules/three'
 shutil.copy2(three / 'build/three.module.min.js', site / 'vendor/three.module.js')
 shutil.copy2(three / 'LICENSE', site / 'vendor/three-LICENSE.txt')
+shutil.copy2(ROOT / 'licenses/third-party/clipper2-rust.txt', site / 'vendor/clipper2-rust-LICENSE.txt')
 # Content-derived versions change whenever a deployed asset changes.
 digest = hashlib.sha256()
 for path in sorted(site.rglob('*')):

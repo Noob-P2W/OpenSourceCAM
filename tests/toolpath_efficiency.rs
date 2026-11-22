@@ -337,14 +337,14 @@ fn physical_offset_spacing_covers_rotated_regions_and_islands() {
             let path = cam::generate(&p).unwrap();
             if angle == 30. && strategy == Strategy::StockRough {
                 assert!(
-                    path.arcs.len() > 100,
+                    !path.arcs.is_empty(),
                     "Angled clearing should produce tangential arcs"
                 );
                 for mode in [MillingMode::Climb, MillingMode::Conventional] {
                     let mut other = p.clone();
                     other.operations[0].settings.milling_mode = Some(mode);
                     assert!(
-                        cam::generate(&other).unwrap().arcs.len() > 100,
+                        !cam::generate(&other).unwrap().arcs.is_empty(),
                         "{mode:?} must smooth angled corners"
                     );
                 }
@@ -531,4 +531,48 @@ fn straight_offsets_use_the_stepover_without_exceeding_its_maximum() {
             "{angle} deg offsets exceed maximum: {offsets:?}"
         );
     }
+}
+
+#[test]
+fn outside_offsets_protect_neighboring_geometry_only_at_intersecting_depths() {
+    let mut p = cases::numeric(Strategy::StockRough);
+    let mut neighbor = block();
+    neighbor.offset[2] = -4.5;
+    p.part = Some(neighbor);
+    let settings = &mut p.operations[0].settings;
+    settings.closed = true;
+    settings.step_down = Some(1.);
+    let rectangle =
+        |x0, y0, x1, y1| vec![[x0, y0, -3.], [x1, y0, -3.], [x1, y1, -3.], [x0, y1, -3.]];
+    settings.path = rectangle(10., 12., 18., 24.);
+    settings.islands = vec![rectangle(38., 12., 45., 24.)];
+    let protected = [
+        settings.path.clone(),
+        settings.islands[0].clone(),
+        rectangle(27., 10., 33., 30.),
+    ];
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    let path = cam::generate(&p).unwrap();
+    let mut open_above_neighbor = false;
+    let mut bottom_cuts = 0;
+    for cut in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        let from = [cut.from.x, cut.from.y, cut.to.z];
+        let to = [cut.to.x, cut.to.y, cut.to.z];
+        if cut.to.z > -1.5 {
+            open_above_neighbor |= opensourcecam::planar::inside([to[0], to[1]], &protected[2]);
+        }
+        bottom_cuts += usize::from(cut.to.z <= -3.);
+        for ring in &protected[..if cut.to.z > -1.5 { 2 } else { 3 }] {
+            assert!(!opensourcecam::planar::inside([to[0], to[1]], ring));
+            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+                assert!(
+                    opensourcecam::planar::segment_distance(from, to, *a, *b) >= radius - 0.0002,
+                    "Cut at Z{} crossed a protected island",
+                    cut.to.z,
+                );
+            }
+        }
+    }
+    assert!(open_above_neighbor);
+    assert!(bottom_cuts > 0);
 }

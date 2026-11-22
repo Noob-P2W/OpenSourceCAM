@@ -702,7 +702,7 @@ impl Clearing {
 /// Ordered closest points give a two-sided deviation bound. Between
 /// consecutive samples both walks are linear, including a clamped projection
 /// at either end. Pair the first and last source vertices with the new ends.
-fn follows_walk(walk: &[Point3], a: Point3, b: Point3, deviation: f64) -> bool {
+pub(crate) fn follows_walk(walk: &[Point3], a: Point3, b: Point3, deviation: f64) -> bool {
     let d = [b.x - a.x, b.y - a.y];
     let length = d[0].hypot(d[1]);
     if length < 1e-9

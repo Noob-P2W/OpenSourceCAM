@@ -444,8 +444,13 @@ autosave and activation flow through Save workspace and update.
 
 Outside clearing can pick a closed horizontal exterior/island boundary, like 2D
 contour. Its measured plane supplies the bottom; positive tip offsets leave stock.
-Each layer protects the selected island and all neighboring model material above
-that plane. Open or internal pocket boundaries are rejected. Saved numeric and
+Each layer protects the selected island and the projected model material above
+the cutting plane. Selected contours use direct vector offsets with round joins
+and retain only regions reachable from outside the stock. Dense projections
+above the vector edge limit use the bounded grid planner. Between passes, the
+tool uses stock- and fixture-aware clearance. A short move (up to 0.5 mm) that
+reverses direction by more than 120° can use a checked lift and re-entry.
+Open or internal pocket boundaries are rejected. Saved numeric and
 whole-model outside jobs retain their previous interpretation; reselect geometry
 to use planar clearing. Edge overlays remain visible over coincident solid faces,
 and edge snap distances use normalized rays.
