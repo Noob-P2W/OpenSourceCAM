@@ -336,34 +336,30 @@ fn span_tangent(span: Span) -> [f64; 2] {
 }
 
 fn emit_span(b: &mut Builder, span: Span, smooth: bool, outside: bool) -> Result<(), String> {
+    // Outside offsets reserve a fixed interpolation error for the
+    // cutter-clearance proof, including the G1 approximation.
+    let tolerance = b.certificate_error - 0.0002;
+    let tolerance = if outside {
+        tolerance.min(crate::exterior::SAG)
+    } else {
+        tolerance
+    };
     if smooth {
-        b.restart_at_reversal(
-            span_tangent(span),
-            outside.then(|| {
-                span.arc.map_or_else(
-                    || span.from.distance(span.to),
-                    |arc| {
-                        arc.sweep.abs()
-                            * (span.from.x - arc.center[0]).hypot(span.from.y - arc.center[1])
-                    },
-                )
-            }),
-        )?;
+        let tangent = span_tangent(span);
+        let chord = if !outside {
+            None
+        } else if let Some(arc) = span.arc {
+            let [x, y] = [span.from.x - arc.center[0], span.from.y - arc.center[1]];
+            let (parts, n) = Builder::arc_sampling(x.hypot(y), arc.sweep, tolerance)?;
+            let (s, c) = (arc.sweep / (parts * n) as f64).sin_cos();
+            Some([x * (c - 1.) - y * s, y * (c - 1.) + x * s])
+        } else {
+            Some(tangent)
+        };
+        b.restart_at_reversal(tangent, chord)?;
     }
     if let Some(arc) = span.arc {
-        // Outside offsets reserve a fixed interpolation error for the
-        // cutter-clearance proof, including the G1 approximation.
-        let tolerance = b.certificate_error - 0.0002;
-        b.arc_xy(
-            arc.center,
-            arc.sweep,
-            span.to.z,
-            if outside {
-                tolerance.min(crate::exterior::SAG)
-            } else {
-                tolerance
-            },
-        )
+        b.arc_xy(arc.center, arc.sweep, span.to.z, tolerance)
     } else {
         b.feed_cut(span.to.x, span.to.y, span.to.z)
     }

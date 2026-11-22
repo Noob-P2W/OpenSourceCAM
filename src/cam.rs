@@ -289,29 +289,26 @@ impl Builder {
     fn restart_at_reversal(
         &mut self,
         incoming: [f64; 2],
-        outside_length: Option<f64>,
+        outside_chord: Option<[f64; 2]>,
     ) -> Result<(), String> {
         if let Some(outgoing) = self.last_cut_direction() {
-            let length = outgoing[0].hypot(outgoing[1]) * incoming[0].hypot(incoming[1]);
-            let dot = outgoing[0] * incoming[0] + outgoing[1] * incoming[1];
-            let short_reversal = outside_length.is_some_and(|distance| {
+            let reverses = |a: [f64; 2], b: [f64; 2], limit: f64| {
+                let length = a[0].hypot(a[1]) * b[0].hypot(b[1]);
+                length > 1e-12 && a[0] * b[0] + a[1] * b[1] < limit * length
+            };
+            // Check both the true tangents and the actual endpoint chords
+            // used when a controller receives the linear approximation.
+            let short_reversal = outside_chord.is_some_and(|incoming_chord| {
                 let last = self.path.moves.last().unwrap();
-                let previous_length = self
-                    .path
-                    .arcs
-                    .last()
-                    .filter(|arc| arc.end == self.path.moves.len())
-                    .map_or_else(
-                        || last.from.distance(last.to),
-                        |arc| {
-                            arc.sweep.abs()
-                                * (last.to.x - arc.center[0]).hypot(last.to.y - arc.center[1])
-                        },
-                    );
-                distance.min(previous_length) <= 0.5 + EPS
+                let previous = [last.to.x - last.from.x, last.to.y - last.from.y];
+                incoming_chord[0]
+                    .hypot(incoming_chord[1])
+                    .min(previous[0].hypot(previous[1]))
+                    <= 0.5 + EPS
+                    && (reverses(outgoing, incoming, -0.5)
+                        || reverses(previous, incoming_chord, -0.5))
             });
-            let limit = if short_reversal { -0.5 } else { -0.996 };
-            if length > 1e-12 && dot < limit * length {
+            if short_reversal || reverses(outgoing, incoming, -0.996) {
                 // Break a sharp reversal that survived the offset and link planning.
                 // End the cut and lift at the cusp before re-entering there.
                 let tip = self.position;
@@ -553,15 +550,7 @@ impl Builder {
             tolerance,
         )
     }
-    fn arc_xy(
-        &mut self,
-        center: [f64; 2],
-        sweep: f64,
-        end_z: f64,
-        tolerance: f64,
-    ) -> Result<(), String> {
-        let origin = self.position;
-        let radius = (origin.x - center[0]).hypot(origin.y - center[1]);
+    fn arc_sampling(radius: f64, sweep: f64, tolerance: f64) -> Result<(usize, usize), String> {
         if !radius.is_finite() || radius <= EPS || !sweep.is_finite() || sweep.abs() < 1e-12 {
             return Err("Invalid circular motion".into());
         }
@@ -575,12 +564,25 @@ impl Builder {
         if parts > MAX_MOVES {
             return Err("Helical motion exceeds its turn budget".into());
         }
+        let n = (per_turn as f64 * sweep.abs() / parts as f64 / std::f64::consts::TAU)
+            .ceil()
+            .max(2.) as usize;
+        Ok((parts, n))
+    }
+
+    fn arc_xy(
+        &mut self,
+        center: [f64; 2],
+        sweep: f64,
+        end_z: f64,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        let origin = self.position;
+        let radius = (origin.x - center[0]).hypot(origin.y - center[1]);
+        let (parts, n) = Self::arc_sampling(radius, sweep, tolerance)?;
         let phase = (origin.y - center[1]).atan2(origin.x - center[0]);
         for part in 0..parts {
             let start = self.path.moves.len();
-            let n = (per_turn as f64 * sweep.abs() / parts as f64 / std::f64::consts::TAU)
-                .ceil()
-                .max(2.) as usize;
             for i in 1..=n {
                 let t = (part as f64 + i as f64 / n as f64) / parts as f64;
                 let a = phase + sweep * t;
