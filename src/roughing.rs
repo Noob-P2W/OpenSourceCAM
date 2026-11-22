@@ -117,18 +117,27 @@ impl Clearing {
             std::array::from_fn(|a| outer.iter().map(|p| p[a]).fold(f64::INFINITY, f64::min));
         let hi: [f64; 2] =
             std::array::from_fn(|a| outer.iter().map(|p| p[a]).fold(f64::NEG_INFINITY, f64::max));
-        let step = resolution.min(stepover / (2. * 2_f64.sqrt()));
+        let mut step = resolution.min(stepover / (2. * 2_f64.sqrt()));
         if !step.is_finite() || step <= 0. {
             return Err("Choose a positive roughing resolution".into());
         }
-        let nx = ((hi[0] - lo[0]) / step).ceil() as usize;
-        let ny = ((hi[1] - lo[1]) / step).ceil() as usize;
-        if nx == 0
-            || ny == 0
-            || nx > 2048
-            || ny > 2048
-            || nx.checked_mul(ny).is_none_or(|n| n > 262144)
-        {
+        let dimensions = |step: f64| [0, 1].map(|i| ((hi[i] - lo[i]) / step).ceil() as usize);
+        let fits = |[nx, ny]: [usize; 2]| {
+            (1..=2048).contains(&nx) && (1..=2048).contains(&ny) && nx * ny <= 262144
+        };
+        if smooth_steps {
+            // A coarse grid capped at half a stepover per diagonal can spend
+            // the entire stepover on the existing grid-rounding reserve.
+            // Refine only when the finer grid fits the existing work limits.
+            let finer = step.min(stepover / (3.5 * 2_f64.sqrt()));
+            let [_, rows] = dimensions(finer);
+            let edges = rings.iter().chain(obstacles).map(Vec::len).sum::<usize>();
+            if fits(dimensions(finer)) && (rows + 2).saturating_mul(edges) <= 50_000_000 {
+                step = finer;
+            }
+        }
+        let [nx, ny] = dimensions(step);
+        if !fits([nx, ny]) {
             return Err(
                 "2D offset grid exceeds 262,144 cells; increase toolpath resolution or stepover"
                     .into(),
@@ -918,6 +927,17 @@ impl Graph<'_> {
 #[cfg(test)]
 mod smoothing_tests {
     use super::*;
+
+    #[test]
+    fn a_coarse_grid_refines_to_keep_blends_at_a_narrow_stepover() {
+        let diamond = vec![[0., 6., -1.], [6., 0., -1.], [12., 6., -1.], [6., 12., -1.]];
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let clearing = Clearing::planar(&[diamond], &[], 1., 0.5, 0.5, true, &cancel).unwrap();
+        let chains = clearing
+            .layer_from(-1., false, &mut Budget::new(&cancel), None)
+            .unwrap();
+        assert!(chains.iter().flatten().any(|span| span.arc.is_some()));
+    }
 
     #[test]
     fn straightening_only_crosses_free_cells() {

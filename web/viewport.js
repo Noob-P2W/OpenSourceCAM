@@ -4,7 +4,7 @@ import {ThreeView} from './three-view.js';
 export class Viewport {
  constructor(canvas,requestDraw,onStatus){
   this.canvas=canvas;canvas.camViewport=this;this.requestDraw=requestDraw;this.onStatus=onStatus;this.buffers=[];this.zoom=1;this.pan=[0,0];this.yaw=-Math.PI/4;this.elevation=Math.asin(1/Math.sqrt(3));this.pointers=new Map();this.scene=null;this.highlight=null;this.preset='axo';this.controls={dark:false,grid:true,axes:true,rapids:true};this.includeReferences=false;
-  this.gl=canvas.getContext('webgl',{alpha:false,antialias:false,powerPreference:'low-power'});
+  this.gl=canvas.getContext('webgl',{alpha:false,antialias:true,powerPreference:'low-power'});
   if(this.gl){try{this.initGL()}catch(error){onStatus(`3D renderer failed: ${error.message}`,true);this.gl=null}}
   if(!this.gl)this.ctx=canvas.getContext('2d');
   canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();this.lost=true;onStatus('3D graphics paused by the browser. Waiting to restore the view…',true)});
