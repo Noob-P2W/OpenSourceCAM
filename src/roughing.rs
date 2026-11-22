@@ -189,7 +189,7 @@ impl Clearing {
             dy,
             origin: lo,
             // Reserve one diagonal for grid rounding and the combined straightening
-            // and fillet deviations on adjacent passes.
+            // and smoothing deviations on adjacent passes.
             spacing: ((stepover
                 - if smooth_steps { 2. } else { 1. } * diagonal
                 - 2. * blend_deviation)
@@ -481,27 +481,131 @@ impl Clearing {
         }
         chains
             .into_iter()
-            .map(|mut nodes| {
-                if self.smooth_steps {
-                    graph.straighten_steps(&mut nodes, [self.dx, self.dy], budget)?;
-                }
-                let mut result: Vec<Point3> = Vec::new();
-                for node in nodes {
-                    let p = self.point(node, z);
-                    if result.len() >= 2 {
-                        let a = result[result.len() - 2];
-                        let b = result[result.len() - 1];
+            .map(|nodes| {
+                let walk: Vec<_> = nodes.iter().map(|&node| self.point(node, z)).collect();
+                let indices = if self.smooth_steps {
+                    graph.straighten_steps(&nodes, &walk, self.dx.hypot(self.dy) / 2., budget)?
+                } else {
+                    (0..nodes.len()).collect()
+                };
+                let mut corners: Vec<usize> = Vec::new();
+                for index in indices {
+                    let p = walk[index];
+                    if corners.len() >= 2 {
+                        let a = walk[corners[corners.len() - 2]];
+                        let b = walk[corners[corners.len() - 1]];
                         let same = (b.x - a.x) * (p.y - b.y) - (b.y - a.y) * (p.x - b.x);
                         let forward = (b.x - a.x) * (p.x - b.x) + (b.y - a.y) * (p.y - b.y);
                         if same.abs() < 1e-10 && forward > 0. {
-                            result.pop();
+                            corners.pop();
                         }
                     }
-                    result.push(p)
+                    corners.push(index);
+                }
+                let mut result: Vec<_> = corners.iter().map(|&i| walk[i]).collect();
+                // Recheck each pass against the same source walk, so repeated
+                // fairing cannot accumulate error or reduce the stepover reserve.
+                for _ in 0..3 {
+                    self.fair_steps(&mut result, &walk, &corners, &graph, budget)?;
                 }
                 self.fillet(&result, &graph, budget)
             })
             .collect()
+    }
+
+    fn grid_point(&self, p: Point3) -> [f64; 2] {
+        [
+            (p.x - self.origin[0]) / self.dx,
+            (p.y - self.origin[1]) / self.dy,
+        ]
+    }
+
+    /// Sample at equal distances along the path so densely spaced vertices
+    /// do not give the underlying stair treads extra weight.
+    fn fair_steps(
+        &self,
+        points: &mut [Point3],
+        walk: &[Point3],
+        corners: &[usize],
+        graph: &Graph<'_>,
+        budget: &mut Budget,
+    ) -> Result<(), String> {
+        if points.len() < 3 || !self.smooth_steps {
+            return Ok(());
+        }
+        let original = points.to_vec();
+        let mut lengths = vec![0.];
+        for edge in original.windows(2) {
+            lengths.push(lengths.last().unwrap() + edge[0].distance(edge[1]));
+        }
+        let sample = |at: f64| {
+            let right = lengths
+                .partition_point(|&d| d <= at)
+                .clamp(1, lengths.len() - 1);
+            let [a, b] = [original[right - 1], original[right]];
+            let t = (at - lengths[right - 1]) / (lengths[right] - lengths[right - 1]);
+            [a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)]
+        };
+        for i in 1..points.len() - 1 {
+            budget.tick()?;
+            // Edits are local. Long merged lines already have a steady
+            // heading and would require scanning many cells for clearance.
+            if corners[i + 1] - corners[i - 1] > 48 {
+                continue;
+            }
+            let v = original[i];
+            let window = (3. * self.dx.hypot(self.dy))
+                .min(lengths[i])
+                .min(lengths[lengths.len() - 1] - lengths[i]);
+            if window < self.dx.min(self.dy) {
+                continue;
+            }
+            let before = sample(lengths[i] - window);
+            let after = sample(lengths[i] + window);
+            let u = [v.x - before[0], v.y - before[1]];
+            let w = [after[0] - v.x, after[1] - v.y];
+            // Keep deliberate corners and reversals. Small alternating turns
+            // within a generally forward run are the raster artefacts.
+            if u[0] * w[0] + u[1] * w[1] < 0.55 * u[0].hypot(u[1]) * w[0].hypot(w[1]) {
+                continue;
+            }
+            let mut offset = [0.; 2];
+            for t in [0.25, 0.5, 0.75, 1.] {
+                let a = sample(lengths[i] - t * window);
+                let b = sample(lengths[i] + t * window);
+                offset[0] += (a[0] + b[0] - 2. * v.x) / 9.;
+                offset[1] += (a[1] + b[1] - 2. * v.y) / 9.;
+            }
+            let length = offset[0].hypot(offset[1]);
+            let deviation = self.dx.hypot(self.dy) / 2.;
+            let mut shift = length.min(deviation);
+            for _ in 0..4 {
+                if shift < 1e-7 {
+                    break;
+                }
+                let q = Point3 {
+                    x: v.x + offset[0] * shift / length,
+                    y: v.y + offset[1] * shift / length,
+                    z: v.z,
+                };
+                let safe = [(i - 1, i, points[i - 1], q), (i, i + 1, q, points[i + 1])]
+                    .into_iter()
+                    .all(|(a, b, p, q)| {
+                        let [u, v] = [original[a], original[b]];
+                        let d = [v.x - u.x, v.y - u.y];
+                        let forward = d[0] * (q.x - p.x) + d[1] * (q.y - p.y);
+                        forward >= 0.25 * (d[0] * d[0] + d[1] * d[1])
+                            && follows_walk(&walk[corners[a]..=corners[b]], p, q, deviation)
+                            && graph.shifted_edge_clear([u, v, p, q].map(|p| self.grid_point(p)))
+                    });
+                if safe {
+                    points[i] = q;
+                    break;
+                }
+                shift *= 0.5;
+            }
+        }
+        Ok(())
     }
 
     fn fillet(
@@ -571,17 +675,11 @@ impl Clearing {
                 y: v.y + trim * w[1],
                 z: v.z,
             };
-            let grid = |p: Point3| {
-                [
-                    (p.x - self.origin[0]) / self.dx,
-                    (p.y - self.origin[1]) / self.dy,
-                ]
-            };
             // The complete minor arc lies in the triangle formed by the
             // tangent points and the original vertex, as do its G1 samples.
             let deviation = trim * (angle / 4.).tan();
             if deviation <= self.clearance_halo
-                || graph.triangle_clear([grid(from), grid(v), grid(to)], turn.signum())
+                || graph.triangle_clear([from, v, to].map(|p| self.grid_point(p)), turn.signum())
             {
                 return Some(Span {
                     from,
@@ -601,6 +699,29 @@ impl Clearing {
         None
     }
 }
+/// Ordered closest points give a two-sided deviation bound. Between
+/// consecutive samples both walks are linear, including a clamped projection
+/// at either end. Pair the first and last source vertices with the new ends.
+fn follows_walk(walk: &[Point3], a: Point3, b: Point3, deviation: f64) -> bool {
+    let d = [b.x - a.x, b.y - a.y];
+    let length = d[0].hypot(d[1]);
+    if length < 1e-9
+        || walk[0].distance(a) > deviation + 1e-9
+        || walk[walk.len() - 1].distance(b) > deviation + 1e-9
+    {
+        return false;
+    }
+    let u = [d[0] / length, d[1] / length];
+    let mut previous = 0.;
+    walk[1..walk.len() - 1].iter().all(|p| {
+        let v = [p.x - a.x, p.y - a.y];
+        let along = (v[0] * u[0] + v[1] * u[1]).clamp(0., length);
+        let in_order = along >= previous - 1e-9;
+        previous = along;
+        in_order && (v[0] - along * u[0]).hypot(v[1] - along * u[1]) <= deviation + 1e-9
+    })
+}
+
 fn cross(a: [f64; 2], b: [f64; 2]) -> f64 {
     a[0] * b[1] - a[1] * b[0]
 }
@@ -621,6 +742,20 @@ struct Graph<'a> {
     components: &'a [usize],
 }
 impl Graph<'_> {
+    fn shifted_edge_clear(&self, [a, b, p, q]: [[f64; 2]; 4]) -> bool {
+        // A triangle containing the shifted segment certifies the entire cut.
+        // Use either original endpoint, and leave collinear shifts to the halo.
+        // Only local edits are needed for raster ripples. Keep triangle
+        // scans bounded even when the neighboring leg is a long straight.
+        if (q[0] - p[0]).abs().max((q[1] - p[1]).abs()) > 24. {
+            return false;
+        }
+        [a, b].into_iter().any(|v| {
+            let winding = cross([q[0] - p[0], q[1] - p[1]], [v[0] - p[0], v[1] - p[1]]);
+            winding.abs() > 1e-10 && self.triangle_clear([p, q, v], winding.signum())
+        })
+    }
+
     fn forward_link(
         &self,
         chain: &[usize],
@@ -753,49 +888,33 @@ impl Graph<'_> {
     /// diagonal allowance still limits the displacement of each pass.
     fn straighten_steps(
         &self,
-        nodes: &mut Vec<usize>,
-        step: [f64; 2],
+        nodes: &[usize],
+        walk: &[Point3],
+        deviation: f64,
         budget: &mut Budget<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<usize>, String> {
         const WINDOW: usize = 20;
-        let point = |node| {
-            let [x, y] = self.coordinates(node);
-            [x as f64 * step[0], y as f64 * step[1]]
-        };
-        let deviation = step[0].hypot(step[1]) / 2.;
         let mut start = 0;
-        let mut output = 1;
+        let mut indices = vec![0];
         while start + 1 < nodes.len() {
-            let a = point(nodes[start]);
             let mut end = start + 1;
             for candidate in (start + 2..=(start + WINDOW).min(nodes.len() - 1)).rev() {
                 budget.tick()?;
-                let b = point(nodes[candidate]);
-                let d = [b[0] - a[0], b[1] - a[1]];
-                let length = d[0].hypot(d[1]);
-                if length <= 1e-9 {
-                    continue;
-                }
-                let mut previous = 0.;
-                let fits = nodes[start + 1..candidate].iter().all(|&node| {
-                    let p = point(node);
-                    let offset = [p[0] - a[0], p[1] - a[1]];
-                    let along = (offset[0] * d[0] + offset[1] * d[1]) / length;
-                    let in_order = along >= previous - 1e-9 && along <= length + 1e-9;
-                    previous = along;
-                    in_order && cross(d, offset).abs() <= (deviation + 1e-9) * length
-                });
-                if fits && self.chord_clear(nodes[start], nodes[candidate]) {
+                if follows_walk(
+                    &walk[start..=candidate],
+                    walk[start],
+                    walk[candidate],
+                    deviation,
+                ) && self.chord_clear(nodes[start], nodes[candidate])
+                {
                     end = candidate;
                     break;
                 }
             }
-            nodes[output] = nodes[end];
-            output += 1;
+            indices.push(end);
             start = end;
         }
-        nodes.truncate(output);
-        Ok(())
+        Ok(indices)
     }
     fn metric(&self, a: usize, b: usize) -> usize {
         (a % (self.nx + 1)).abs_diff(b % (self.nx + 1))
@@ -928,6 +1047,30 @@ impl Graph<'_> {
 mod smoothing_tests {
     use super::*;
 
+    fn straighten(
+        graph: &Graph<'_>,
+        nodes: &[usize],
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Vec<usize> {
+        let points: Vec<_> = nodes
+            .iter()
+            .map(|&n| {
+                let [x, y] = graph.coordinates(n);
+                Point3 {
+                    x: x as f64,
+                    y: y as f64,
+                    z: 0.,
+                }
+            })
+            .collect();
+        graph
+            .straighten_steps(nodes, &points, 2_f64.sqrt() / 2., &mut Budget::new(cancel))
+            .unwrap()
+            .into_iter()
+            .map(|i| nodes[i])
+            .collect()
+    }
+
     #[test]
     fn a_coarse_grid_refines_to_keep_blends_at_a_narrow_stepover() {
         let diamond = vec![[0., 6., -1.], [6., 0., -1.], [12., 6., -1.], [6., 12., -1.]];
@@ -940,6 +1083,98 @@ mod smoothing_tests {
     }
 
     #[test]
+    fn fairing_attenuates_ripples_within_the_original_pass_tolerance() {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let ring = vec![
+            [0., 10., -1.],
+            [10., 0., -1.],
+            [20., 10., -1.],
+            [10., 20., -1.],
+        ];
+        let clearing = Clearing::planar(&[ring], &[], 1., 2., 0.5, true, &cancel).unwrap();
+        let grid = vec![true; clearing.nx * clearing.ny];
+        let graph = Graph {
+            nx: clearing.nx,
+            ny: clearing.ny,
+            free: &grid,
+            components: &[],
+        };
+        let walk: Vec<_> = (0..19)
+            .map(|i| Point3 {
+                x: 5. + i as f64 * 0.3,
+                y: 8. + if i % 2 == 0 { 0. } else { 0.16 },
+                z: -1.,
+            })
+            .collect();
+        let indices: Vec<_> = (0..walk.len()).collect();
+        let mut points = walk.clone();
+        clearing
+            .fair_steps(
+                &mut points,
+                &walk,
+                &indices,
+                &graph,
+                &mut Budget::new(&cancel),
+            )
+            .unwrap();
+        let lateral_travel = |points: &[Point3]| {
+            points
+                .windows(2)
+                .map(|edge| (edge[1].y - edge[0].y).abs())
+                .sum::<f64>()
+        };
+        assert!(lateral_travel(&points) < lateral_travel(&walk) / 3.);
+        assert!(points[0].distance(walk[0]) < 1e-12);
+        assert!(points.last().unwrap().distance(*walk.last().unwrap()) < 1e-12);
+        let deviation = clearing.dx.hypot(clearing.dy) / 2.;
+        for (i, pair) in points.windows(2).enumerate() {
+            assert!(follows_walk(&walk[i..=i + 1], pair[0], pair[1], deviation));
+        }
+    }
+
+    #[test]
+    fn fairing_cannot_pull_a_corner_into_a_protected_cell() {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let clearing = Clearing {
+            heights: vec![],
+            nx: 4,
+            ny: 4,
+            dx: 1.,
+            dy: 1.,
+            origin: [0.; 2],
+            spacing: 1,
+            weights: [1; 3],
+            smooth_steps: true,
+            blend_deviation: 0.1,
+            clearance_halo: 0.,
+        };
+        // Both legs pass outside cell (2, 1), touching at its upper left
+        // corner. Unconstrained fairing would cut across that corner.
+        let walk = [(0.5, 1.1), (2., 2.), (4., 2.1)].map(|(x, y)| Point3 { x, y, z: -1. });
+        for blocked in [false, true] {
+            let mut free = [true; 16];
+            free[6] = !blocked;
+            let graph = Graph {
+                nx: 4,
+                ny: 4,
+                free: &free,
+                components: &[],
+            };
+            let mut points = walk;
+            clearing
+                .fair_steps(
+                    &mut points,
+                    &walk,
+                    &[0, 1, 2],
+                    &graph,
+                    &mut Budget::new(&cancel),
+                )
+                .unwrap();
+            assert_eq!(points[1].distance(walk[1]) < 1e-12, blocked);
+        }
+    }
+
+    #[test]
     fn straightening_only_crosses_free_cells() {
         let graph = Graph {
             nx: 2,
@@ -947,19 +1182,13 @@ mod smoothing_tests {
             free: &[true, true, true, false],
             components: &[0; 4],
         };
-        for (mut path, expected) in [
+        for (path, expected) in [
             (vec![0, 1, 4], vec![0, 4]),
             (vec![4, 1, 0], vec![4, 0]),
             (vec![4, 5, 8], vec![4, 5, 8]),
             (vec![8, 5, 4], vec![8, 5, 4]),
         ] {
-            graph
-                .straighten_steps(
-                    &mut path,
-                    [1.; 2],
-                    &mut Budget::new(&std::sync::atomic::AtomicBool::new(false)),
-                )
-                .unwrap();
+            let path = straighten(&graph, &path, &std::sync::atomic::AtomicBool::new(false));
             assert_eq!(path, expected);
         }
     }
@@ -977,10 +1206,7 @@ mod smoothing_tests {
                 free: &free,
                 components: &[0; 16],
             };
-            let mut path = stair.to_vec();
-            graph
-                .straighten_steps(&mut path, [1.; 2], &mut Budget::new(&cancel))
-                .unwrap();
+            let path = straighten(&graph, &stair, &cancel);
             assert_eq!(path == [0, 18], !obstructed);
             assert!(path
                 .windows(2)
