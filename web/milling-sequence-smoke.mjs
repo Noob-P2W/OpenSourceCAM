@@ -23,8 +23,13 @@ try{
   const {Viewport}=await import('./viewport.js');const c=document.createElement('canvas');c.style.cssText='position:fixed;left:0;top:0;width:320px;height:320px';document.body.append(c);const v=new Viewport(c,()=>{},()=>{});v.controls={axes:false,grid:false};v.setView('top');
   const mesh={vertices:[[0,0,0],[20,0,0],[20,20,0],[0,20,0],[9,9,2],[11,9,2],[11,11,2],[9,11,2]],triangles:[[0,1,2],[0,2,3],[4,5,6],[4,6,7]]};
   const p={stock:{width:20,height:20,thickness:5},part:{visible:true,units:'millimetres',offset:[0,0,0],geometry:{mesh}},operations:[{strategy:'surface_smooth'}]};const path={seconds:1,moves:[{from:[3,10,0],to:[17,10,0],operation:0,rapid:false,start_seconds:0,end_seconds:1}]};v.draw(p,[],path,100,null,null,false,false);
-  const pixels=point=>{const [x,y]=v.projectWorld(point),data=new Uint8Array(5*5*4);v.gl.readPixels(Math.round(x)-2,c.height-Math.round(y)-2,5,5,v.gl.RGBA,v.gl.UNSIGNED_BYTE,data);let count=0;for(let i=0;i<data.length;i+=4)if(data[i]<15&&Math.abs(data[i+1]-107)<20&&Math.abs(data[i+2]-84)<20)count++;return count};
-  const result={onFace:pixels([5,10,0]),behindBoss:pixels([10,10,0])};v.three.dispose();c.remove();return result;
+  const pixels=point=>{const [x,y]=v.projectWorld(point),data=new Uint8Array(5*5*4);v.gl.readPixels(Math.round(x)-2,c.height-Math.round(y)-2,5,5,v.gl.RGBA,v.gl.UNSIGNED_BYTE,data);return data};
+  // Compare against the same view with its path hidden. Antialiasing blends
+  // line and surface colors, so a visible line may have no fully green pixels.
+  const points=[[5,10,0],[10,10,0]],withPath=points.map(pixels);
+  v.draw(p,[],null,100,null,null,false,false);
+  const [onFace,behindBoss]=points.map(pixels).map((without,i)=>without.reduce((n,channel,j)=>n+Number(Math.abs(channel-withPath[i][j])>8),0));
+  v.three.dispose();c.remove();return {onFace,behindBoss};
  });assert.ok(overlay.onFace>0,'Coplanar finishing cuts must remain visible');assert.equal(overlay.behindBoss,0,'Raised geometry must still occlude hidden cuts');
  assert.deepEqual(errors,[]);console.log('PASS: same-tool finishing stays down, sampled rough/finish stock colors, configured tool-change travel and timed exchange in playback');
 }finally{await browser.close()}
