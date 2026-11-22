@@ -21,6 +21,7 @@ pub mod post;
 pub mod process;
 mod roughing;
 pub mod session;
+mod step_edges;
 pub mod stock;
 pub mod surface;
 pub mod tool_library;

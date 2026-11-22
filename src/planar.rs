@@ -68,23 +68,14 @@ pub fn raster(
 ) -> Result<Vec<[[f64; 2]; 2]>, String> {
     raster_obstacles(rings, radius, step, &[])
 }
-pub fn raster_obstacles(
-    rings: &[Vec<[f64; 3]>],
-    radius: f64,
-    step: f64,
-    obstacles: &[Vec<[f64; 3]>],
-) -> Result<Vec<[[f64; 2]; 2]>, String> {
+pub(crate) fn validate_rings(rings: &[Vec<[f64; 3]>]) -> Result<usize, String> {
     let n = rings.iter().map(Vec::len).sum::<usize>();
     if rings.is_empty()
         || rings.iter().any(|r| r.len() < 3)
         || n > 2000
-        || !radius.is_finite()
-        || radius <= 0.
-        || !step.is_finite()
-        || step <= 0.
         || rings.iter().flatten().flatten().any(|v| !v.is_finite())
     {
-        return Err("Select finite bounded face loops with at most 2,000 edges and a positive cutter/stepover".into());
+        return Err("Select finite bounded face loops with at most 2,000 edges".into());
     }
     for (ri, ring) in rings.iter().enumerate() {
         if ri > 0
@@ -115,6 +106,19 @@ pub fn raster_obstacles(
                 }
             }
         }
+    }
+    Ok(n)
+}
+
+pub fn raster_obstacles(
+    rings: &[Vec<[f64; 3]>],
+    radius: f64,
+    step: f64,
+    obstacles: &[Vec<[f64; 3]>],
+) -> Result<Vec<[[f64; 2]; 2]>, String> {
+    let n = validate_rings(rings)?;
+    if !radius.is_finite() || radius <= 0. || !step.is_finite() || step <= 0. {
+        return Err("Choose a positive cutter diameter and stepover".into());
     }
     let lo = rings
         .iter()

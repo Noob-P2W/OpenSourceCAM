@@ -66,6 +66,7 @@ fn area_paths(
     level: f64,
     cancel: &AtomicBool,
     entry: Option<Point3>,
+    rest: Option<&crate::material::RemainingStock>,
 ) -> Result<Vec<Vec<Span>>, String> {
     let (mut rings, z) = face_region(op)?;
     let contour_clearing = op.strategy == Strategy::StockRough && op.has_chain();
@@ -130,8 +131,11 @@ fn area_paths(
         return Err("2D offset clearing bottom must be at or below stock top".into());
     }
     let mut budget = crate::surface::Budget::new(cancel);
-    if contour_clearing
-        && p.process == crate::process::Process::Milling
+    if p.process == crate::process::Process::Milling
+        && (contour_clearing
+            || op.strategy == Strategy::Pocket
+            || (op.strategy == Strategy::AreaRough
+                && (op.model_link.is_some() || op.settings.rest_machining)))
         && obstacles
             .iter()
             .chain(&rings[1..])
@@ -139,8 +143,14 @@ fn area_paths(
             .sum::<usize>()
             <= crate::exterior::MAX_EDGES
     {
+        if !contour_clearing {
+            crate::planar::validate_rings(&rings)?;
+        }
         obstacles.extend(rings.drain(1..));
-        return crate::exterior::paths(p, op, &rings[0], &obstacles, level, &mut budget);
+        return crate::exterior::paths(p, op, &rings[0], &obstacles, level, rest, &mut budget);
+    }
+    if op.settings.rest_machining {
+        return Err("Rest machining exceeds the planar vector geometry limit".into());
     }
     let mut clearing = crate::roughing::Clearing::planar(
         &rings,
@@ -157,8 +167,7 @@ fn area_paths(
     let reverse = op.settings.direction == Direction::Clockwise;
     clearing.layer_from(level, reverse, &mut budget, entry)
 }
-fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
-    let points = curve(op);
+fn compensation(p: &Project, op: &Operation) -> Result<(f64, bool), String> {
     let tool = p.operation_tool(op)?;
     let radius = if op.strategy == Strategy::Chamfer {
         let record = p
@@ -176,13 +185,61 @@ fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
         contact - width
     } else if op.strategy == Strategy::Trace && op.settings.trace_offset {
         tool.diameter / 2.
+    } else if matches!(
+        op.strategy,
+        Strategy::InsideProfile | Strategy::OutsideProfile
+    ) {
+        let inward = if !op.settings.closed && op.model_link.is_some() {
+            !op.settings.outside
+        } else {
+            op.strategy == Strategy::InsideProfile
+        };
+        return Ok((tool.diameter / 2. + op.settings.radial_allowance, inward));
     } else {
-        return Ok(points);
+        0.
     };
+    Ok((radius, !op.settings.outside))
+}
+
+fn compensated(p: &Project, op: &Operation) -> Result<Vec<[f64; 3]>, String> {
+    let points = curve(op);
+    let (radius, inward) = compensation(p, op)?;
     if radius < 1e-7 {
         return Ok(points);
     }
-    crate::contour::offset(&points, op.settings.closed, radius, !op.settings.outside)
+    crate::contour::offset(&points, op.settings.closed, radius, inward)
+}
+
+fn step_finishing_part<'a>(p: &'a Project, op: &Operation) -> Option<&'a crate::import::Part> {
+    if op.model_link.is_none()
+        || p.process != crate::process::Process::Milling
+        || !matches!(
+            op.strategy,
+            Strategy::InsideProfile | Strategy::OutsideProfile | Strategy::Chamfer
+        )
+    {
+        return None;
+    }
+    p.part.as_ref()
+}
+
+fn step_finishing_spans(
+    p: &Project,
+    op: &Operation,
+    compensated: &[[f64; 3]],
+) -> Result<Option<Vec<Span>>, String> {
+    let Some(part) = step_finishing_part(p, op) else {
+        return Ok(None);
+    };
+    let (distance, inward) = compensation(p, op)?;
+    crate::step_edges::finishing_chain(
+        part,
+        &op.settings.path,
+        compensated,
+        op.settings.closed,
+        inward,
+        distance,
+    )
 }
 pub(super) fn needs_stock_proof(op: &Operation) -> bool {
     !op.settings.precleared
@@ -266,6 +323,50 @@ pub(super) fn verify_stock(
     } else {
         // Face clearing can prove exposure even if a conservative cell straddles
         // the selected edge. Otherwise every referenced cell must be exposed.
+        if let Some(part) = step_finishing_part(p, op) {
+            let points = &op.settings.path;
+            let z = points[0][2];
+            if z >= -cleared_top(p, index) - EPS {
+                return Ok(());
+            }
+            let exact = crate::step_edges::finishing_chain(
+                part,
+                points,
+                points,
+                op.settings.closed,
+                false,
+                0.,
+            )?;
+            if let Some(exact) = exact {
+                let sag = 0.001;
+                let covered = crate::step_edges::proof_chords(&exact, sag).is_some_and(|chords| {
+                    chords.into_iter().all(|[a, b]| {
+                        state.is_clear(
+                            Point3 {
+                                x: a[0],
+                                y: a[1],
+                                z: a[2],
+                            },
+                            Point3 {
+                                x: b[0],
+                                y: b[1],
+                                z: b[2],
+                            },
+                            sag,
+                            0.,
+                        )
+                    })
+                });
+                return if covered {
+                    Ok(())
+                } else {
+                    Err(
+                        "Remaining stock is not proven clear/exposed along the selected STEP edge"
+                            .into(),
+                    )
+                };
+            }
+        }
         let mut points = curve(op);
         if op.settings.closed && !points.is_empty() {
             points.push(points[0]);
@@ -300,7 +401,7 @@ pub(super) fn model_exterior(
     op: &Operation,
     cancel: &AtomicBool,
 ) -> Result<Vec<Vec<Span>>, String> {
-    area_paths(p, op, -op.depth, cancel, None)
+    area_paths(p, op, -op.depth, cancel, None, None)
 }
 pub(super) fn clear_model_exterior(
     chains: &[Vec<Span>],
@@ -335,18 +436,18 @@ fn span_tangent(span: Span) -> [f64; 2] {
     }
 }
 
-fn emit_span(b: &mut Builder, span: Span, smooth: bool, outside: bool) -> Result<(), String> {
-    // Outside offsets reserve a fixed interpolation error for the
+fn emit_span(b: &mut Builder, span: Span, smooth: bool, offset_pass: bool) -> Result<(), String> {
+    // Vector offsets reserve a fixed interpolation error for the
     // cutter-clearance proof, including the G1 approximation.
     let tolerance = b.certificate_error - 0.0002;
-    let tolerance = if outside {
+    let tolerance = if offset_pass {
         tolerance.min(crate::exterior::SAG)
     } else {
         tolerance
     };
     if smooth {
         let tangent = span_tangent(span);
-        let chord = if !outside {
+        let chord = if !offset_pass {
             None
         } else if let Some(arc) = span.arc {
             let [x, y] = [span.from.x - arc.center[0], span.from.y - arc.center[1]];
@@ -377,7 +478,7 @@ fn cut_clearing_spans(
     spans: &[Span],
     b: &mut Builder,
     cancel: &AtomicBool,
-    outside: bool,
+    offset_pass: bool,
 ) -> Result<(), String> {
     // A closed chain may start at a different span boundary without reversing
     // the milling direction or splitting an analytical arc.
@@ -397,7 +498,7 @@ fn cut_clearing_spans(
     };
     let radius = b.cutter.map_or(0., |t| t.radius) + b.certificate_error;
     let spacing = radius.max(0.25);
-    let smooth = outside || spans.iter().any(|span| span.arc.is_some());
+    let smooth = offset_pass || spans.iter().any(|span| span.arc.is_some());
     let mut attached = false;
     let mut air = Vec::new();
     let mut air_length = 0.;
@@ -431,7 +532,7 @@ fn cut_clearing_spans(
             let proof_radius = radius + span.arc.map_or(0., |arc| arc.sag);
             if b.remaining.is_clear(span.from, span.to, proof_radius, 0.) {
                 if let Some(cut) = pending.take() {
-                    emit_span(b, cut, smooth, outside)?;
+                    emit_span(b, cut, smooth, offset_pass)?;
                 }
                 if attached {
                     air_length += span.from.distance(span.to);
@@ -450,7 +551,7 @@ fn cut_clearing_spans(
                 && (air_length <= 4. * radius || !b.cleared_link(span.from, air_length, !smooth)?)
             {
                 for &link in &air {
-                    emit_span(b, link, smooth, outside)?;
+                    emit_span(b, link, smooth, offset_pass)?;
                 }
             }
             air.clear();
@@ -462,10 +563,10 @@ fn cut_clearing_spans(
             pending = Some(span);
         }
         if let Some(cut) = pending {
-            emit_span(b, cut, smooth, outside)?;
+            emit_span(b, cut, smooth, offset_pass)?;
         }
     }
-    if !outside {
+    if !offset_pass {
         b.retract()?;
     }
     Ok(())
@@ -549,7 +650,7 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
             if (-z / tool.step_down).ceil() > MAX_LAYERS as f64 {
                 return Err("Too many area roughing depth passes".into());
             }
-            area_paths(p, op, z, &AtomicBool::new(false), None)?;
+            area_paths(p, op, z, &AtomicBool::new(false), None, None)?;
         } else {
             crate::planar::raster(&rings, tool.diameter / 2., tool.diameter * tool.step_over)?;
         }
@@ -632,25 +733,11 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
         if op.strategy.is_curve() && op.settings.radial_allowance != 0. {
             return Err("Tool-center chains do not use radial stock allowance".into());
         }
-        let mut points = compensated(p, op)?;
+        let points = compensated(p, op)?;
         if points.iter().flatten().any(|v| !v.is_finite()) {
             return Err("Chain coordinates must be finite".into());
         }
-        if matches!(
-            op.strategy,
-            Strategy::InsideProfile | Strategy::OutsideProfile
-        ) {
-            points = crate::contour::offset(
-                &points,
-                op.settings.closed,
-                tool.diameter / 2. + op.settings.radial_allowance,
-                if !op.settings.closed && op.model_link.is_some() {
-                    !op.settings.outside
-                } else {
-                    op.strategy == Strategy::InsideProfile
-                },
-            )?;
-        }
+
         if points.len() < 2 {
             return Err("Select a chain with at least two points".into());
         }
@@ -675,6 +762,24 @@ pub(super) fn validate(p: &Project, op: &Operation, index: usize) -> Result<(), 
                 .any(|q| q[0] < 0. || q[1] < 0. || q[0] > p.stock.width || q[1] > p.stock.height)
         {
             return Err("The retained contour extends outside stock".into());
+        }
+        if op.strategy == Strategy::InsideProfile {
+            if let Some(spans) = step_finishing_spans(p, op, &points)? {
+                let sag = 0.0002;
+                // The convex stock contains each swept chord, including the
+                // chordal allowance that encloses its exact arc.
+                if !crate::step_edges::proof_chords(&spans, sag).is_some_and(|chords| {
+                    chords.iter().flatten().all(|q| {
+                        p.stock
+                            .contains_disc([q[0], q[1], q[2] - depth], radius + sag)
+                    })
+                }) {
+                    return Err(
+                        "Circular STEP contour cutter footprint extends outside the physical blank"
+                            .into(),
+                    );
+                }
+            }
         }
         for q in points {
             if -depth + q[2] < -p.stock.thickness - EPS || -depth + q[2] > clearance {
@@ -923,8 +1028,16 @@ pub(super) fn generate(
                     level,
                     cancel,
                     op.settings.optimize_links.then_some(b.position),
+                    op.settings.rest_machining.then_some(&b.remaining),
                 )? {
-                    cut_clearing_spans(&chain, b, cancel, op.strategy == Strategy::StockRough)?;
+                    cut_clearing_spans(
+                        &chain,
+                        b,
+                        cancel,
+                        op.strategy != Strategy::AreaRough
+                            || op.model_link.is_some()
+                            || op.settings.rest_machining,
+                    )?;
                 }
                 continue;
             }
@@ -962,21 +1075,8 @@ pub(super) fn generate(
     let layers = (((depth - top) / tool.step_down).ceil() as usize).max(1);
     if op.has_chain() {
         let mut points = compensated(p, op)?;
-        if matches!(
-            op.strategy,
-            Strategy::InsideProfile | Strategy::OutsideProfile
-        ) {
-            points = crate::contour::offset(
-                &points,
-                op.settings.closed,
-                tool.diameter / 2. + op.settings.radial_allowance,
-                if !op.settings.closed && op.model_link.is_some() {
-                    !op.settings.outside
-                } else {
-                    op.strategy == Strategy::InsideProfile
-                },
-            )?;
-        }
+
+        let mut exact = step_finishing_spans(p, op, &points)?;
         let area = (0..points.len())
             .map(|i| {
                 let a = points[i];
@@ -998,6 +1098,15 @@ pub(super) fn generate(
             op.settings.direction == Direction::Clockwise
         };
         if reverse {
+            if let Some(spans) = &mut exact {
+                spans.reverse();
+                for span in spans {
+                    std::mem::swap(&mut span.from, &mut span.to);
+                    if let Some(arc) = &mut span.arc {
+                        arc.sweep = -arc.sweep;
+                    }
+                }
+            }
             if op.settings.closed {
                 points[1..].reverse();
             } else {
@@ -1012,6 +1121,24 @@ pub(super) fn generate(
                 })
                 .unwrap();
             points.rotate_left(nearest);
+        }
+        if let Some(spans) = exact.as_mut().filter(|_| op.settings.closed) {
+            if spans.len() == 1 {
+                let span = &mut spans[0];
+                if let Some(arc) = &span.arc {
+                    let phase = (points[0][1] - arc.center[1]).atan2(points[0][0] - arc.center[0]);
+                    let r = (span.from.x - arc.center[0]).hypot(span.from.y - arc.center[1]);
+                    span.from.x = arc.center[0] + r * phase.cos();
+                    span.from.y = arc.center[1] + r * phase.sin();
+                    span.to = span.from;
+                }
+            } else if let Some((start, _)) = spans.iter().enumerate().min_by(|(_, a), (_, c)| {
+                b.position
+                    .distance(a.from)
+                    .total_cmp(&b.position.distance(c.from))
+            }) {
+                spans.rotate_left(start);
+            }
         }
         let target = contour_target(op);
         let axial_top = -material_top(p, index);
@@ -1036,8 +1163,19 @@ pub(super) fn generate(
             } else {
                 -(top + layer as f64 * tool.step_down).min(depth)
             };
-            let first = points[0];
-            b.enter(first[0], first[1], z + first[2])?;
+            let first = if let Some(spans) = &exact {
+                Point3 {
+                    z: z + spans[0].from.z,
+                    ..spans[0].from
+                }
+            } else {
+                Point3 {
+                    x: points[0][0],
+                    y: points[0][1],
+                    z: z + points[0][2],
+                }
+            };
+            b.enter(first.x, first.y, first.z)?;
             let passes = if layer == layers {
                 1 + op.settings.spring_passes
             } else {
@@ -1047,13 +1185,20 @@ pub(super) fn generate(
                 if layer == layers {
                     b.feed = op.settings.finish_feed.unwrap_or(tool.feed)
                 }
-                for q in points.iter().skip(1) {
-                    b.feed_cut(q[0], q[1], z + q[2])?
+                if let Some(spans) = &exact {
+                    for span in spans {
+                        emit_span(b, span.at_z(first.z), false, false)?;
+                    }
+                } else {
+                    for q in points.iter().skip(1) {
+                        b.feed_cut(q[0], q[1], z + q[2])?;
+                    }
+                    if op.settings.closed {
+                        b.feed_cut(first.x, first.y, first.z)?;
+                    }
                 }
-                if op.settings.closed {
-                    b.feed_cut(first[0], first[1], z + first[2])?
-                } else if pass + 1 < passes {
-                    b.enter(first[0], first[1], z + first[2])?
+                if !op.settings.closed && pass + 1 < passes {
+                    b.enter(first.x, first.y, first.z)?;
                 }
             }
             b.feed = tool.feed;

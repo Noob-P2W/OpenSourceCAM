@@ -706,6 +706,31 @@ fn validate_setup_geometry(project: &Project) -> Result<(), String> {
         .filter(|(_, op)| op.enabled)
     {
         let check = || -> Result<(), String> {
+            if op.settings.rest_machining {
+                if project.process != crate::process::Process::Milling
+                    || !milling2d::planar_rough(op)
+                {
+                    return Err("Rest machining requires a planar offset-clearing operation".into());
+                }
+                let diameter = project.operation_tool(op)?.diameter;
+                if !project.operations[..index].iter().any(|previous| {
+                    previous.enabled
+                        && matches!(
+                            previous.strategy,
+                            Strategy::Pocket
+                                | Strategy::CircularPocket
+                                | Strategy::StockRough
+                                | Strategy::AreaRough
+                                | Strategy::SurfaceRough
+                                | Strategy::SmoothRough
+                        )
+                        && project
+                            .operation_tool(previous)
+                            .is_ok_and(|tool| tool.diameter > diameter + EPS)
+                }) {
+                    return Err("Rest machining needs an earlier enabled roughing operation with a larger cutter".into());
+                }
+            }
             if op.strategy.is_new_2d() || op.has_chain() {
                 milling2d::validate(project, op, index)?;
                 return Ok(());

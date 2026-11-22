@@ -54,6 +54,8 @@ pub struct Settings {
     pub stock_clearance: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clearing_boundary: Option<ClearingBoundary>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub rest_machining: bool,
     pub height_offset: Option<f64>,
     pub milling_mode: Option<MillingMode>,
     pub islands: Vec<Vec<[f64; 3]>>,

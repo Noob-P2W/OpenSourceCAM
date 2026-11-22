@@ -576,3 +576,179 @@ fn outside_offsets_protect_neighboring_geometry_only_at_intersecting_depths() {
     assert!(open_above_neighbor);
     assert!(bottom_cuts > 0);
 }
+
+#[test]
+fn selected_pocket_vectors_keep_islands_and_emit_round_offsets() {
+    let mut p = cases::numeric(Strategy::Pocket);
+    let settings = &mut p.operations[0].settings;
+    settings.path = vec![
+        [8., 10., -3.],
+        [49., 10., -3.],
+        [49., 51., -3.],
+        [43., 59., -3.],
+        [8., 59., -3.],
+    ];
+    settings.closed = true;
+    settings.islands = vec![vec![
+        [22., 20., -3.],
+        [33., 20., -3.],
+        [33., 42., -3.],
+        [22., 42., -3.],
+    ]];
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    let path = cam::generate(&p).unwrap();
+    assert!(!path.arcs.is_empty());
+    let island = &p.operations[0].settings.islands[0];
+    for cut in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        let from = [cut.from.x, cut.from.y, cut.from.z];
+        let to = [cut.to.x, cut.to.y, cut.to.z];
+        assert!(!opensourcecam::planar::inside([to[0], to[1]], island));
+        for (&a, &b) in island.iter().zip(island.iter().cycle().skip(1)) {
+            assert!(opensourcecam::planar::segment_distance(from, to, a, b) >= radius - 1e-7);
+        }
+    }
+}
+
+#[test]
+fn rest_machining_replans_from_prior_larger_tool_stock() {
+    use opensourcecam::tool_library::{LibraryTool, ToolKind};
+    let mut p = cases::numeric(Strategy::Pocket);
+    p.tool_library.tools[0]
+        .geometry
+        .insert("diameter".into(), 12.);
+    let mut small = LibraryTool::new(2, 2, ToolKind::FlatEndMill);
+    small.geometry.insert("diameter".into(), 4.);
+    p.tool_library.tools.push(small);
+    p.operations[0].settings.path = vec![
+        [15., 20., -3.],
+        [45., 20., -3.],
+        [45., 60., -3.],
+        [15., 60., -3.],
+    ];
+    p.operations[0].settings.closed = true;
+    let mut rest = p.operations[0].clone();
+    rest.tool_id = Some(2);
+    rest.preset_id = None;
+    rest.settings.rest_machining = true;
+    p.operations.push(rest);
+    let rest_path = cam::generate(&p).unwrap();
+    let mut full = p.clone();
+    full.operations[1].settings.rest_machining = false;
+    let full_path = cam::generate(&full).unwrap();
+    let measure = |path: &cam::Toolpath| {
+        path.moves
+            .iter()
+            .filter(|m| m.operation == 1 && m.motion == Motion::Cut)
+            .map(|m| m.from.distance(m.to))
+            .sum::<f64>()
+    };
+    assert!(
+        measure(&rest_path) > 0.,
+        "A smaller cutter must reach residual stock"
+    );
+    assert!(rest_path.moves.len() < full_path.moves.len());
+    assert!(rest_path.estimated_seconds <= full_path.estimated_seconds + 0.1);
+    assert!(rest_path
+        .moves
+        .iter()
+        .any(|m| m.operation == 1 && m.motion == Motion::Cut && m.to.z == -3.));
+    p.operations[0].enabled = false;
+    assert!(cam::generate(&p)
+        .unwrap_err()
+        .contains("earlier enabled roughing operation"));
+}
+
+#[test]
+fn finishing_posts_the_exact_circle_retained_in_a_step_file() {
+    let mut p = cases::numeric(Strategy::InsideProfile);
+    p.tool_library.tools[0]
+        .geometry
+        .insert("diameter".into(), 4.);
+    let mut part = block();
+    part.offset[2] = -12.;
+    let geometry = Arc::make_mut(&mut part.geometry);
+    geometry.format = SourceFormat::Step;
+    geometry.cad_source = Some(include_str!("fixtures/features-blind-hole.step").into());
+    let vertices: Vec<[f64; 3]> = (0..24)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * f64::from(i) / 24.;
+            [30. + 3. * phase.cos(), 25. + 3. * phase.sin(), 12.]
+        })
+        .collect();
+    geometry.mesh.vertices = vertices.clone();
+    geometry.mesh.triangles = (1..23).map(|i| [0, i, i + 1]).collect();
+    let op = &mut p.operations[0];
+    op.depth = 1.;
+    op.settings.path = vertices.iter().map(|&p| part.point(p)).collect();
+    op.settings.closed = true;
+    op.settings.height_offset = Some(-1.);
+    opensourcecam::machining::link(op, &part);
+    p.part = Some(part);
+    let path = cam::generate(&p).unwrap();
+    assert_eq!(path.arcs.len(), 2);
+    for arc in &path.arcs {
+        assert_eq!(arc.center, [30., 25.]);
+        let start = path.moves[arc.start].from;
+        assert!(((start.x - 30.).hypot(start.y - 25.) - 1.).abs() < 1e-8);
+    }
+    let circular = |line: &str| line.starts_with("G2 ") || line.starts_with("G3 ");
+    assert_eq!(
+        post::gcode(&p)
+            .unwrap()
+            .lines()
+            .filter(|l| circular(l))
+            .count(),
+        2
+    );
+    p.post.linearize_arcs = true;
+    assert!(!post::gcode(&p).unwrap().lines().any(circular));
+}
+
+#[test]
+fn finishing_preserves_a_tangent_step_arc_between_straight_edges() {
+    let mut p = cases::numeric(Strategy::OutsideProfile);
+    p.tool_library.tools[0]
+        .geometry
+        .insert("diameter".into(), 4.);
+    let mut part = block();
+    let geometry = Arc::make_mut(&mut part.geometry);
+    geometry.format = SourceFormat::Step;
+    geometry.cad_source = Some(
+        "ISO-10303-21;DATA;
+#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#2=EDGE_CURVE('',#3,#4,#5,.T.);
+#3=VERTEX_POINT('',#6);
+#4=VERTEX_POINT('',#7);
+#5=CIRCLE('',#8,5.);
+#6=CARTESIAN_POINT('',(20.,20.,0.));
+#7=CARTESIAN_POINT('',(25.,25.,0.));
+#8=AXIS2_PLACEMENT_3D('',#9,#10,$);
+#9=CARTESIAN_POINT('',(20.,25.,0.));
+#10=DIRECTION('',(0.,0.,1.));
+ENDSEC;END-ISO-10303-21;"
+            .into(),
+    );
+    let mut boundary = vec![[12., 20., 0.]];
+    for i in 0..=8 {
+        let a = std::f64::consts::FRAC_PI_2 * (f64::from(i) / 8. - 1.);
+        boundary.push([20. + 5. * a.cos(), 25. + 5. * a.sin(), 0.]);
+    }
+    boundary.push([25., 35., 0.]);
+    geometry.mesh.vertices = boundary.clone();
+    geometry.mesh.triangles = (1..10).map(|i| [0, i, i + 1]).collect();
+    let op = &mut p.operations[0];
+    op.depth = 1.;
+    op.settings.path = boundary;
+    op.settings.closed = false;
+    op.settings.outside = true;
+    op.settings.height_offset = Some(-1.);
+    opensourcecam::machining::link(op, &part);
+    p.part = Some(part);
+    let path = cam::generate(&p).unwrap();
+    assert_eq!(path.arcs.len(), 1);
+    let arc = &path.arcs[0];
+    assert_eq!(arc.center, [20., 25.]);
+    assert!((arc.sweep.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+    let start = path.moves[arc.start].from;
+    assert!(((start.x - 20.).hypot(start.y - 25.) - 7.).abs() < 1e-8);
+}

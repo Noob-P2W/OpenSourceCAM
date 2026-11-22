@@ -440,6 +440,28 @@ Software settings includes a manual Check for updates action, with current-versi
 download, offline and failure status. A waiting update uses the existing workspace
 autosave and activation flow through Save workspace and update.
 
+## Vector pockets, rest machining and STEP finishing
+
+Selected 2D pocket regions use direct inward offsets with round joins. The
+planner subtracts islands and the model geometry above each cutting layer.
+Model-linked 2D offset clearing also uses vector passes within its geometry
+budget. Existing numeric pocket entry cycles retain their entry behavior.
+
+Rest machining is available in Passes for selected pockets, selected Outside
+clearing contours and 2D offset clearing. Add an earlier enabled roughing
+operation with a larger cutter. The rest operation clips its offset passes to
+where the current cutter can reach material that may remain, using the
+conservative stock from preceding operations in the same setup. Uncertain cells
+are kept in the rest region. Rest machining requires the vector planner.
+
+Linked 2D contour and Chamfer milling preserve supported horizontal circular
+edges from the original metric STEP when the imported mesh boundary confirms
+placement and trim. This includes complete circles, partial arcs and verified
+tangent line/arc chains. The usual stock, fixture and NC preflight still
+applies. Unsupported placements, source units or joins follow the existing
+compensated mesh chain. G2/G3 and supported G5 posts use the shared arc stream.
+G1 posts sample it at the operation chord tolerance.
+
 ## Planar outside clearing and automatic calculation
 
 Outside clearing can pick a closed horizontal exterior/island boundary, like 2D

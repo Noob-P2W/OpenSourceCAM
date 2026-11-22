@@ -1,7 +1,8 @@
-//! Direct planar offsets for clearing around a selected island.
+//! Direct planar offsets for pocket, outside and rest clearing.
 use crate::{
     cam::Point3,
-    model::{Operation, Project},
+    material::RemainingStock,
+    model::{Operation, Project, Strategy},
     operation::Direction,
     roughing::{follows_walk, CornerArc, Span},
     surface::Budget,
@@ -38,6 +39,9 @@ fn polygon(points: &[[f64; 3]]) -> Path64 {
 }
 
 fn offset(paths: &Paths64, delta: f64, join: JoinType, end: EndType) -> Result<Paths64, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut engine = ClipperOffset::new(2., SAG * SCALE, false, false);
     engine.add_paths(paths, join, end);
     let mut result = Paths64::new();
@@ -48,9 +52,13 @@ fn offset(paths: &Paths64, delta: f64, join: JoinType, end: EndType) -> Result<P
     Ok(result)
 }
 
-fn protect(obstacles: &[Vec<[f64; 3]>], budget: &mut Budget<'_>) -> Result<Paths64, String> {
+fn protect(
+    obstacles: &[Vec<[f64; 3]>],
+    outside: bool,
+    budget: &mut Budget<'_>,
+) -> Result<Paths64, String> {
     if obstacles.iter().map(Vec::len).sum::<usize>() > MAX_EDGES {
-        return Err("Outside clearing exceeds its projected-edge limit".into());
+        return Err("Offset clearing exceeds its projected-edge limit".into());
     }
     let mut areas = Paths64::new();
     let mut lines = Paths64::new();
@@ -64,7 +72,7 @@ fn protect(obstacles: &[Vec<[f64; 3]>], budget: &mut Budget<'_>) -> Result<Paths
             .map(|(a, b)| a.x as i128 * b.y as i128 - b.x as i128 * a.y as i128)
             .sum();
         if area == 0 {
-            if i == 0 {
+            if outside && i == 0 {
                 return Err("Select a closed outside boundary with nonzero area".into());
             }
             // A vertical projected face may be only a line. Keep it as a thin
@@ -86,6 +94,9 @@ fn protect(obstacles: &[Vec<[f64; 3]>], budget: &mut Budget<'_>) -> Result<Paths
         // Square joins give the thin projection a small conservative width.
         areas.extend(offset(&lines, 4., JoinType::Square, EndType::Square)?);
     }
+    if areas.is_empty() {
+        return Ok(areas);
+    }
     let mut engine = Clipper64::new();
     engine.add_subject(&areas);
     let mut union = Paths64::new();
@@ -93,7 +104,7 @@ fn protect(obstacles: &[Vec<[f64; 3]>], budget: &mut Budget<'_>) -> Result<Paths
         || union.is_empty()
         || vertices(&union) > MAX_EDGES
     {
-        return Err("Could not construct the protected Outside clearing region".into());
+        return Err("Could not construct the protected offset clearing region".into());
     }
     Ok(union)
 }
@@ -104,33 +115,47 @@ pub(crate) fn paths(
     work: &[[f64; 3]],
     obstacles: &[Vec<[f64; 3]>],
     z: f64,
+    rest: Option<&RemainingStock>,
     budget: &mut Budget<'_>,
 ) -> Result<Vec<Vec<Span>>, String> {
+    let outside = op.strategy == Strategy::StockRough;
     let tool = project.operation_tool(op)?;
     let radius = tool.diameter / 2. + op.settings.radial_allowance;
     let stepover = tool.diameter * tool.step_over.min(0.5);
     let blend = (stepover * 0.05).min(0.045);
     let step = stepover * 0.9;
     let first = radius + RESERVE + blend;
-    let ring = polygon(work);
-    let [lo, hi] = [ring[0], ring[2]];
-    let width = (hi.x - lo.x).min(hi.y - lo.y) as f64 / SCALE;
+    let mut ring = polygon(work);
+    if !is_positive(&ring) {
+        ring.reverse();
+    }
+    let min = |coordinate: fn(&Point64) -> i64| ring.iter().map(coordinate).min().unwrap();
+    let max = |coordinate: fn(&Point64) -> i64| ring.iter().map(coordinate).max().unwrap();
+    let bounds = Rect64::new(min(|p| p.x), min(|p| p.y), max(|p| p.x), max(|p| p.y));
+    let width = bounds.width().min(bounds.height()) as f64 / SCALE;
+    let boundary = vec![ring];
     let count = ((width / 2. - first) / step).ceil().max(0.) as usize;
     if count > MAX_LEVELS {
         return Err(
-            "Outside clearing exceeds its pass limit; increase stepover or split the setup".into(),
+            "Offset clearing exceeds its pass limit; increase stepover or split the setup".into(),
         );
     }
-    let protected = protect(obstacles, budget)?;
+    let protected = protect(obstacles, outside, budget)?;
     if count.saturating_mul(vertices(&protected)) > MAX_WORK {
         return Err(
-            "Outside clearing exceeds its calculation budget; increase stepover or split the setup"
+            "Offset clearing exceeds its calculation budget; increase stepover or split the setup"
                 .into(),
         );
     }
     let stock_x = (project.stock.width * SCALE).ceil() as i64;
     let stock_y = (project.stock.height * SCALE).ceil() as i64;
     let reverse = op.settings.direction == Direction::Clockwise;
+    let rest_mask = rest
+        .map(|stock| rest_mask(stock, z, radius, budget))
+        .transpose()?;
+    if rest_mask.as_ref().is_some_and(Vec::is_empty) {
+        return Ok(Vec::new());
+    }
     let mut reachable = Paths64::new();
     let mut result = Vec::new();
     let mut total = 0;
@@ -138,55 +163,37 @@ pub(crate) fn paths(
         budget.tick()?;
         let delta = (first + level as f64 * step) * SCALE;
         let blocked = offset(&protected, delta, JoinType::Round, EndType::Polygon)?;
-        if blocked.is_empty() {
-            return Err("Outside clearing lost the protected region during offsetting".into());
+        if !protected.is_empty() && blocked.is_empty() {
+            return Err("Offset clearing lost protected geometry".into());
         }
-        let d = delta.ceil() as i64;
-        let limits = Rect64::new(lo.x + d, lo.y + d, hi.x - d, hi.y - d);
-        let mut engine = Clipper64::new();
-        engine.add_subject(&vec![limits.as_path()]);
-        engine.add_clip(&blocked);
-        let mut free = PolyTree64::new();
-        if !engine.execute_tree(
-            ClipType::Difference,
-            FillRule::NonZero,
-            &mut free,
-            &mut Vec::new(),
-        ) {
-            return Err(
-                "Could not subtract protected geometry from the Outside clearing passes".into(),
-            );
-        }
-        let mut rings = Paths64::new();
-        for face in poly_tree_to_faces64(&free) {
-            if level > 0
-                || face
-                    .outer
-                    .iter()
-                    .any(|p| p.x < 0 || p.y < 0 || p.x > stock_x || p.y > stock_y)
-            {
-                rings.push(face.outer);
-                rings.extend(face.holes);
-            }
-        }
-        if level == 0 {
-            reachable.clone_from(&rings);
+        let limits = if outside {
+            let d = delta.ceil() as i64;
+            vec![Rect64::new(
+                bounds.left + d,
+                bounds.top + d,
+                bounds.right - d,
+                bounds.bottom - d,
+            )
+            .as_path()]
         } else {
-            // An interior hole disconnected at cutter radius is not an
-            // outside-clearing region, even after neighboring offsets merge.
-            let mut engine = Clipper64::new();
-            engine.add_subject(&rings);
-            engine.add_clip(&reachable);
-            if !engine.execute(ClipType::Intersection, FillRule::NonZero, &mut rings, None) {
-                return Err("Could not retain exterior-connected Outside clearing passes".into());
-            }
+            offset(&boundary, -delta, JoinType::Round, EndType::Polygon)?
+        };
+        let mut rings = free_region(
+            &limits,
+            &blocked,
+            (outside && level == 0).then_some([stock_x, stock_y]),
+        )?;
+        if outside && level == 0 {
+            reachable.clone_from(&rings);
+        } else if outside {
+            rings = intersect(&rings, &reachable)?;
         }
         if rings.is_empty() {
             break;
         }
         total += vertices(&rings);
         if total > MAX_EDGES {
-            return Err("Outside clearing exceeds its path point limit; increase stepover or split the setup".into());
+            return Err("Offset clearing exceeds its path point limit; increase stepover or split the setup".into());
         }
         // Cut the stock edge first at each offset, then the island boundaries.
         rings.sort_by(|a, b| {
@@ -201,16 +208,136 @@ pub(crate) fn paths(
             if reverse {
                 ring.reverse();
             }
-            result.push(spans(&ring, z, blend, budget)?);
+            if let Some(mask) = &rest_mask {
+                ring.push(ring[0]);
+                for clipped in clip_open(ring, mask)? {
+                    result.push(spans(&clipped, z, blend, false, budget)?);
+                }
+            } else {
+                result.push(spans(&ring, z, blend, true, budget)?);
+            }
         }
     }
-    if result.is_empty() {
-        return Err("No cutter-sized region is reachable from the outside of the stock".into());
+    if result.is_empty() && rest.is_none() {
+        return Err(if outside {
+            "No cutter-sized region is reachable from the outside of the stock"
+        } else {
+            "No cutter-sized region remains inside the pocket"
+        }
+        .into());
     }
     Ok(result)
 }
 
-fn spans(ring: &Path64, z: f64, blend: f64, budget: &mut Budget<'_>) -> Result<Vec<Span>, String> {
+fn free_region(
+    limits: &Paths64,
+    blocked: &Paths64,
+    stock: Option<[i64; 2]>,
+) -> Result<Paths64, String> {
+    if limits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut engine = Clipper64::new();
+    engine.add_subject(limits);
+    engine.add_clip(blocked);
+    let mut free = PolyTree64::new();
+    if !engine.execute_tree(
+        ClipType::Difference,
+        FillRule::NonZero,
+        &mut free,
+        &mut Vec::new(),
+    ) {
+        return Err("Could not subtract protected geometry from offset clearing".into());
+    }
+    let mut rings = Paths64::new();
+    for face in poly_tree_to_faces64(&free) {
+        if stock.is_none_or(|[x, y]| {
+            face.outer
+                .iter()
+                .any(|p| p.x < 0 || p.y < 0 || p.x > x || p.y > y)
+        }) {
+            rings.push(face.outer);
+            rings.extend(face.holes);
+        }
+    }
+    Ok(rings)
+}
+
+fn intersect(subject: &Paths64, clip: &Paths64) -> Result<Paths64, String> {
+    let mut engine = Clipper64::new();
+    engine.add_subject(subject);
+    engine.add_clip(clip);
+    let mut output = Paths64::new();
+    if !engine.execute(ClipType::Intersection, FillRule::NonZero, &mut output, None) {
+        return Err("Could not intersect offset clearing regions".into());
+    }
+    Ok(output)
+}
+
+fn rest_mask(
+    stock: &RemainingStock,
+    z: f64,
+    radius: f64,
+    budget: &mut Budget<'_>,
+) -> Result<Paths64, String> {
+    let rectangles = stock.remaining_rectangles(z);
+    if rectangles.len() > MAX_EDGES / 4 {
+        return Err("Remaining stock exceeds the rest machining region limit".into());
+    }
+    let mut boxes = Paths64::with_capacity(rectangles.len());
+    for [[x0, y0], [x1, y1]] in rectangles {
+        budget.tick()?;
+        boxes.push(
+            Rect64::new(
+                (x0 * SCALE).floor() as i64,
+                (y0 * SCALE).floor() as i64,
+                (x1 * SCALE).ceil() as i64,
+                (y1 * SCALE).ceil() as i64,
+            )
+            .as_path(),
+        );
+    }
+    let mut engine = Clipper64::new();
+    engine.add_subject(&boxes);
+    let mut merged = Paths64::new();
+    if !engine.execute(ClipType::Union, FillRule::NonZero, &mut merged, None) {
+        return Err("Could not merge remaining stock regions".into());
+    }
+    // Every potentially useful cutter center lies within one effective
+    // cutter radius of a residual cell, including cells near stock edges.
+    offset(
+        &merged,
+        (radius + RESERVE) * SCALE,
+        JoinType::Round,
+        EndType::Polygon,
+    )
+}
+
+fn clip_open(ring: Path64, mask: &Paths64) -> Result<Paths64, String> {
+    let mut engine = Clipper64::new();
+    engine.add_open_subject(&vec![ring]);
+    engine.add_clip(mask);
+    let mut open = Paths64::new();
+    if !engine.execute(
+        ClipType::Intersection,
+        FillRule::NonZero,
+        &mut Vec::new(),
+        Some(&mut open),
+    ) || vertices(&open) > MAX_EDGES
+    {
+        return Err("Rest toolpath clipping exceeds its geometry limits".into());
+    }
+    open.retain(|path| path.len() > 1);
+    Ok(open)
+}
+
+fn spans(
+    ring: &Path64,
+    z: f64,
+    blend: f64,
+    closed: bool,
+    budget: &mut Budget<'_>,
+) -> Result<Vec<Span>, String> {
     let mut points: Vec<_> = ring
         .iter()
         .map(|p| Point3 {
@@ -219,12 +346,14 @@ fn spans(ring: &Path64, z: f64, blend: f64, budget: &mut Budget<'_>) -> Result<V
             z,
         })
         .collect();
-    let start = (0..points.len()).find(|&i| {
-        points[i].distance(points[(i + 1) % points.len()]) > 4. * CLEANUP
-            && points[i].distance(points[(i + points.len() - 1) % points.len()]) > 4. * CLEANUP
-    });
-    points.rotate_left(start.unwrap_or(0));
-    points.push(points[0]);
+    if closed {
+        let start = (0..points.len()).find(|&i| {
+            points[i].distance(points[(i + 1) % points.len()]) > 4. * CLEANUP
+                && points[i].distance(points[(i + points.len() - 1) % points.len()]) > 4. * CLEANUP
+        });
+        points.rotate_left(start.unwrap_or(0));
+        points.push(points[0]);
+    }
     let mut clean = vec![points[0]];
     let mut begin = 0;
     while begin + 1 < points.len() {
@@ -259,12 +388,13 @@ fn spans(ring: &Path64, z: f64, blend: f64, budget: &mut Budget<'_>) -> Result<V
             i += 1;
         }
     }
-    blend_lines(&result, blend, budget)
+    blend_lines(&result, blend, closed, budget)
 }
 
 fn blend_lines(
     source: &[Span],
     deviation: f64,
+    closed: bool,
     budget: &mut Budget<'_>,
 ) -> Result<Vec<Span>, String> {
     if source.len() < 3 {
@@ -274,7 +404,11 @@ fn blend_lines(
     for i in 0..source.len() {
         budget.tick()?;
         let next = source[(i + 1) % source.len()];
-        blends.push(blend_corner(source[i], next, deviation));
+        blends.push(if closed || i + 1 < source.len() {
+            blend_corner(source[i], next, deviation)
+        } else {
+            None
+        });
     }
     let mut result = Vec::new();
     for (i, &span) in source.iter().enumerate() {

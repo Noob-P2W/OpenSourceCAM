@@ -153,6 +153,38 @@ impl RemainingStock {
         }
         true
     }
+    /// Merge adjacent rows into rectangles of stock that might still be
+    /// present at the requested cut plane. Unknown cells remain material.
+    pub(crate) fn remaining_rectangles(&self, z: f64) -> Vec<[[f64; 2]; 2]> {
+        let mut active = std::collections::BTreeMap::new();
+        let mut result = Vec::new();
+        for (y, row) in self.upper.chunks_exact(self.nx).enumerate() {
+            let mut next = std::collections::BTreeMap::new();
+            let mut begin = None;
+            for (x, height) in row.iter().copied().chain([f64::NEG_INFINITY]).enumerate() {
+                if height > z + 1e-8 {
+                    begin.get_or_insert(x);
+                } else if let Some(start) = begin.take() {
+                    let key = (start, x);
+                    next.insert(key, active.remove(&key).unwrap_or(y));
+                }
+            }
+            for ((x0, x1), y0) in active {
+                result.push([
+                    [x0 as f64 * self.dx, y0 as f64 * self.dy],
+                    [x1 as f64 * self.dx, y as f64 * self.dy],
+                ]);
+            }
+            active = next;
+        }
+        for ((x0, x1), y0) in active {
+            result.push([
+                [x0 as f64 * self.dx, y0 as f64 * self.dy],
+                [x1 as f64 * self.dx, self.ny as f64 * self.dy],
+            ]);
+        }
+        result
+    }
     pub fn remaining_upper_mm3(&self) -> f64 {
         self.upper
             .iter()
