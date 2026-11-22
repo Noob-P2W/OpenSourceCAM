@@ -3,7 +3,7 @@ import * as THREE from './vendor/three.module.js';
 // Presentation only. Full CAM meshes and all physical transforms remain in Rust.
 export class ThreeView {
  constructor(canvas,gl){
-  this.renderer=new THREE.WebGLRenderer({canvas,context:gl,antialias:false,alpha:false,preserveDrawingBuffer:true});
+  this.renderer=new THREE.WebGLRenderer({canvas,context:gl,alpha:false,preserveDrawingBuffer:true});
   this.renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
   this.renderer.toneMapping=THREE.NoToneMapping;
   this.scene=new THREE.Scene();this.camera=new THREE.OrthographicCamera();
