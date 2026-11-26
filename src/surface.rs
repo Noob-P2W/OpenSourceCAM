@@ -76,7 +76,7 @@ pub fn from_stock(
     crate::cam::generate_with_cancel(&result, cancel)?;
     Ok(crate::machining::Plan{project:result,report,notes:vec![
         "Three-axis upper-surface machining: undercuts and inaccessible material remain for another setup.".into(),
-        "The grid conservatively protects the imported triangle mesh. Reduce grid step and stepover for a finer finish; CAD tessellation also limits accuracy.".into(),
+        "Roughing uses a conservative grid. Parallel finishing follows the model's projected cutter reach and checks local entries against remaining stock and fixtures.".into(),
         "Constant-Z offset roughing clears successive depth layers and links connected regions at cutting depth. Separate regions retract. Entry/link cuts can use full tool width; this is conventional offset clearing, without a constant-engagement guarantee.".into(),
         "Backing remains attached and needs a second setup. Stock preview is sampled material removal, not exact solid or machine-kinematics verification.".into(),
     ]})
@@ -221,73 +221,139 @@ impl Field {
         &self,
         project: &Project,
         op: &Operation,
-        budget: &mut Budget,
+        budget: &mut Budget<'_>,
+        mut entry_is_safe: impl FnMut(Point3) -> bool,
     ) -> Result<Vec<Vec<Point3>>, String> {
         let tool = project.operation_tool(op)?;
         let ball = project
             .library_tool(Some(op))?
             .is_some_and(|t| t.kind == ToolKind::BallEndMill);
         let r = tool.diameter * 0.5;
-        let step = op.settings.surface_step.unwrap_or(0.5);
         let count = (project.stock.height / (tool.diameter * tool.step_over.min(0.5)))
             .ceil()
             .max(1.0) as usize;
-        let start = -r - 0.5;
-        let end = project.stock.width + r + 0.5;
         if count > 10000 {
             return Err(
                 "3D finishing exceeds 10,000 rows; increase stepover or split the job".into(),
             );
         }
+        let step = op.settings.surface_step.unwrap_or(0.5);
+        let tolerance = op.settings.path_tolerance.unwrap_or(0.01);
         let mut samples = 0usize;
         let mut rows = Vec::new();
+        let full = [-r - 0.5, project.stock.width + r + 0.5];
+        // Include run-off beyond contact for an entry outside the model.
+        // Outward rounding protects contact near the ends of a posted row.
+        let reach = r + op.settings.radial_allowance + SAFETY + 0.5;
+        let contact = self
+            .contact
+            .as_ref()
+            .expect("Finishing has a contact hierarchy");
         for row in 0..=count {
             let y = project.stock.height * row as f64 / count as f64;
-            let first = self.height([start, start], y, r, ball, op, budget)?;
-            let last = self.height([end, end], y, r, ball, op, budget)?;
-            let mut stack = vec![(start, end, first, last)];
-            let mut spans = Vec::new();
-            while let Some((a, b, ha, hb)) = stack.pop() {
-                budget.tick()?;
-                let h = self.height([a, b], y, r, ball, op, budget)?;
-                if b - a <= step || h - ha.min(hb) <= op.settings.path_tolerance.unwrap_or(0.01) {
-                    samples += 1;
-                    if samples > 100_000 {
-                        return Err("3D finishing exceeds 100,000 adaptive spans; relax surface sampling/contact tolerance or split the job".into());
+            let mut intervals = contact.row_intervals(y, reach, budget)?;
+            if intervals.is_empty() {
+                continue;
+            }
+            let reverse = op.settings.raster == crate::operation::Raster::NegativeX
+                || (op.settings.raster == crate::operation::Raster::Bidirectional && row % 2 == 1);
+            // Stay within the existing boundary for stock-edge approaches.
+            for [a, b] in &mut intervals {
+                *a = a.max(full[0]);
+                *b = b.min(full[1]);
+            }
+            intervals.retain(|[a, b]| b - a > 1e-9);
+            if reverse {
+                intervals.reverse();
+            }
+            let entry = usize::from(reverse);
+            let exit = 1 - entry;
+            let direction = if reverse { 1. } else { -1. };
+            let probe_step = (r / 2.).clamp(0.5, 2.);
+            let mut routes: Vec<[f64; 2]> = Vec::with_capacity(intervals.len());
+            for mut interval in intervals {
+                let lead_limit = routes.last().map_or(full[entry], |previous| previous[exit]);
+                let mut start = None;
+                for sample in 0..=6 {
+                    let candidate = interval[entry] + direction * f64::from(sample) * probe_step;
+                    if (candidate - lead_limit) * direction >= 0. {
+                        break;
                     }
-                    spans.push((a, b, h));
-                } else {
-                    let mid = (a + b) / 2.;
-                    let hm = self.height([mid, mid], y, r, ball, op, budget)?;
-                    stack.push((mid, b, hm, hb));
-                    stack.push((a, mid, ha, hm));
+                    let z = self.height([candidate, candidate], y, r, ball, op, budget)?;
+                    if entry_is_safe(Point3 { x: candidate, y, z }) {
+                        start = Some(candidate);
+                        break;
+                    }
                 }
+                if let Some(start) = start {
+                    interval[entry] = start;
+                } else if let Some(previous) = routes.last_mut() {
+                    // Carry the established entry through the gap when a
+                    // second short entry cannot be proven at the cut depth.
+                    previous[exit] = interval[exit];
+                    continue;
+                } else {
+                    interval[entry] = full[entry];
+                }
+                routes.push(interval);
             }
-            let mut points = Vec::with_capacity(spans.len() + 1);
-            for (i, &(a, _, h)) in spans.iter().enumerate() {
-                points.push(Point3 {
-                    x: a,
-                    y,
-                    z: h.max(if i > 0 { spans[i - 1].2 } else { h }),
-                });
+            let [left, right] = full;
+            let first = self.height([left, left], y, r, ball, op, budget)?;
+            let last = self.height([right, right], y, r, ball, op, budget)?;
+            for [start, end] in routes {
+                // Keep the original subdivision phase so trimming does not
+                // shift sampling near the model.
+                let mut stack = vec![(left, right, first, last)];
+                let mut spans = Vec::new();
+                while let Some((a, b, ha, hb)) = stack.pop() {
+                    budget.tick()?;
+                    if b <= start || a >= end {
+                        continue;
+                    }
+                    let h = self.height([a, b], y, r, ball, op, budget)?;
+                    if b - a <= step || h - ha.min(hb) <= tolerance {
+                        samples += 1;
+                        if samples > 100_000 {
+                            return Err("3D finishing exceeds 100,000 adaptive spans; relax surface sampling/contact tolerance or split the job".into());
+                        }
+                        spans.push((a.max(start), b.min(end), h));
+                    } else {
+                        let mid = (a + b) / 2.;
+                        let hm = self.height([mid, mid], y, r, ball, op, budget)?;
+                        stack.push((mid, b, hm, hb));
+                        stack.push((a, mid, ha, hm));
+                    }
+                }
+                let mut points: Vec<Point3> = Vec::new();
+                for (i, &(a, _, h)) in spans.iter().enumerate() {
+                    let z = h.max(if i > 0 { spans[i - 1].2 } else { h });
+                    // Coalesce identical-height spans into a single linear
+                    // move with the same continuous cutter sweep.
+                    if points.len() >= 2
+                        && points[points.len() - 1].z == z
+                        && points[points.len() - 2].z == z
+                    {
+                        points.pop();
+                    }
+                    points.push(Point3 { x: a, y, z });
+                }
+                let z = spans.last().unwrap().2;
+                let last = points.len() - 1;
+                if last > 0 && points[last].z == z && points[last - 1].z == z {
+                    points.pop();
+                }
+                points.push(Point3 { x: end, y, z });
+                if points
+                    .iter()
+                    .any(|p| p.z >= op.settings.clearance.unwrap_or(project.clearance))
+                {
+                    return Err("3D contact height reaches clearance; increase clearance".into());
+                }
+                if reverse {
+                    points.reverse();
+                }
+                rows.push(points);
             }
-            points.push(Point3 {
-                x: end,
-                y,
-                z: spans.last().unwrap().2,
-            });
-            if points
-                .iter()
-                .any(|p| p.z >= op.settings.clearance.unwrap_or(project.clearance))
-            {
-                return Err("3D contact height reaches clearance; increase clearance".into());
-            }
-            if op.settings.raster == crate::operation::Raster::NegativeX
-                || (op.settings.raster == crate::operation::Raster::Bidirectional && row % 2 == 1)
-            {
-                points.reverse();
-            }
-            rows.push(points);
         }
         Ok(rows)
     }

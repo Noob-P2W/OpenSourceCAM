@@ -162,6 +162,22 @@ impl Builder {
         }
         Some(height)
     }
+    fn finishing_entry_is_safe(&mut self, tip: Point3, step_down: f64) -> bool {
+        let q = [tip.x, tip.y];
+        // A shortened path may start inside the stock. Enforce the finish
+        // tool's permitted axial step and keep non-cutting bodies in air.
+        self.fixtures
+            .as_mut()
+            .and_then(|fixtures| fixtures.top(q, q, &self.bodies))
+            .is_some_and(|z| z <= tip.z)
+            && !self.bodies.is_empty()
+            && self.bodies.iter().all(|body| {
+                let cut = if body.low == 0. { step_down } else { 0. };
+                self.remaining
+                    .top(q, q, body.radius + self.certificate_error)
+                    .is_some_and(|height| height <= tip.z + body.low + cut + EPS)
+            })
+    }
     fn retract(&mut self) -> Result<(), String> {
         let mut z = self.clearance;
         if let Some(gap) = self.stock_clearance {
@@ -1035,6 +1051,7 @@ pub fn generate_with_cancel(
             o.enabled
                 && (o.settings.stock_clearance.is_some()
                     || o.settings.optimize_links
+                    || o.strategy == Strategy::ParallelFinish
                     || milling2d::planar_rough(o)
                     || (o.strategy == Strategy::StockRough && o.model_link.is_some()))
         }) {
@@ -1145,37 +1162,28 @@ pub fn generate_with_cancel(
                 }
                 continue;
             }
-            let rows = field.rows(project, op, &mut surface_budget)?;
-            let passes = if op.strategy == Strategy::ParallelFinish {
-                1
+            let entry_step = if project
+                .library_tool(Some(op))?
+                .is_some_and(|t| t.center_cutting)
+            {
+                tool.step_down
             } else {
-                layers
+                0.
             };
-            for layer in 1..=passes {
+            let rows = field.rows(project, op, &mut surface_budget, |tip| {
+                b.finishing_entry_is_safe(tip, entry_step)
+            })?;
+            for row in rows {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                     return Err("Machining cancelled".into());
                 }
-                let z = -(layer as f64 * tool.step_down).min(depth) + 0.0002;
-                for row in &rows {
-                    let mut engaged = false;
-                    for pair in row.windows(2) {
-                        let finish = op.strategy == Strategy::ParallelFinish;
-                        if finish || pair.iter().all(|p| p.z <= z + EPS) {
-                            let a = pair[0];
-                            let end = pair[1];
-                            if !engaged {
-                                b.enter(a.x, a.y, if finish { a.z } else { z })?;
-                                engaged = true;
-                            }
-                            b.cut(end.x, end.y, if finish { end.z } else { z })?;
-                        } else if engaged {
-                            b.retract()?;
-                            engaged = false;
-                        }
-                    }
-                    b.retract()?;
+                let first = row[0];
+                b.enter(first.x, first.y, first.z)?;
+                for end in &row[1..] {
+                    b.cut(end.x, end.y, end.z)?;
                 }
             }
+            b.retract()?;
             if !same_tool_next(project, index)? {
                 b.clearance = project.travel_clearance();
                 b.stock_clearance = None;

@@ -311,3 +311,50 @@ fn fine_finishing_uses_model_hierarchy_instead_of_whole_blank_grid() {
     let path = cam::generate(&p).unwrap();
     assert!(path.moves.iter().any(|m| m.operation == 1));
 }
+
+#[test]
+fn parallel_finishing_trims_stock_margins_to_actual_tool_reach() {
+    let p = surface::from_stock(
+        &wedge(),
+        &PlanOptions {
+            xy_margin: 15.,
+            top_allowance: 1.,
+            backing: 1.,
+            ..Default::default()
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+    .project;
+    let bounds = p.part.as_ref().unwrap().bounds();
+    let tool = p.operation_tool(&p.operations[1]).unwrap();
+    let furthest = tool.diameter / 2. + 0.5003;
+    let path = cam::generate(&p).unwrap();
+    let cuts: Vec<_> = path
+        .moves
+        .iter()
+        .filter(|m| m.operation == 1 && m.motion == Motion::Cut)
+        .collect();
+    assert!(!cuts.is_empty());
+    assert!(cuts.iter().any(|m| (m.from.z - m.to.z).abs() > 0.1));
+    for cut in &cuts {
+        for point in [cut.from, cut.to] {
+            assert!(point.y >= bounds.min[1] - furthest && point.y <= bounds.max[1] + furthest);
+            assert!(
+                point.x >= bounds.min[0] - furthest - 3.
+                    && point.x <= bounds.max[0] + furthest + 3.
+            );
+        }
+    }
+    let covered_rows = cuts
+        .iter()
+        .filter(|m| {
+            m.from.x < bounds.min[0] && m.to.x >= bounds.min[0]
+                || m.from.x > bounds.max[0] && m.to.x <= bounds.max[0]
+        })
+        .count();
+    assert!(
+        covered_rows >= 20,
+        "The trimmed path must still reach the model at the programmed stepover"
+    );
+}

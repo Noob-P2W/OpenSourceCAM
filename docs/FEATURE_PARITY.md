@@ -82,8 +82,11 @@ and raster reversals retain radius/allowance compensation. See [drilling and
 compensation](DRILLING_AND_COMPENSATION.md) for exact behavior and primary sources.
 
 3D roughing now uses top-down constant-Z offset clearing with stay-down links in
-connected free regions. It remains conventional clearing rather than adaptive
-engagement control. Facing stops at the highest imported target surface; lower
+connected free regions. It uses conventional offset clearing. Parallel finishing
+limits each row to the model's projected cutter reach and combines continuous
+flat spans. Short entries use remaining-stock, tool, holder and fixture checks.
+Where an entry cannot be certified, the planner extends a pass to the stock edge
+or continues from the preceding certified entry. Facing stops at the highest imported target surface; lower
 recessed levels require a suitable strategy. Recognized operations retain the feature opening and clear stock above it in
 bounded depth passes; earlier whole-stock facing can establish a cleared starting
 level. See [machining geometry and clearing](MACHINING_WORKFLOW.md).

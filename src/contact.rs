@@ -67,6 +67,56 @@ impl Contact {
         }
         Ok(id)
     }
+    /// Intersect the swept cutter's XY reach with a finishing row. A
+    /// projected triangle is convex, so the extrema of its three edge
+    /// capsules also bound its interior, including horizontal or vertical faces.
+    pub(crate) fn row_intervals(
+        &self,
+        y: f64,
+        reach: f64,
+        budget: &mut Budget<'_>,
+    ) -> Result<Vec<[f64; 2]>, String> {
+        let mut pending = vec![0];
+        let mut intervals = Vec::<[f64; 2]>::new();
+        while let Some(id) = pending.pop() {
+            budget.tick()?;
+            let node = &self.nodes[id];
+            if y + reach < node.min[1] || y - reach > node.max[1] {
+                continue;
+            }
+            if let Some(children) = node.children {
+                pending.extend(children);
+                continue;
+            }
+            for &[a, b, c] in &self.triangles[node.range.clone()] {
+                budget.tick()?;
+                let mut low = f64::INFINITY;
+                let mut high = f64::NEG_INFINITY;
+                for (u, v) in [(a, b), (b, c), (c, a)] {
+                    if let Some([x0, x1]) = crate::planar::capsule(y, u, v, reach) {
+                        low = low.min(x0);
+                        high = high.max(x1);
+                    }
+                }
+                if low < high {
+                    intervals.push([low, high]);
+                }
+            }
+        }
+        intervals.sort_unstable_by(|a, b| a[0].total_cmp(&b[0]));
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for [a, b] in intervals {
+            if let Some(last) = merged.last_mut() {
+                if a <= last[1] + 1e-8 {
+                    last[1] = last[1].max(b);
+                    continue;
+                }
+            }
+            merged.push([a, b]);
+        }
+        Ok(merged)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn height(
         &self,

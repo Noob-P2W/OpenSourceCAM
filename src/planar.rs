@@ -29,13 +29,17 @@ fn restrict(range: &mut [f64; 2], a: f64, b: f64, lo: f64, hi: f64) -> bool {
     range[1] = range[1].min(x.max(y));
     range[0] <= range[1]
 }
-fn capsule(y: f64, a: [f64; 3], b: [f64; 3], r: f64) -> Option<[f64; 2]> {
-    let mut pieces = Vec::new();
+pub(crate) fn capsule(y: f64, a: [f64; 3], b: [f64; 3], r: f64) -> Option<[f64; 2]> {
+    let mut limits = [f64::INFINITY, f64::NEG_INFINITY];
+    let mut include = |[lo, hi]: [f64; 2]| {
+        limits[0] = limits[0].min(lo);
+        limits[1] = limits[1].max(hi);
+    };
     for p in [a, b] {
         let d = (y - p[1]).abs();
         if d <= r {
             let h = (r * r - d * d).max(0.).sqrt();
-            pieces.push([p[0] - h, p[0] + h]);
+            include([p[0] - h, p[0] + h]);
         }
     }
     let dx = b[0] - a[0];
@@ -46,20 +50,10 @@ fn capsule(y: f64, a: [f64; 3], b: [f64; 3], r: f64) -> Option<[f64; 2]> {
         if restrict(&mut span, dx, dy * (y - a[1]) - dx * a[0], 0., l * l)
             && restrict(&mut span, -dy, dy * a[0] + dx * (y - a[1]), -r * l, r * l)
         {
-            pieces.push(span);
+            include(span);
         }
     }
-    if pieces.is_empty() {
-        None
-    } else {
-        Some([
-            pieces.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min),
-            pieces
-                .iter()
-                .map(|p| p[1])
-                .fold(f64::NEG_INFINITY, f64::max),
-        ])
-    }
+    (limits[0] <= limits[1]).then_some(limits)
 }
 pub fn raster(
     rings: &[Vec<[f64; 3]>],
