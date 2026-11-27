@@ -54,9 +54,13 @@ function showIssues(){
   if(rev===revision)issuePanel.scan(list);
  });
 }
+$('return-to-issues').onclick=()=>{
+ showIssues();$('issues-heading').focus({preventScroll:true});
+};
 function lookAtMove(location){
  if(!path?.moves[location.move_index])return;
- openIssues();pausePlayback();clearGeometrySelection();
+ issuePanel.show(false);shell.hideBrowser();pausePlayback();clearGeometrySelection();
+ document.querySelector('.playback-dock').open=false;
  diagnosticLocation=location;
  const size=Math.max(0.7,Math.min(3,(project.tool?.diameter||6)/3)),point=location.point;
  const axes=[0,1,2].flatMap(i=>[-1,1].map(sign=>point.map((value,j)=>i===j?value+sign*size:value)));
@@ -70,6 +74,7 @@ function lookAtMove(location){
  queuePlaybackTool(location.operation);
  $('canvas').dataset.issueMove=String(location.move_index);
  viewport.focusPoint(point,Math.max(12,size*8));
+ $('return-to-issues').focus({preventScroll:true});
  draw();
 }
 const geometryState={key:null,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false};

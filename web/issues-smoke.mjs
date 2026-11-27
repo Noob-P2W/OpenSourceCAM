@@ -28,14 +28,27 @@ try{
  const collision=issues.locator('details').filter({hasText:'Fixture contact'}).first();
  await collision.locator('summary').click();
  assert.match(await collision.locator('.issue-coordinates').textContent(),/Move \d+ · .* Work X /);
- await collision.getByRole('button',{name:'Look at',exact:true}).click();
  const canvas=page.locator('#canvas');
- await page.waitForFunction(()=>{
-  const data=document.querySelector('#canvas').dataset;
-  return data.issueMove&&/^(cutter|shaft|holder)$/.test(data.issueSection)&&Number(data.toolTriangles)>0&&Number(data.selectionCopies)>0;
- });
- assert.match(await canvas.getAttribute('data-issue-section'),/cutter|shaft|holder/);
- assert.ok(Number(await canvas.getAttribute('data-selection-copies'))>0,'The fixture patch is highlighted');
+ const playback=page.locator('.playback-dock');
+ for(const [width,height] of [[390,844],[768,1024],[1440,1000]]){
+  await page.setViewportSize({width,height});
+  await playback.evaluate(dock=>dock.open=true);
+  const before=await canvas.boundingBox();
+  await collision.getByRole('button',{name:'Look at',exact:true}).click();
+  await issues.waitFor({state:'hidden'});
+  assert.equal(await playback.evaluate(dock=>dock.open),false);
+  await page.waitForFunction(()=>{
+   const data=document.querySelector('#canvas').dataset;
+   return data.issueMove&&/^(cutter|shaft|holder)$/.test(data.issueSection)&&Number(data.toolTriangles)>0&&Number(data.selectionCopies)>0;
+  });
+  const focused=await canvas.boundingBox();
+  assert.ok(focused.height>before.height+(width<1100?height*0.3:15),`${width}px viewer gets the space back`);
+  if(width===1440)assert.ok(focused.width>before.width+200,'Desktop inspector column collapses');
+  const back=page.getByRole('button',{name:'Back to issues',exact:true});
+  await back.click();
+  await collision.getByRole('button',{name:'Approve',exact:true}).waitFor();
+  assert.match(await canvas.getAttribute('data-issue-section'),/cutter|shaft|holder/);
+ }
  await collision.getByRole('button',{name:'Approve',exact:true}).click();
  const confirmation=page.locator('#app-confirm');
  await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -60,5 +73,5 @@ try{
  const field=page.locator('#active-machine-dialog').getByLabel('axis max X · mm',{exact:true});
  await field.waitFor();assert.match(await field.getAttribute('class'),/issue-setting/);
  assert.deepEqual(errors,[]);
- console.log('PASS: issue list, collision preview, move and tool/fixture highlight, review confirmation, retained export preflight and linked machine field');
+ console.log('PASS: issues, collision focus with collapsed panels at phone/tablet/desktop sizes, return to finding, review confirmation, export preflight and linked settings');
 }finally{await browser.close()}

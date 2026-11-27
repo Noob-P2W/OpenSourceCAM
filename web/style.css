@@ -110,6 +110,8 @@ body:has(#inspector .vise-dock[open]) .canvas-host{margin-right:0}
 
 /* Workspace diagnostics share the inspector rather than covering the model. */
 #issues-panel{min-width:0}
+#return-to-issues{display:none;pointer-events:auto;min-height:32px;padding:4px 9px;font-size:11px}
+body:not([data-issues=true]):has(#canvas[data-issue-move]) #return-to-issues{display:inline-flex}
 body[data-issues=true] #inspector{display:block;overflow:auto}
 body[data-issues=true] #inspector>.context-heading,body[data-issues=true] #selection-summary,body[data-issues=true] #edit-selected{display:none}
 .issues-head{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding-bottom:5px}
@@ -142,4 +144,8 @@ body[data-issues=true] #inspector>.context-heading,body[data-issues=true] #selec
  body[data-issues=true] .workbench{grid-template-rows:minmax(160px,1fr) 34dvh}
  body[data-issues=true] #inspector{grid-column:1/-1;grid-row:2;height:34dvh;max-height:none;position:static;min-height:0}
  body[data-issues=true] .viewer{grid-row:1;min-height:0;padding-bottom:0}
+}
+@media(min-width:1280px){
+ body:not([data-issues=true],[data-feature-inspect=true]) .workbench:has(#canvas[data-issue-move]):not(:has(.vise-dock[open])){grid-template-columns:var(--browser-width,260px) minmax(0,1fr)}
+ body:not([data-issues=true],[data-feature-inspect=true]):has(#canvas[data-issue-move]) #inspector:not(:has(.vise-dock[open])){display:none}
 }

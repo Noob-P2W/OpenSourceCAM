@@ -576,8 +576,9 @@ Inspect → Issues lists configuration findings for the current workspace and
 preflight findings from the most recent generated path. Expand a row for the
 details, a suggested correction, and links to the affected settings. Findings
 with a move location also have a Look at action. It pauses playback at the
-reported time, centers the viewport, and marks the fixture patch and affected
-tool section for the conservative swept-envelope check.
+reported time, collapses the Issues panel and playback controls, and centers the
+viewport on the highlighted contact. Back to issues reopens the findings with
+the current move still highlighted.
 
 The browser keeps calculated moves available for inspection and stock playback
 when a machine travel, feed, fixture, or tool-change check reports a problem.
