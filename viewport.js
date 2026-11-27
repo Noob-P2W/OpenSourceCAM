@@ -28,6 +28,11 @@ export class Viewport {
  release(item){if(item?.three)this.three?.remove(item.three)}
  setView(preset){this.preset=preset;this.yaw=preset==='top'||preset==='front'?-Math.PI/2:preset==='right'?0:-Math.PI/4;this.elevation=preset==='top'?Math.PI/2:['front','right'].includes(preset)?0:preset==='axo'?Math.PI/6:Math.asin(1/Math.sqrt(3));this.fit(this.fitTarget||(this.includeReferences?'all':'part'))}
  fit(mode='part'){this.cameraFrame=null;this.focusBounds=null;this.fixedScale=null;this.screenAnchor=null;this.fitTarget=typeof mode==='object'?mode:null;this.includeReferences=mode==='all';this.zoom=1;this.pan=[0,0];this.requestDraw()}
+ focusPoint(point,span){
+  const scale=Math.max(1,Math.min(this.canvas.clientWidth,this.canvas.clientHeight))/span;
+  this.cameraFrame={center:[...point],scale};this.focusBounds=null;this.fitTarget=null;
+  this.fixedScale=null;this.zoom=1;this.pan=[0,0];this.screenAnchor=null;this.requestDraw();
+ }
  // Keep a physical reference steady across a work-origin edit; explicit Fit releases the scale.
  keepPointOnScreen(point,screenPoint){
   if(point?.length<3||screenPoint?.length<2||!point?.slice(0,3).every(Number.isFinite)||!screenPoint?.slice(0,2).every(Number.isFinite))return;
@@ -68,7 +73,18 @@ export class Viewport {
   if(this.toolSource===tool)return;
   for(const item of this.toolBuffers||[])this.release(item);
   this.toolSource=tool;
-  this.toolBuffers=tool?tool.meshes.map((mesh,index)=>this.mesh(mesh,v=>v,index?[.95,.65,.18]:[.66,.75,.82],false)):[];
+  this.toolBuffers=[];
+  if(tool){
+   const add=(mesh,section,color)=>{if(mesh?.triangles.length){const item=this.mesh(mesh,v=>v,color,false);item.section=section;this.toolBuffers.push(item)}};
+   const [body,cutter]=tool.meshes;
+   if(body&&tool.holder_start!=null){
+    const holder=[],shaft=[];
+    for(const triangle of body.triangles)(triangle.every(i=>body.vertices[i][2]>=tool.holder_start-1e-8)?holder:shaft).push(triangle);
+    add({...body,triangles:holder},'holder',[.66,.75,.82]);
+    add({...body,triangles:shaft},'shaft',[.66,.75,.82]);
+   }else add(body,'shaft',[.66,.75,.82]);
+   add(cutter,'cutter',[.95,.65,.18]);
+  }
  }
  lines(points,color){const data=new Float32Array(points.length*6);points.forEach((p,i)=>data.set(p,i*6));return this.upload(data,color,true)}
  rebuild(project,workspace,simulation){
@@ -136,7 +152,7 @@ export class Viewport {
   if(this.highlightSource!==highlight){
    for(const item of this.highlightItems||[]){this.release(item);const i=this.buffers.indexOf(item);if(i>=0)this.buffers.splice(i,1)}
    this.highlightItems=[];this.highlightSource=highlight;
-   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.unavailable?[1,.35,.2]:highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.unavailable?[.9,.15,.05]:highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
+   if(highlight&&!highlight.component&&!highlight.movingModel){const triangles=highlight.fill||((highlight.outline||[]).slice(1,-1).map((p,i)=>[highlight.outline[0],p,highlight.outline[i+2]]));if(triangles.length){const vertices=triangles.flat(),mesh={vertices,triangles:triangles.map((_,i)=>[i*3,i*3+1,i*3+2])};const fill=this.mesh(mesh,v=>v,highlight.diagnostic?[1,.12,.16]:highlight.unavailable?[1,.35,.2]:highlight.hover?[.25,.75,1]:[1,.7,.28]);fill.selection=true;this.highlightItems.push(fill)}const edges=this.lines(highlight.segments||highlight.outline.flatMap((p,i,a)=>[p,a[(i+1)%a.length]]),highlight.diagnostic?[1,.05,.12]:highlight.unavailable?[.9,.15,.05]:highlight.hover?[.1,.65,1]:[1,.45,.04]);edges.selection=true;this.highlightItems.push(edges);}
   }
 
   if(!this.stockLegend){this.stockLegend=document.createElement('div');this.stockLegend.className='stock-legend';this.stockLegend.innerHTML='<span data-role="uncut">Uncut</span><span data-role="rough">Rough-machined</span><span data-role="finish">Finish pass</span>';this.stockLegend.title='Tool-contact history at the selected simulation resolution; not a surface-finish or tolerance measurement.';canvas.parentElement.append(this.stockLegend)}this.stockLegend.hidden=!simulation;
@@ -144,9 +160,10 @@ export class Viewport {
   const time=path?Math.max(0,Math.min(100,progress))/100*path.seconds:0;
   let completed=0;
   if(path){let lo=0,hi=path.moves.length;while(lo<hi){const mid=(lo+hi)>>>1;if(path.moves[mid].end_seconds<=time)lo=mid+1;else hi=mid}completed=lo}
+  if(highlight?.diagnostic&&path?.moves[highlight.move])completed=highlight.move;
   const move=path?.moves[Math.min(completed,path.moves.length-1)];
   const fraction=move?(completed===path.moves.length?1:Math.max(0,Math.min(1,(time-move.start_seconds)/(move.end_seconds-move.start_seconds)))):0;
-  const cursor=move?move.from.map((v,i)=>v+(move.to[i]-v)*fraction):null;
+  const cursor=highlight?.diagnostic?highlight.tip:move?move.from.map((v,i)=>v+(move.to[i]-v)*fraction):null;
   const showCursor=cursor&&(filter===null||(filter instanceof Set?filter.has(move.operation):move.operation===filter));
   canvas.dataset.toolChange=String(!!move?.tool_change);const tool=showCursor&&!move?.tool_change?toolForOperation?.(move.operation):null;this.setTool(tool||null);
   if(tool){if(!this.toolEnvelope)this.toolEnvelope={min:[...tool.min],max:[...tool.max]};else for(let i=0;i<3;i++){this.toolEnvelope.min[i]=Math.min(this.toolEnvelope.min[i],tool.min[i]);this.toolEnvelope.max[i]=Math.max(this.toolEnvelope.max[i],tool.max[i])}}
@@ -169,9 +186,10 @@ export class Viewport {
   this.projectWorld=projectPoint;
   const jawOffset=item=>{if(!item.jawMotion)return [0,0,0];if(item.jawMotion.start===null)item.jawMotion.start=performance.now();const fraction=Math.max(0,1-(performance.now()-item.jawMotion.start)/450);if(fraction>0)this.requestDraw();return item.jawMotion.from.map(v=>v*fraction)};
   const visible=this.buffers.filter(item=>(!item.setupStock||showStock)&&(item!==this.stockLines||showStock)&&(item!==this.gridLines||this.controls.grid)&&(!this.axisBuffers.includes(item)||this.controls.axes)&&(!item.moveEnds||this.controls.paths!==false)&&(!item.rapid||this.controls.rapids)).sort((a,b)=>(a.lines?2:a.selection?1:0)-(b.lines?2:b.selection?1:0));
+  const toolColor=item=>highlight?.diagnostic&&(!highlight.section||highlight.section===item.section)?[1,.11,.14]:item.color;
   if(this.gl){
    const items=visible.map(item=>{item.drawOffset=jawOffset(item);item.drawColor=(highlight?.component&&highlight.component.model===item.model&&(highlight.component.body===undefined||highlight.component.body===item.body)||highlight?.movingModel===item.model&&item.moving)?[1,.7,.28]:this.pathColor(item);item.wireframe=wireframe&&!item.lines;item.drawCount=item.moveEnds?this.pathCount(item,completed):item.count;return item});
-   if(tool)for(const item of this.toolBuffers){item.drawOffset=cursor;item.drawColor=item.color;item.wireframe=false;item.drawCount=item.count;items.push(item)}
+   if(tool)for(const item of this.toolBuffers){item.drawOffset=cursor;item.drawColor=toolColor(item);item.wireframe=false;item.drawCount=item.count;items.push(item)}
    if(showCursor&&!tool){if(!this.cursorItem)this.cursorItem={three:this.three.marker(),lines:true,color:[1,.35,.08],count:1};this.cursorItem.drawOffset=cursor;this.cursorItem.drawColor=this.cursorItem.color;this.cursorItem.drawCount=1;items.push(this.cursorItem)}
    this.three.render(items,{width:w,height:h,dpr,center,depth,up,scale,pan:this.pan,radius,dark:this.controls.dark});canvas.dataset.renderer='webgl';canvas.dataset.engine='three';canvas.dataset.geometryUploads=String(this.three.uploads);canvas.dataset.geometryCacheHits=String(this.three.hits);canvas.dataset.geometryBytes=String(this.three.cacheBytes);
   }else if(this.ctx){
@@ -179,12 +197,13 @@ export class Viewport {
    const drawLine=item=>{const line=new Path2D();let count=item.count;if(item.moveEnds)count=this.pathCount(item,completed);for(let i=0;i<count;i+=2){const a=projectPoint(Array.from(item.data.subarray(i*6,i*6+3))),b=projectPoint(Array.from(item.data.subarray((i+1)*6,(i+1)*6+3)));line.moveTo(a[0],a[1]);line.lineTo(b[0],b[1])}ctx.strokeStyle=`rgb(${this.pathColor(item).map(v=>Math.round(v*255)).join(',')})`;ctx.globalAlpha=item.rapid?.45:1;ctx.stroke(line);ctx.globalAlpha=1};
    if(visible.includes(this.gridLines))drawLine(this.gridLines);
    for(const item of visible){if(item.lines)continue;const motion=jawOffset(item);const stride=1;for(let i=0;i<item.count;i+=3*stride){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+motion[k])));faces.push({p,color:(highlight?.component&&highlight.component.model===item.model&&(highlight.component.body===undefined||highlight.component.body===item.body)||highlight?.movingModel===item.model&&item.moving)?[1,.7,.28]:item.color,reference:item.reference,z:p.reduce((n,v)=>n+v[2],0)/3})}}
-   if(tool)for(const item of this.toolBuffers)for(let i=0;i<item.count;i+=3){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+cursor[k])));faces.push({p,color:item.color,z:p.reduce((n,v)=>n+v[2],0)/3,tool:true})}
+   if(tool)for(const item of this.toolBuffers)for(let i=0;i<item.count;i+=3){const p=[0,1,2].map(j=>projectPoint(Array.from(item.data.subarray((i+j)*6,(i+j)*6+3),(v,k)=>v+cursor[k])));faces.push({p,color:toolColor(item),z:p.reduce((n,v)=>n+v[2],0)/3,tool:true})}
    faces.sort((a,b)=>a.z-b.z);for(const face of faces){ctx.beginPath();face.p.forEach((v,i)=>i?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]));ctx.closePath();ctx.fillStyle=`rgb(${face.color.map(v=>Math.round(v*200)).join(',')})`;if(wireframe&&!face.tool)ctx.stroke();else{ctx.fill();if(!face.tool){ctx.strokeStyle=ctx.fillStyle;ctx.lineJoin='round';ctx.lineWidth=1;ctx.stroke();ctx.lineJoin='miter'}}}
    for(const item of visible.filter(x=>x.lines&&x!==this.gridLines))drawLine(item);
    if(showCursor&&!tool){const p=projectPoint(cursor);ctx.fillStyle='#e65100';ctx.beginPath();ctx.arc(p[0],p[1],4,0,Math.PI*2);ctx.fill()}
    canvas.dataset.renderer='canvas';
   }else this.onStatus('Graphics are unavailable in this browser. Enable graphics acceleration and reload.',true);
+  canvas.dataset.issueSection=highlight?.diagnostic?(highlight.section||'tool'):'';
   canvas.dataset.selectionCopies=String((this.highlightItems||[]).filter(b=>!b.lines).reduce((n,b)=>n+b.count/3,0));canvas.dataset.referenceTriangles=String(this.buffers.filter(b=>b.reference).reduce((n,b)=>n+b.count/3,0));canvas.dataset.displayProgress=String(progress);canvas.dataset.cuttingDiameter=tool?String(tool.cutting_diameter):'';canvas.dataset.triangles=String(this.triangleCount);canvas.dataset.zoom=String(this.zoom);canvas.dataset.yaw=String(this.yaw);
   canvas.dataset.markerVisible=String(!!showCursor&&!tool);canvas.dataset.toolTriangles=String((this.toolBuffers||[]).reduce((n,item)=>n+item.count/3,0));canvas.dataset.toolId=tool?String(tool.library_id??'legacy'):'';canvas.dataset.toolTip=showCursor?cursor.join(','):'';canvas.dataset.toolOperation=showCursor?String(move.operation):'';
   return {toolChange:!!move?.tool_change,changePositionKnown:move?.change_position_known,timelineOperation:move?.operation??null,triangles:this.triangleCount,fallback:!this.gl,projectPoint,camera:depth,operation:showCursor?move.operation:null,tool};

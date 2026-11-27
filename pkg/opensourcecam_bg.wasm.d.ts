@@ -11,6 +11,7 @@ export const normalize: (a: number, b: number, c: number) => void;
 export const operation: (a: number) => void;
 export const run: (a: number, b: number, c: number, d: number, e: number) => void;
 export const sample: (a: number) => void;
+export const websession_describe_issue: (a: number, b: number, c: number, d: number) => void;
 export const websession_edit: (a: number, b: number, c: number, d: number) => void;
 export const websession_geometry: (a: number, b: number, c: number, d: number) => void;
 export const websession_history_checkpoint: (a: number, b: number) => void;

@@ -4,6 +4,7 @@
 export class WebSession {
     free(): void;
     [Symbol.dispose](): void;
+    describe_issue(message: string): string;
     edit(data: string): string;
     geometry(query: string): string;
     history_checkpoint(): string;
@@ -70,6 +71,7 @@ export interface InitOutput {
     readonly operation: (a: number) => void;
     readonly run: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly sample: (a: number) => void;
+    readonly websession_describe_issue: (a: number, b: number, c: number, d: number) => void;
     readonly websession_edit: (a: number, b: number, c: number, d: number) => void;
     readonly websession_geometry: (a: number, b: number, c: number, d: number) => void;
     readonly websession_history_checkpoint: (a: number, b: number) => void;

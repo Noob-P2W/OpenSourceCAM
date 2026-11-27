@@ -107,3 +107,39 @@ body:has(#inspector .vise-dock[open]) .canvas-host{margin-right:0}
 @media(min-width:700px) and (max-width:1099px){body:has(#inspector .vise-dock[open]) .browser-resizer{bottom:36dvh}}
 
 .stock-legend{position:absolute;right:10px;bottom:10px;display:flex;gap:10px;background:var(--panel);padding:5px 8px;border-radius:4px;font-size:10px;pointer-events:none}.stock-legend[hidden]{display:none}.stock-legend span:before{content:'';display:inline-block;width:9px;height:9px;margin-right:4px;background:#7394a8}.stock-legend [data-role=rough]:before{background:#e6962e}.stock-legend [data-role=finish]:before{background:#33bf82}
+
+/* Workspace diagnostics share the inspector rather than covering the model. */
+#issues-panel{min-width:0}
+body[data-issues=true] #inspector{display:block;overflow:auto}
+body[data-issues=true] #inspector>.context-heading,body[data-issues=true] #selection-summary,body[data-issues=true] #edit-selected{display:none}
+.issues-head{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding-bottom:5px}
+.issues-head h2{margin:0;font-size:15px}
+.issues-head button{min-width:32px;font-size:18px;padding:2px 8px}
+#issues-summary{font-size:12px;color:var(--muted);margin:10px 0}
+#issues-reviewed{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:12px}
+.issues-table{width:100%;table-layout:fixed;border-spacing:0;border-collapse:collapse;font-size:13px}
+.issues-table td{padding:0;border-bottom:1px solid var(--line);vertical-align:top}
+.issues-table details{margin:0;border:0;border-radius:0;background:transparent}
+.issues-table summary{padding:9px 7px;cursor:pointer;border-left:3px solid var(--line);overflow-wrap:anywhere}
+.issues-table summary[data-severity=error]{border-left-color:var(--danger)}
+.issues-table summary[data-severity=warning]{border-left-color:#bf820d}
+.issue-title{font-weight:650}
+.issue-scope{display:block;color:var(--muted);font-size:11px;padding:3px 0 0 14px}
+.issues-table p{overflow-wrap:anywhere;margin:8px 8px 10px;line-height:1.4}
+.issue-remedy{color:var(--muted)}
+.issue-actions{display:flex;flex-wrap:wrap;gap:5px;padding:0 7px 10px}
+.issue-actions button{font-size:12px}
+.issue-actions .issue-approve{color:#fff;background:#a82a30;border-color:#a82a30}
+.issue-actions .issue-approve:hover{background:#852127}
+.issue-setting{outline:2px solid var(--danger)!important;outline-offset:3px;scroll-margin:14px}
+.ribbon-command:has(.issue-count){position:relative}
+.issue-count{position:absolute;right:6px;top:4px;border-radius:11px;padding:1px 5px;background:#a82a30;color:#fff;font-size:10px}
+@media(min-width:1100px){
+ body[data-issues=true] .workbench{grid-template-columns:var(--browser-width,260px) minmax(0,1fr) minmax(260px,var(--editor-width,320px))}
+ body[data-browser-floating=true][data-issues=true] .workbench{grid-template-columns:0 minmax(0,1fr) minmax(260px,var(--editor-width,320px))}
+}
+@media(max-width:1099px){
+ body[data-issues=true] .workbench{grid-template-rows:minmax(160px,1fr) 34dvh}
+ body[data-issues=true] #inspector{grid-column:1/-1;grid-row:2;height:34dvh;max-height:none;position:static;min-height:0}
+ body[data-issues=true] .viewer{grid-row:1;min-height:0;padding-bottom:0}
+}
