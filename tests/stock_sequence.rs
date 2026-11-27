@@ -490,6 +490,90 @@ fn planar_outside_clearing_stops_at_selected_floor_and_retains_the_selected_isla
 }
 
 #[test]
+fn outside_face_pick_clears_the_floor_and_preserves_the_raised_step() {
+    use opensourcecam::import::{Geometry, Mesh, Part, SourceFormat, Units};
+    let mut p = job();
+    let profile = [
+        (10., -8.),
+        (42., -8.),
+        (42., 0.),
+        (30., 0.),
+        (30., -3.),
+        (10., -3.),
+    ];
+    let vertices = [8., 32.]
+        .into_iter()
+        .flat_map(|y| profile.map(|(x, z)| [x, y, z]))
+        .collect();
+    let mut triangles = Vec::new();
+    for [a, b, c] in [[0, 1, 4], [0, 4, 5], [1, 2, 3], [1, 3, 4]] {
+        triangles.extend([[a, b, c], [c + 6, b + 6, a + 6]]);
+    }
+    for i in 0..6 {
+        let j = (i + 1) % 6;
+        triangles.extend([[i, i + 6, j + 6], [i, j + 6, j]]);
+    }
+    p.part = Some(Part {
+        geometry: std::sync::Arc::new(Geometry {
+            bodies: vec![],
+            removed_degenerate_triangles: 0,
+            source_name: "step.obj".into(),
+            format: SourceFormat::Obj,
+            mesh: Mesh {
+                vertices,
+                triangles,
+            },
+            cad_source: None,
+        }),
+        units: Units::Millimetres,
+        offset: [0.; 3],
+        rotation: [0.; 3],
+        visible: true,
+    });
+    let pick = |origin, direction| {
+        commands::geometry_query(
+            &p,
+            commands::GeometryQuery::OutsideFaceDraft { origin, direction },
+        )
+        .unwrap()
+    };
+    let wall = pick([0., 20., -4.], [1., 0., 0.]);
+    assert!(wall["unavailable"].is_string());
+    assert!(wall["draft"].is_null());
+    let mut op: Operation =
+        serde_json::from_value(pick([20., 20., 10.], [0., 0., -1.])["draft"].clone()).unwrap();
+    assert_eq!(op.strategy, Strategy::StockRough);
+    assert!(op.settings.outside_floor && op.model_link.is_some());
+    assert_eq!(op.depth, 3.);
+    op.settings.step_down = Some(1.);
+    p.operations = vec![op];
+    let path = cam::generate(&p).unwrap();
+    let radius = p.operation_tool(&p.operations[0]).unwrap().diameter / 2.;
+    let mut reaches_floor_interior = false;
+    for m in path.moves.iter().filter(|m| m.motion == Motion::Cut) {
+        assert!(m.to.z >= -3. - 1e-8);
+        assert!((m.from.z - m.to.z).abs() < 1e-8);
+        for i in 0..=10 {
+            let t = i as f64 / 10.;
+            let x = m.from.x + (m.to.x - m.from.x) * t;
+            let y = m.from.y + (m.to.y - m.from.y) * t;
+            let dx = (30. - x).max(x - 42.).max(0.);
+            let dy = (8. - y).max(y - 32.).max(0.);
+            assert!(
+                dx.hypot(dy) >= radius - 1e-6,
+                "The cutter crosses the raised step"
+            );
+            reaches_floor_interior |=
+                (m.to.z + 3.).abs() < 1e-8 && (16. ..26.).contains(&x) && (14. ..26.).contains(&y);
+        }
+    }
+    assert!(
+        reaches_floor_interior,
+        "The face must clear across its interior"
+    );
+}
+
+#[test]
 fn flat_endmill_stock_preserves_vertical_shoulders_without_invented_ramps() {
     let mut p = job();
     p.operations = vec![pocket(&p)];

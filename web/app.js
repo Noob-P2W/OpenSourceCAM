@@ -351,10 +351,16 @@ async function geometryDraft(strategy,index){
  return null;
 }
 async function pickOperation(strategy,commit,edgeMode='boundary'){
- pendingFeaturePick={strategy,commit};let chainDraft=null;
+ const outsideFace=strategy==='stock_rough'&&edgeMode==='face';
+ pendingFeaturePick=outsideFace?null:{strategy,commit};let chainDraft=null;
  const edgeSelection=draft=>({outline:[],segments:[...draft.settings.path.slice(1).flatMap((p,i)=>[draft.settings.path[i],p]),...(draft.settings.closed?[draft.settings.path.at(-1),draft.settings.path[0]]:[])],fill:[]});
  const edgeStrategies=['trace','engrave','chamfer','inside_profile','outside_profile','stock_rough'];
  const query=async(ray,extend=false)=>{
+  if(outsideFace){
+   const result=await engineCall('geometry',{data:{action:'outside_face_draft',...ray}});
+   if(result.unavailable)result.selection.unavailable=result.unavailable;
+   return result;
+  }
   if(edgeStrategies.includes(strategy)){
    if(strategy==='chamfer'&&edgeMode==='boundary'){try{const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});const draft=await engineCall('geometry',{data:{action:'feature_geometry',feature,strategy}});return {draft,selection:edgeSelection(draft)}}catch{}}
    const draft=await engineCall('geometry',{data:{action:'chain_draft',...ray,strategy,single_edge:edgeMode!=='boundary',existing_path:extend&&chainDraft?chainDraft.settings.path:[],edge_tolerance:12/(viewport.viewScale||1)}});return {draft,selection:edgeSelection(draft)};
@@ -369,7 +375,8 @@ async function pickOperation(strategy,commit,edgeMode='boundary'){
   const feature=await engineCall('geometry',{data:{action:'pick_feature',...ray}});return {draft:await engineCall('geometry',{data:{action:'feature_geometry',feature,strategy}}),selection:featureHighlight(feature)};
  };
  const connected=edgeStrategies.includes(strategy)&&edgeMode==='connected';document.body.dataset.edgePicking=String(edgeStrategies.includes(strategy));
- beginPick(async ray=>{const result=await query(ray,connected);highlight=result.selection;draw();if(result.unavailable){status(result.unavailable,true);return false;}chainDraft=result.draft;if(connected){$('pick-finish').dataset.ready='true';$('pick-finish').disabled=false;return false;}await commit(result.draft);},connected?'Select connected edges, then Finish selection':edgeStrategies.includes(strategy)?'Select a highlighted edge or boundary chain':['surface_smooth','area_rough'].includes(strategy)?'Select a highlighted horizontal target face':'Select the highlighted machining feature',null,async ray=>(await query(ray,connected)).selection);
+ const hint=outsideFace?'Select a horizontal face as the roughing floor':connected?'Select connected edges, then Finish selection':edgeStrategies.includes(strategy)?'Select a highlighted edge or boundary chain':['surface_smooth','area_rough'].includes(strategy)?'Select a highlighted horizontal target face':'Select the highlighted machining feature';
+ beginPick(async ray=>{const result=await query(ray,connected);highlight=result.selection;draw();if(result.unavailable){status(result.unavailable,true);return false;}chainDraft=result.draft;if(connected){$('pick-finish').dataset.ready='true';$('pick-finish').disabled=false;return false;}await commit(result.draft);},hint,null,async ray=>(await query(ray,connected)).selection);
  if(connected){let finish=$('pick-finish');if(!finish){finish=document.createElement('button');finish.id='pick-finish';finish.textContent='Finish selection';$('pick-face').after(finish);}finish.hidden=false;finish.dataset.ready='false';finish.disabled=true;finish.onclick=()=>task(async()=>{if(chainDraft){await commit(chainDraft);cancelPicking();}});}
 }
 

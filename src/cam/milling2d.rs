@@ -69,7 +69,8 @@ fn area_paths(
     rest: Option<&crate::material::RemainingStock>,
 ) -> Result<Vec<Vec<Span>>, String> {
     let (mut rings, z) = face_region(op)?;
-    let contour_clearing = op.strategy == Strategy::StockRough && op.has_chain();
+    let outside_clearing = op.strategy == Strategy::StockRough && op.has_chain();
+    let contour_clearing = outside_clearing && !op.settings.outside_floor;
     let retained = contour_clearing.then(|| rings[0].clone());
     if op.model_link.is_some() {
         rings.truncate(1);
@@ -78,7 +79,7 @@ fn area_paths(
     let stock_boundary = op
         .settings
         .clearing_boundary
-        .map_or(op.model_link.is_some() || contour_clearing, |b| {
+        .map_or(op.model_link.is_some() || outside_clearing, |b| {
             b == crate::operation::ClearingBoundary::Stock
         });
     if stock_boundary {
@@ -97,16 +98,16 @@ fn area_paths(
     }
     let mut obstacles = retained.into_iter().collect::<Vec<_>>();
     if let Some(part) = &p.part {
+        let floor = if op.strategy == Strategy::StockRough && !outside_clearing {
+            f64::NEG_INFINITY
+        } else {
+            level - op.settings.axial_allowance
+        };
         for triangle in &part.geometry.mesh.triangles {
             let points: Vec<_> = triangle
                 .iter()
                 .map(|i| part.point(part.geometry.mesh.vertices[*i as usize]))
                 .collect();
-            let floor = if op.strategy == Strategy::StockRough && !contour_clearing {
-                f64::NEG_INFINITY
-            } else {
-                level - op.settings.axial_allowance
-            };
             if points.iter().all(|q| q[2] <= floor + 1e-6) {
                 continue;
             }
@@ -132,7 +133,7 @@ fn area_paths(
     }
     let mut budget = crate::surface::Budget::new(cancel);
     if p.process == crate::process::Process::Milling
-        && (contour_clearing
+        && (outside_clearing
             || op.strategy == Strategy::Pocket
             || (op.strategy == Strategy::AreaRough
                 && (op.model_link.is_some() || op.settings.rest_machining)))

@@ -107,6 +107,9 @@ pub fn geometry_fingerprint(op: &Operation) -> String {
         hash.number(depth);
     }
     if op.has_chain() || matches!(op.strategy, Strategy::SurfaceSmooth | Strategy::AreaRough) {
+        if op.strategy == Strategy::StockRough && op.settings.outside_floor {
+            hash.bytes(b"outside clearing floor");
+        }
         for point in &op.settings.path {
             for v in point {
                 hash.number(*v);

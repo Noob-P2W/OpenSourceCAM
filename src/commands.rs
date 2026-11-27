@@ -351,6 +351,10 @@ pub enum GeometryQuery {
         origin: [f64; 3],
         direction: [f64; 3],
     },
+    OutsideFaceDraft {
+        origin: [f64; 3],
+        direction: [f64; 3],
+    },
     ChainDraft {
         origin: [f64; 3],
         direction: [f64; 3],
@@ -398,6 +402,51 @@ pub enum GeometryQuery {
         strategy: crate::model::Strategy,
     },
 }
+
+fn planar_face_operation(
+    project: &Project,
+    part: &crate::import::Part,
+    face: &crate::faces::Face,
+    strategy: crate::model::Strategy,
+) -> Result<crate::model::Operation, String> {
+    use crate::model::Strategy;
+    if !face.horizontal {
+        return Err("Select an upward horizontal planar target face".into());
+    }
+    let mut loops = crate::faces::boundary_loops(face)?;
+    let area = |ring: &Vec<[f64; 3]>| {
+        (0..ring.len())
+            .map(|i| {
+                let a = ring[i];
+                let b = ring[(i + 1) % ring.len()];
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f64>()
+            .abs()
+    };
+    loops.sort_by(|a, b| area(b).total_cmp(&area(a)));
+    if loops.is_empty() {
+        return Err("The selected face has no boundary".into());
+    }
+    let mut op = operation_template(project, strategy);
+    op.settings.path = loops.remove(0);
+    if strategy == Strategy::SurfaceSmooth {
+        op.settings.islands = loops;
+    }
+    if strategy == Strategy::StockRough {
+        let z = op.settings.path[0][2];
+        if op.settings.path.iter().any(|p| (p[2] - z).abs() > 1e-6) {
+            return Err("Select an upward horizontal planar target face".into());
+        }
+        op.depth = -z;
+        op.settings.outside_floor = true;
+    }
+    op.settings.closed = true;
+    op.settings.height_offset = Some(0.);
+    crate::machining::link(&mut op, part);
+    Ok(op)
+}
+
 pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, String> {
     let part = project
         .part
@@ -518,41 +567,36 @@ pub fn geometry_query(project: &Project, query: GeometryQuery) -> Result<Value, 
             crate::machining::link(&mut op, part);
             Ok(json!(op))
         }
+        GeometryQuery::OutsideFaceDraft { origin, direction } => {
+            let face = crate::faces::pick(part, origin, direction)?;
+            Ok(
+                match planar_face_operation(
+                    project,
+                    part,
+                    &face,
+                    crate::model::Strategy::StockRough,
+                ) {
+                    Ok(op) => json!({"draft":op,"selection":face}),
+                    Err(error) => json!({"selection":face,"unavailable":error}),
+                },
+            )
+        }
         GeometryQuery::SmoothFaceDraft {
             origin,
             direction,
             roughing,
         } => {
             let face = crate::faces::pick(part, origin, direction)?;
-            if !face.horizontal {
-                return Err("Select an upward horizontal planar target face".into());
-            }
-            let mut loops = crate::faces::boundary_loops(&face)?;
-            let area = |ring: &Vec<[f64; 3]>| {
-                (0..ring.len())
-                    .map(|i| {
-                        let a = ring[i];
-                        let b = ring[(i + 1) % ring.len()];
-                        a[0] * b[1] - b[0] * a[1]
-                    })
-                    .sum::<f64>()
-                    .abs()
-            };
-            loops.sort_by(|a, b| area(b).total_cmp(&area(a)));
-            let mut op = operation_template(
+            Ok(json!(planar_face_operation(
                 project,
+                part,
+                &face,
                 if roughing {
                     crate::model::Strategy::AreaRough
                 } else {
                     crate::model::Strategy::SurfaceSmooth
                 },
-            );
-            op.settings.path = loops.remove(0);
-            op.settings.islands = if roughing { Vec::new() } else { loops };
-            op.settings.closed = true;
-            op.settings.height_offset = Some(0.);
-            crate::machining::link(&mut op, part);
-            Ok(json!(op))
+            )?))
         }
         GeometryQuery::Faces => Ok(json!(crate::faces::list(part)?)),
         GeometryQuery::Face { triangle } => Ok(json!(crate::faces::face(part, triangle)?)),

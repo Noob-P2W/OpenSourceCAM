@@ -377,6 +377,9 @@ Stock mode extends the planar mask into air so complete stock-edge coverage does
 not depend on eroding a selected face. Model projections still protect raised
 geometry at every depth. Spindle-relative traversal and its displayed mode share
 `operation::clockwise_for` rather than independent UI/generator formulas.
+Outside clearing with a picked floor uses the linked face for bottom Z and
+projects material at each stepdown. Boundary-chain selections additionally
+retain the selected contour at every level.
 Pocket entry resolves angle/feed from the measured preset with conservative caps;
 Circular wall passes share a parametric tangent-lead helper. Exposed-surface
 confirmations and pre-roughed contour choices are manufacturing state, not camera

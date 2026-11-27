@@ -54,7 +54,7 @@ fn offset(paths: &Paths64, delta: f64, join: JoinType, end: EndType) -> Result<P
 
 fn protect(
     obstacles: &[Vec<[f64; 3]>],
-    outside: bool,
+    retained_contour: bool,
     budget: &mut Budget<'_>,
 ) -> Result<Paths64, String> {
     if obstacles.iter().map(Vec::len).sum::<usize>() > MAX_EDGES {
@@ -72,7 +72,7 @@ fn protect(
             .map(|(a, b)| a.x as i128 * b.y as i128 - b.x as i128 * a.y as i128)
             .sum();
         if area == 0 {
-            if outside && i == 0 {
+            if retained_contour && i == 0 {
                 return Err("Select a closed outside boundary with nonzero area".into());
             }
             // A vertical projected face may be only a line. Keep it as a thin
@@ -140,7 +140,7 @@ pub(crate) fn paths(
             "Offset clearing exceeds its pass limit; increase stepover or split the setup".into(),
         );
     }
-    let protected = protect(obstacles, outside, budget)?;
+    let protected = protect(obstacles, outside && !op.settings.outside_floor, budget)?;
     if count.saturating_mul(vertices(&protected)) > MAX_WORK {
         return Err(
             "Offset clearing exceeds its calculation budget; increase stepover or split the setup"

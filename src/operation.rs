@@ -54,6 +54,9 @@ pub struct Settings {
     pub stock_clearance: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clearing_boundary: Option<ClearingBoundary>,
+    /// For outside clearing, the selected face sets Z without retaining its footprint.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub outside_floor: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub rest_machining: bool,
     pub height_offset: Option<f64>,
