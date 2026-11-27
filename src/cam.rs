@@ -666,6 +666,21 @@ pub fn validate_setup(project: &Project) -> Result<(), String> {
     Ok(())
 }
 fn validate_setup_geometry(project: &Project) -> Result<(), String> {
+    validate_geometry(project, None)
+}
+
+pub(crate) fn inspection_setup(project: &Project) -> Vec<String> {
+    let mut errors = Vec::new();
+    if let Err(error) = validate_geometry(project, Some(&mut errors)) {
+        errors.push(error);
+    }
+    errors
+}
+
+fn validate_geometry(
+    project: &Project,
+    mut errors: Option<&mut Vec<String>>,
+) -> Result<(), String> {
     if project.format_version != FORMAT_VERSION {
         return Err("Unsupported project format version".into());
     }
@@ -697,11 +712,27 @@ fn validate_setup_geometry(project: &Project) -> Result<(), String> {
     if let Some(tool) = project.library_tool(None)? {
         tool.preset(project.active_preset)?;
     }
-    for op in &project.operations {
-        op.settings.validate()?;
-        if let Some(tool) = project.library_tool(Some(op))? {
-            tool.preset(op.preset_id)?;
+    for (index, op) in project.operations.iter().enumerate() {
+        let check = || -> Result<(), String> {
+            op.settings.validate()?;
+            if let Some(tool) = project.library_tool(Some(op))? {
+                tool.preset(op.preset_id)?;
+            }
+            Ok(())
+        };
+        if let Err(error) = check() {
+            if let Some(errors) = errors.as_deref_mut() {
+                errors.push(format!("Operation {}: {error}", index + 1));
+                if errors.len() >= 48 {
+                    return Ok(());
+                }
+            } else {
+                return Err(error);
+            }
         }
+    }
+    if errors.as_ref().is_some_and(|items| !items.is_empty()) {
+        return Ok(());
     }
     if project.operations.len() > 1000 {
         return Err("At most 1,000 operations are supported".into());
@@ -938,7 +969,17 @@ fn validate_setup_geometry(project: &Project) -> Result<(), String> {
             }
             Ok(())
         };
-        check().map_err(|e| format!("Operation {}: {e}", index + 1))?;
+        if let Err(error) = check() {
+            let error = format!("Operation {}: {error}", index + 1);
+            if let Some(errors) = errors.as_deref_mut() {
+                errors.push(error);
+                if errors.len() >= 48 {
+                    break;
+                }
+            } else {
+                return Err(error);
+            }
+        }
     }
     Ok(())
 }
@@ -977,6 +1018,26 @@ pub fn generate_with_cancel(
     project: &Project,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Toolpath, String> {
+    generate_inner(project, cancel, &mut None, true)
+}
+
+pub(crate) fn inspection_geometry(project: &Project) -> Result<Toolpath, (String, Option<usize>)> {
+    let mut operation = None;
+    generate_inner(
+        project,
+        &std::sync::atomic::AtomicBool::new(false),
+        &mut operation,
+        false,
+    )
+    .map_err(|error| (error, operation))
+}
+
+fn generate_inner(
+    project: &Project,
+    cancel: &std::sync::atomic::AtomicBool,
+    operation: &mut Option<usize>,
+    enforce_travel: bool,
+) -> Result<Toolpath, String> {
     if project
         .operations
         .iter()
@@ -1006,7 +1067,7 @@ pub fn generate_with_cancel(
                 };
             }
         }
-        return generate_with_cancel(&resolved, cancel);
+        return generate_inner(&resolved, cancel, operation, enforce_travel);
     }
     validate_for_generation(project)?;
     if project
@@ -1072,6 +1133,7 @@ pub fn generate_with_cancel(
         .enumerate()
         .filter(|(_, op)| op.enabled)
     {
+        *operation = Some(index);
         let tool = project.operation_tool(op)?;
         b.clearance = op.settings.clearance.unwrap_or(project.clearance);
         b.feed = tool.feed;
@@ -1646,7 +1708,7 @@ pub fn generate_with_cancel(
     b.stock_clearance = None;
     b.clearance = project.travel_clearance();
     b.retract()?;
-    if let Some(machine) = &project.machine {
+    if let Some(machine) = project.machine.as_ref().filter(|_| enforce_travel) {
         // Include both endpoints: the first clearance point can be outside travel
         // even if the first cutting endpoint is inside it. Linear segments lie
         // entirely within an axis-aligned envelope when both endpoints do.

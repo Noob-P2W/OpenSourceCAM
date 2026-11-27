@@ -10,6 +10,7 @@ pub mod faces;
 pub mod features;
 pub mod files;
 pub mod import;
+mod issues;
 pub mod machine;
 pub mod machine_library;
 pub mod machining;

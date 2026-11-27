@@ -27,7 +27,7 @@ def run(*command, env=None):
         result.check_returncode()
 
 def web():
-    for script in ('app.js', 'storage.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'viewport.js', 'three-view.js', 'worker.js', 'cad-worker.js', 'sw.js'):
+    for script in ('app.js', 'storage.js', 'help.js', 'vise.js', 'scene.js', 'shell.js', 'dialogs.js', 'issues.js', 'viewport.js', 'three-view.js', 'worker.js', 'cad-worker.js', 'sw.js'):
         run('node', '--check', 'web/' + script)
     run('node', 'web/cad-mesh-smoke.mjs')
     run('cargo', 'fmt', '--all', '--', '--check')
@@ -58,6 +58,7 @@ def web():
         run('node', 'web/automation-smoke.mjs', env=env)
         run('node', 'web/operation-colors-smoke.mjs', env=env)
         run('node', 'web/inspection-smoke.mjs', env=env)
+        run('node', 'web/issues-smoke.mjs', env=env)
         run('node', 'web/feature-markers-smoke.mjs', env=env)
         run('node', 'web/fixture-preview-smoke.mjs', env=env)
         run('node', 'web/vise-wizard-smoke.mjs', env=env)

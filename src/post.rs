@@ -822,7 +822,22 @@ fn round(value: f64, places: usize) -> f64 {
 /// Controller-managed M6 internals are not invented when no position is supplied.
 pub fn playback_path(
     project: &Project,
+    path: crate::cam::Toolpath,
+) -> Result<crate::cam::Toolpath, String> {
+    decorate_playback(project, path, true)
+}
+
+pub(crate) fn inspection_playback(
+    project: &Project,
+    path: crate::cam::Toolpath,
+) -> Result<crate::cam::Toolpath, String> {
+    decorate_playback(project, path, false)
+}
+
+fn decorate_playback(
+    project: &Project,
     mut path: crate::cam::Toolpath,
+    checked: bool,
 ) -> Result<crate::cam::Toolpath, String> {
     use crate::cam::{Motion, Move, Point3};
     let Some(machine) = project.machine.as_ref() else {
@@ -886,9 +901,11 @@ pub fn playback_path(
                         motion,
                         feed: machine.rapid_feed,
                     };
-                    machine.check_point(from)?;
-                    machine.check_point(to)?;
-                    machine.check_move(&movement)?;
+                    if checked {
+                        machine.check_point(from)?;
+                        machine.check_point(to)?;
+                        machine.check_move(&movement)?;
+                    }
                     path.estimated_seconds += movement.seconds();
                     if movement.motion == Motion::Rapid {
                         path.rapid_length += from.distance(to);
@@ -924,6 +941,8 @@ pub fn playback_path(
         arc.start = mapping[arc.start];
         arc.end = mapping[arc.end - 1] + 1;
     }
-    crate::collision::check(project, &routes)?;
+    if checked {
+        crate::collision::check(project, &routes)?;
+    }
     Ok(path)
 }

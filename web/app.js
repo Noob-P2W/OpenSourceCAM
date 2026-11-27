@@ -5,6 +5,7 @@ import {loadWorkspace,readSnapshot,saveWorkspace} from './storage.js';
 import {BUILD_ID} from './build.js';
 import {Viewport} from './viewport.js';
 import {initShell} from './shell.js';
+import {createIssuesPanel} from './issues.js';
 import {confirmAction,showContextMenu} from './dialogs.js';
 let shell,viseUI,presentation={};
 const $=id=>document.getElementById(id);
@@ -21,6 +22,56 @@ let workspacePreview=[],serializedProject=null,catalog={processes:[],tools:[]},s
 let stockRequest=false,stockWanted=null,stockEpoch=0,stockTimer=null;
 let playbackToolPath=null,playbackToolRequest=null,playbackToolWanted=null;
 const playbackToolCache=new Map();
+let diagnosticLocation=null,diagnosticHighlight=null;
+const issuePanel=createIssuesPanel({
+ root:$('issues-list'),look:lookAtMove,settings:target=>shell.lookAtSetting(target),
+ operationName:index=>project?.operations[index]?.name,
+ onCount:count=>{
+  const command=$('ribbon-commands')?.querySelector('[aria-label=Issues]');
+  if(!command)return;
+  const badge=command.querySelector('.issue-count');
+  if(!count){badge?.remove();return;}
+  const next=badge||document.createElement('span');next.className='issue-count';next.textContent=count;
+  if(!badge)command.append(next);
+ },
+ onClose:()=>{issuePanel.show(false);clearIssueLocation();shell?.render();draw()}
+});
+function clearIssueLocation(){
+ if(!diagnosticLocation)return;
+ diagnosticLocation=null;diagnosticHighlight=null;delete $('canvas').dataset.issueMove;
+}
+function currentProgress(){
+ return diagnosticLocation&&path?.seconds?diagnosticLocation.seconds/path.seconds:Number($('progress').value)/100;
+}
+function openIssues(){
+ if(inspectionMode)toggleInspection(false);
+ cancelPicking();viseUI?.suspend();sceneUI?.close();issuePanel.show(true);
+}
+function showIssues(){
+ openIssues();
+ if(!issuePanel.scanned())task(async()=>{
+  const rev=revision,list=await call('issues');
+  if(rev===revision)issuePanel.scan(list);
+ });
+}
+function lookAtMove(location){
+ if(!path?.moves[location.move_index])return;
+ openIssues();pausePlayback();clearGeometrySelection();
+ diagnosticLocation=location;
+ const size=Math.max(0.7,Math.min(3,(project.tool?.diameter||6)/3)),point=location.point;
+ const axes=[0,1,2].flatMap(i=>[-1,1].map(sign=>point.map((value,j)=>i===j?value+sign*size:value)));
+ const outline=location.contact?.patch||[];
+ const edges=outline.flatMap((p,i)=>[p,outline[(i+1)%outline.length]]);
+ diagnosticHighlight={diagnostic:true,outline,segments:[...axes,...edges],section:location.contact?.section,move:location.move_index,tip:location.tip};
+ selectOperation(location.operation);
+ $('progress').value=100*currentProgress();
+ $('show-tool').checked=true;$('selected-path').checked=false;
+ if(!path.stock_preview_error){$('show-simulation').checked=true;requestStockPreview(true)}
+ queuePlaybackTool(location.operation);
+ $('canvas').dataset.issueMove=String(location.move_index);
+ viewport.focusPoint(point,Math.max(12,size*8));
+ draw();
+}
 const geometryState={key:null,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false};
 function geometryKey(){return project?.part?`${presentation.part_fingerprint}:${project.setup_face??'top'}`:null}
 function updateGeometryState(){const key=geometryKey();if(geometryState.key!==key){inspection=null;if(!project.part){inspectionMode=false;document.body.dataset.featureInspect='false'}Object.assign(geometryState,{key,faces:null,face:null,report:null,feature:null,selectedFeature:null,survey:null,exterior:false});$('features').replaceChildren();$('feature-tags').replaceChildren();$('feature-count').textContent='Not scanned';highlight=null}}
@@ -30,7 +81,7 @@ function projectJSON(){return serializedProject??=JSON.stringify(project)}
 function refreshEditor(){if(!project)return;$('json').dataset.dirty='false';const data=projectJSON();const open=$('advanced-editor').open;$('json').value=(open||data.length<512*1024)?data:'';$('json').placeholder='Open this editor to load project JSON. Large models use extra memory in text form.'}
 let canUndo=false,canRedo=false,lastState,autosaved=false,fieldsDirty=false,fieldTimer;
 function scheduleFields(){clearTimeout(fieldTimer);fieldTimer=setTimeout(()=>{if(document.activeElement?.matches('input:not([type=checkbox]),textarea')){scheduleFields();return}task(async()=>{})},350)}
-function markFields(){fieldsDirty=true;$('show-simulation').checked=false;serializedProject=null;autosaved=false;path=null;simulation=null;clearStockRequests();pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';$('saved').dataset.state='saving';historyButtons();draw();scheduleFields()}
+function markFields(){fieldsDirty=true;clearIssueLocation();issuePanel.reset();$('show-simulation').checked=false;serializedProject=null;autosaved=false;path=null;simulation=null;clearStockRequests();pausePlayback();$('stats').textContent='Changed · generate to refresh';$('saved').textContent='Saving…';$('saved').dataset.state='saving';historyButtons();draw();scheduleFields()}
 function historyButtons(){if($('pick-finish'))$('pick-finish').disabled=busy||$('pick-finish').dataset.ready!=='true';$('fit-vise').disabled=busy||!project?.workspace.some(m=>m.kind==='vise');$('undo').disabled=busy||(!canUndo&&!fieldsDirty);$('redo').disabled=busy||fieldsDirty||!canRedo;const planned=project&&project.process!=='milling';for(const id of ['surface','plan','generate','export','simulate','nc-preview','add'])$(id).disabled=busy||planned;$('replace-library').disabled=busy||project?.operations.length>0;if(project?.operations.length)$('replace-library').checked=false;$('save-stock').disabled=busy||!simulation;$('play').disabled=busy||!path?.moves.length;$('simulation-requirement').hidden=!!path?.moves.length&&!path.stock_preview_error;$('simulation-requirement').textContent=path?.stock_preview_error||'Generate valid toolpaths to enable stock simulation.';for(const id of ['simulate','show-simulation'])$(id).disabled=busy||!path?.moves.length||!!path.stock_preview_error}
 function displayView(view){presentation={part_geometry_key:view.part_geometry_key,setup_allowances:view.setup_allowances,setup_margin:view.setup_margin,part_fingerprint:view.part_fingerprint,part_transform:view.part_transform,stock_outline:view.stock_outline,stock_definition:view.stock_definition,setup_issue:view.setup_issue,clamping_stock:view.clamping_stock};Object.defineProperty(project,'_display',{value:presentation,configurable:true});workspacePreview=view.workspace_preview||[];canUndo=view.can_undo;canRedo=view.can_redo}
 function applyView(view){project=view.project;serializedProject=null;displayView(view)}
@@ -57,16 +108,23 @@ $('cancel-job').onclick=()=>{
  $('cancel-job').disabled=true;const saved=jobCheckpoint;worker.onmessage=null;worker.onerror=null;worker.terminate();for(const p of pending.values()){const error=Error('Calculation cancelled. Workspace and undo history preserved.');error.name='AbortError';p.reject(error);}pending.clear();worker=createEngine();
  restarting=engineCall('restore-session',{project:saved.project,history:saved.history}).then(view=>{canUndo=view.can_undo;canRedo=view.can_redo}).catch(error=>{status(`Engine recovery failed: ${error.message}. Download a backup and reload.`,true)});
 };
-function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);document.dispatchEvent(new CustomEvent('cam-status',{detail:{text,error}}))}
-async function task(fn){if(busy)return;pausePlayback();clearStockRequests();busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){status(e.message,e.name!=='AbortError')}finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
+function status(text,error=false,inIssues=false){$('status').textContent=text;$('status').classList.toggle('error',error);document.dispatchEvent(new CustomEvent('cam-status',{detail:{text,error,inIssues}}))}
+async function task(fn){if(busy)return;pausePlayback();clearStockRequests();busy=true;const disabled=new Map([...document.querySelectorAll('button,input,select,textarea')].map(b=>[b,b.disabled]));for(const b of disabled.keys())b.disabled=true;try{if(fieldsDirty){clearTimeout(fieldTimer);fieldsDirty=false;await changed(true,true);render()}await fn()}catch(e){
+  if(e.name!=='AbortError'&&project){
+   const rev=revision;void engineCall('describe-issue',{data:e.message}).then(issue=>{
+    if(rev===revision)issuePanel.add(issue)
+   }).catch(()=>{})
+  }
+  status(e.message,e.name!=='AbortError')
+ }finally{if(restarting)await restarting;restarting=null;jobCheckpoint=null;$('job-controls').hidden=true;busy=false;for(const [b,was] of disabled)if(b.isConnected)b.disabled=was;historyButtons();shell?.render()}}
 let autoGenerateTimer=null;
 function scheduleGeneration(){clearTimeout(autoGenerateTimer);if(!shell?.prefs().autoGenerate)return;const rev=revision;autoGenerateTimer=setTimeout(function run(){if(rev!==revision||!shell.prefs().autoGenerate)return;if(busy||fieldsDirty){autoGenerateTimer=setTimeout(run,250);return;}if(project?.process==='milling'&&project.operations.some(o=>o.enabled)&&!path)$('generate').click();},600);}
 async function changed(record=true,keepPresentation=false){
  if(record){serializedProject=null;autosaved=false;$('saved').textContent='Saving…';try{const view=await call('session-edit',{edit:{kind:'replace',project}});if(keepPresentation){displayView(view);viewport.scene=null}else applyView(view)}catch(e){project=JSON.parse(lastState);serializedProject=lastState;render();await persist();throw e}}
  operationSelection.clear();selectionAnchor=selected;viewport.controls.hoveredOperation=null;
- lastState=projectJSON();revision++;viewport.controls.hiddenOperations?.clear();path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();await persist();historyButtons();draw();scheduleGeneration()
+ lastState=projectJSON();revision++;clearIssueLocation();issuePanel.reset();viewport.controls.hiddenOperations?.clear();path=null;simulation=null;clearStockRequests();pausePlayback();$('show-simulation').checked=false;$('nc-code').textContent='';$('planning-notes').textContent='';status('Project changed · generate to refresh paths');$('stats').textContent='Changed · generate to refresh';$('result').textContent='';updateGeometryState();refreshEditor();await persist();historyButtons();draw();scheduleGeneration();if(document.body.dataset.issues==='true'){const rev=revision;void engineCall('issues').then(list=>{if(rev===revision&&!path){issuePanel.scan(list);shell.render()}}).catch(()=>{})}
 }
-function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);attachHelp(input,key,label);return input}
+function field(parent,label,obj,key,type='number',choices,factor=1){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement(choices?'select':'input');input.setAttribute('aria-label',label);if(choices){for(const [value,name] of choices){const o=document.createElement('option');o.value=value;o.textContent=name;input.append(o)}}else{input.type=['optional','integer','optional-integer'].includes(type)?'number':type;if(input.type==='number')input.step=type.includes('integer')?'1':'any';if(type.startsWith('optional'))input.placeholder='Use default'}if(type==='checkbox')input.checked=obj[key];else input.value=typeof obj[key]==='number'?obj[key]/factor:obj[key]??'';const update=()=>{if(busy)return;obj[key]=type==='id'?(input.value===''?null:Number(input.value)):['optional','optional-integer'].includes(type)?(input.value===''?null:input.valueAsNumber*factor):['number','integer'].includes(type)?input.valueAsNumber*factor:type==='checkbox'?input.checked:input.value;if(obj===project&&key==='active_tool')project.active_preset=project.tool_library.tools.find(t=>t.id===project.active_tool)?.default_preset??null;if(key==='tool_id')obj.preset_id=null;markFields()};input.oninput=update;input.onchange=update;wrap.append(input);parent.append(wrap);input.dataset.fieldKey=key;attachHelp(input,key,label);return input}
 let operationSelection=new Set(),selectionAnchor=0;
 function selectedOperations(){return operationSelection.size?operationSelection:new Set(project?.operations[selected]?[selected]:[]);}
 function selectOperation(index,event={}){
@@ -94,9 +152,27 @@ $('open').onchange=()=>task(async()=>{const file=$('open').files[0];if(!file)ret
 $('model').onchange=()=>task(async()=>{const file=$('model').files[0];if(!file)return;$('model').value='';if(file.size>32*1024*1024)throw Error('Model exceeds 32 MiB');const role=$('import-role').value;if(!await confirmAction({title:role==='part'?'Import workpiece?':'Add reference model?',message:role==='part'?'Replace the workpiece and refit stock? Reference models, CNC and tool library are retained. Existing machining operations will be cleared.':'Add this model to the current setup for positioning and workholding?',accept:role==='part'?'Import workpiece':'Add model',destructive:role==='part'}))return;shell.close('import-dialog');status('Importing model…');const imported=await call('import',{file:{name:file.name,bytes:await file.arrayBuffer()},role,inches:$('units').value==='inch'});applyView(imported);selected=0;await changed(false);render();shell.afterImport(role);document.body.dataset.preview='true';$('preview-toggle').textContent='Hide preview';$('preview-toggle').setAttribute('aria-pressed','true');const geometry=(role==='part'?project.part:project.workspace.at(-1)?.part)?.geometry,repaired=geometry?.removed_degenerate_triangles||0;status(`Model imported.${geometry?.bodies?.length?` ${geometry.bodies.length} CAD components retained.`:''}${repaired?` Auto-fixed ${repaired} degenerate triangles.`:''} Review stock fitting, CNC, vise and tooling in Setup.${autosaved?'':' Autosave is unavailable: download a project backup before closing.'}`,!autosaved)});
 $('add').onclick=()=>task(async()=>{selected=project.operations.length;await sessionEdit({kind:'add_strategy',strategy:$('new-strategy').value})});
 $('apply').onclick=()=>task(async()=>{await adopt(await call('normalize',{project:$('json').value}));status('Project settings applied')});
-$('generate').onclick=()=>task(async()=>{status('Generating and checking paths…');const rev=revision;const p=await call('generate');if(rev!==revision){status('Project changed during generation. Generate again.');return}path=p;resetPlaybackTools();if(p.moves.length)queuePlaybackTool(p.moves[0].operation);simulation=null;clearStockRequests();$('stats').textContent=`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`;$('progress').value=100;if(p.stock_preview_error)$('show-simulation').checked=false;if($('show-simulation').checked)requestStockPreview(true);draw();status(`Paths generated and checked${p.stock_preview_error?' · '+p.stock_preview_error:''}`)});
+$('generate').onclick=()=>task(async()=>{
+ status('Generating and checking paths…');
+ const rev=revision,p=await call('generate');
+ if(rev!==revision){status('Project changed during generation. Generate again.');return}
+ clearIssueLocation();issuePanel.replace(p.issues||[]);
+ path=p.moves.length?p:null;resetPlaybackTools();
+ if(path)queuePlaybackTool(p.moves[0].operation);
+ simulation=null;clearStockRequests();$('progress').value=100;
+ $('stats').textContent=path?`${p.moves.length} moves · ${p.cut.toFixed(0)} mm cutting · ~${Math.round(p.seconds)} s`:'No toolpath available · review Issues';
+ if(p.stock_preview_error||!path)$('show-simulation').checked=false;
+ if($('show-simulation').checked)requestStockPreview(true);
+ if(p.issues?.length){
+  openIssues();
+  status(path?`Paths generated for inspection · ${p.issues.length} issue(s)`:'Review Issues before generating paths.',!path,true);
+ }else{
+  status(`Paths generated and checked${p.stock_preview_error?' · '+p.stock_preview_error:''}`);
+ }
+ draw();
+});
 $('export').onclick=()=>task(async()=>{const gcode=await call('export');download(gcode,filename('.nc'));status('G-code generated from current project and downloaded')});
-$('simulate').onclick=()=>task(async()=>{if(!path?.moves.length)throw Error('Generate valid toolpaths before simulating stock.');pausePlayback();clearStockRequests();shell.close('stock-simulation-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:Number($('progress').value)/100,resolution:Number($('simulation-detail').value),budget:simulationBudget(),conservative:$('conservative-stock').checked});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value),budget:simulationBudget(),conservative:$('conservative-stock').checked};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`${v.conservative?'Conservative':'Sampled'} stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
+$('simulate').onclick=()=>task(async()=>{if(!path?.moves.length)throw Error('Generate valid toolpaths before simulating stock.');pausePlayback();clearStockRequests();shell.close('stock-simulation-dialog');status('Simulating stock removal…');const rev=revision;const s=await call('simulate-current',{progress:currentProgress(),resolution:Number($('simulation-detail').value),budget:simulationBudget(),conservative:$('conservative-stock').checked});if(rev!==revision)return;simulation={...s,resolution:Number($('simulation-detail').value),budget:simulationBudget(),conservative:$('conservative-stock').checked};$('show-simulation').checked=true;draw();const v=s.summary;$('result').textContent=`${v.conservative?'Conservative':'Sampled'} stock removal\nRemoved: ${v.removed_volume_mm3.toFixed(1)} mm³\nRemaining: ${v.remaining_volume_mm3.toFixed(1)} mm³\nGrid: ${v.resolution.join(' × ')}\n${v.notes.join('\n')}`;status('Stock simulation complete')});
 for(const action of ['plan','surface'])$(action).onclick=()=>task(async()=>{
  shell.close('planning-dialog');status('Planning model-linked operations…');
  const options={fit_stock:!$('use-setup-stock').checked,xy_margin:$('plan-margin').valueAsNumber,top_allowance:$('plan-top').valueAsNumber,backing:$('plan-backing').valueAsNumber,replace_operations:$('replace-operations').checked,face:$('plan-face').checked,outside:$('plan-outside').checked,cavities:$('plan-cavities').checked};
@@ -107,10 +183,10 @@ let drawPending=false;
 function draw(){if(drawPending)return;drawPending=true;requestAnimationFrame(()=>{drawPending=false;paint()})}
 function paint(){updateTimeline();
  if(!project)return;
-const visibleProgress=$('show-simulation').checked&&simulation&&path?simulation.summary.progress*100:Number($('progress').value);
+const visibleProgress=diagnosticLocation?currentProgress()*100:$('show-simulation').checked&&simulation&&path?simulation.summary.progress*100:Number($('progress').value);
 $('simulation-off').hidden=!($('show-simulation').checked||playing||simulation);$('simulation-off').disabled=busy;$('simulation-off-menu').disabled=busy||!($('show-simulation').checked||playing||simulation);
 $('canvas').dataset.stockProgress=$('show-simulation').checked&&simulation?String(simulation.summary.progress*100):'';if(path)$('playback-clock').textContent=`${formatTime(visibleProgress/100*path.seconds)} / ${formatTime(path.seconds)}`;
-const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show-simulation').checked?simulation:null,hoverSelection||highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selectedOperations():null,$('show-tool').checked?playbackTool:null);
+const result=viewport.draw(project,workspacePreview,path,visibleProgress,$('show-simulation').checked?simulation:null,diagnosticHighlight||hoverSelection||highlight,$('wireframe').checked,$('show-stock').checked,$('selected-path').checked?selectedOperations():null,$('show-tool').checked?playbackTool:null);
  if(result&&timelineOperation!==result.timelineOperation){timelineOperation=result.timelineOperation;$('progress').dataset.operation=timelineOperation??'';$('progress').title=timelineOperation==null?'Path playback':`${timelineOperation+1}. ${project.operations[timelineOperation]?.name||'Operation'}`;}
  positionFeatureTags(result);
  if(result){const entry=result.operation===null?null:playbackToolCache.get(playbackToolKey(result.operation));$('playback-tool-state').textContent=result.toolChange?`Tool exchange · estimated duration · ${result.changePositionKnown?'configured change station':'controller/operator route; no station configured'}`:!$('show-tool').checked||result.operation===null?'':result.tool?`${result.tool.number===null?'Legacy tool':`T${result.tool.number}`} · ${result.tool.name} · cutting Ø${result.tool.cutting_diameter} mm${result.tool.shaft_diameter!==result.tool.cutting_diameter?` · shaft Ø${result.tool.shaft_diameter} mm`:""}`:entry?.error?`Tool preview unavailable: ${entry.error}`:'Loading tool model…'}
@@ -129,7 +205,7 @@ $('simulation-off-menu').onclick=$('simulation-off').onclick=()=>{
  $('result').textContent='';$('save-stock').disabled=true;viewport.scene=null;draw();
  status('Simulation off. Original model restored; generated paths retained.');
 };
-$('progress').oninput=()=>{pausePlayback();requestStockPreview(true);draw()};
+$('progress').oninput=()=>{clearIssueLocation();pausePlayback();requestStockPreview(true);draw()};
 new ResizeObserver(draw).observe($('canvas'));
 // Load library assemblies on demand. Keep four CPU meshes and only the active
 // tool's GPU buffers, independent of stock snapshots and animation frames.
@@ -170,7 +246,7 @@ $('plan-margin').oninput=()=>{$('stock-margin').value=$('plan-margin').value};$(
 function clearStockRequests(){stockEpoch++;stockWanted=null;if(!path||!$('show-simulation').checked)$('stock-playback-state').textContent='';clearTimeout(stockTimer);stockTimer=null}
 function requestStockPreview(reset=false){
  if(!$('show-simulation').checked||!path?.moves.length||path.stock_preview_error)return;
- const progress=Number($('progress').value)/100,resolution=Number($('simulation-detail').value),conservative=$('conservative-stock').checked;
+ const progress=currentProgress(),resolution=Number($('simulation-detail').value),conservative=$('conservative-stock').checked;
  if(reset){clearStockRequests();simulation=(path.preview_initial?.resolution===resolution&&path.preview_initial?.conservative===conservative)?path.preview_initial:path.initial_stock?{...path.initial_stock,resolution:32,conservative,preview:true}:null;draw()}
  if(!reset&&simulation?.resolution===resolution&&simulation.conservative===conservative&&simulation.summary.progress===progress)return;
  if(progress===0&&(resolution===32||(path.preview_initial?.resolution===resolution&&path.preview_initial?.conservative===conservative))){stockWanted=null;$('stock-playback-state').textContent='Uncut stock · 0%';return}
@@ -185,7 +261,7 @@ function pumpStockPreview(){
  const request=stockWanted;stockWanted=null;stockRequest=true;
  engineCall('stock-preview',{progress:request.progress,resolution:request.resolution,epoch:request.epoch,budget:simulationBudget(),conservative:request.conservative}).then(value=>{
   if(request.epoch!==stockEpoch||request.revision!==revision||request.path!==path||!$('show-simulation').checked)return;
-  if(request.progress>Number($('progress').value)/100+1e-9)return;
+  if(request.progress>currentProgress()+1e-9)return;
   simulation={...value,resolution:request.resolution,conservative:request.conservative,preview:true};viewport.stageStockFrame(simulation);if(request.progress===0&&request.resolution>32)path.preview_initial=simulation;
   $('stock-playback-state').textContent=`Stock ${(value.summary.progress*100).toFixed(1)}% · playback preview`;
   $('save-stock').disabled=false;draw();
@@ -211,7 +287,7 @@ function playbackTick(now){
 $('play').onclick=()=>{
  if(playing){pausePlayback();return}
  if(!path?.moves.length){status('Generate paths before playback.',true);return}
- playbackProgress=Number($('progress').value);
+ clearIssueLocation();playbackProgress=Number($('progress').value);
  const restart=playbackProgress>=100;
  if(restart)playbackProgress=0;
  $('progress').value=playbackProgress;requestStockPreview(restart);lastPlaybackTime=performance.now();playing=true;
@@ -461,7 +537,7 @@ viseUI=initVise({project:()=>project,call,edit:sessionEdit,task,status,viewport,
 $('fit-vise').onclick=()=>sceneUI.centerVise();
 sceneUI=initScene({project:()=>project,call,edit:sessionEdit,task,status,viewport,highlight:(id,body)=>{if(inspectionMode)toggleInspection(false);if(viewport.controls.clampingStock)cancelPicking();highlight={component:{model:id,body}};draw()},viseOpen:()=>viseUI.isOpen(),suspendVise:()=>viseUI.suspend(),editExampleVise:model=>shell.openVise(model),openVise:id=>{sceneUI.close();viseUI.open(id)},viseState:id=>viseUI.treeState(id),toggleBody:(id,body,checked)=>viseUI.toggleBody(id,body,checked)});
 $('open-vise-library').onclick=()=>viseUI.showLibrary();
-shell=initShell({project:()=>project,inspectionMode:()=>inspectionMode,inspection:()=>inspection,toggleInspection,sendToVise,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,selectedOperations,select:(index,event)=>{selectOperation(index,event);if(inspectionMode){inspectionMode=false;inspection=null;document.body.dataset.featureInspect='false'}},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,operationActions,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,pickOperation,recognizeAll,cancelPicking,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
+shell=initShell({showIssues,issueCount:()=>issuePanel.count(),project:()=>project,inspectionMode:()=>inspectionMode,inspection:()=>inspection,toggleInspection,sendToVise,catalog:()=>catalog,presentation:()=>presentation,selected:()=>selected,selectedOperations,select:(index,event)=>{selectOperation(index,event);if(inspectionMode){inspectionMode=false;inspection=null;document.body.dataset.featureInspect='false'}},busy:()=>busy,dirty:()=>fieldsDirty,viewport,draw,task,call,edit:sessionEdit,changed,render,status,context:showOperationMenu,operationActions,focusTool:id=>{toolFocus=id},renderLibrary,download,home:showHome,pickOperation,recognizeAll,cancelPicking,geometryState:()=>geometryState,geometryDraft,clearGeometrySelection});
 $('machine-file').onchange=()=>task(async()=>{const file=$('machine-file').files[0];if(!file)return;$('machine-file').value='';await shell.importMachine(file);shell.openMachines()});
 await task(async()=>{
  catalog=await call('catalog');await shell.restoreLibraries();renderHome();const loaded=await loadWorkspace(),saved=loaded.data;let failed=false;

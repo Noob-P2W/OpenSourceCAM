@@ -569,3 +569,21 @@ antialiasing to reduce pixel stair steps on path lines.
 Active machine setup and portable machine records select G1, G2/G3 or LinuxCNC
 G5 output. Flat curves in G5 mode use bounded cubic spans, with circular output
 for helices. Existing linear-only settings remain readable by the shared engine.
+
+## Workspace issues
+
+Inspect → Issues lists configuration findings for the current workspace and
+preflight findings from the most recent generated path. Expand a row for the
+details, a suggested correction, and links to the affected settings. Findings
+with a move location also have a Look at action. It pauses playback at the
+reported time, centers the viewport, and marks the fixture patch and affected
+tool section for the conservative swept-envelope check.
+
+The browser keeps calculated moves available for inspection and stock playback
+when a machine travel, feed, fixture, or tool-change check reports a problem.
+If the geometry cannot be calculated, Issues displays the settings or geometry
+error. Approve marks a finding as reviewed until the workspace changes. Export
+runs its own full preflight every time.
+
+Program checks add typed entries through `src/issues.rs`. The workspace and
+diagnostic playback commands use the same issue schema.

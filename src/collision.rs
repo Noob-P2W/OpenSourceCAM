@@ -125,7 +125,7 @@ impl Tree {
         to: [f64; 2],
         radius: f64,
         budget: &mut Budget<'_>,
-    ) -> Result<Option<usize>, String> {
+    ) -> Result<Option<&Triangle>, String> {
         budget.tick()?;
         let n = &self.nodes[node];
         if !n.bounds.overlaps(bounds) {
@@ -139,20 +139,8 @@ impl Tree {
         }
         for t in &self.triangles[n.start..n.end] {
             budget.tick()?;
-            let mut polygon = t.points.to_vec();
-            polygon = clip(&polygon, bounds.min[2], true);
-            polygon = clip(&polygon, bounds.max[2], false);
-            if polygon.is_empty() {
-                continue;
-            }
-            let points: Vec<_> = polygon.iter().map(|p| [p[0], p[1]]).collect();
-            if inside(from, &points)
-                || inside(to, &points)
-                || (0..points.len()).any(|i| {
-                    segment_distance(from, to, points[i], points[(i + 1) % points.len()]) <= radius
-                })
-            {
-                return Ok(Some(t.model));
+            if swept_triangle(t.points, bounds, from, to, radius) {
+                return Ok(Some(t));
             }
         }
         Ok(None)
@@ -408,7 +396,24 @@ fn inside(p: [f64; 2], polygon: &[[f64; 2]]) -> bool {
     yes
 }
 #[derive(Clone, Copy)]
+pub(crate) enum ToolSection {
+    Cutter,
+    Shaft,
+    Holder,
+}
+
+impl ToolSection {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Cutter => "cutter",
+            Self::Shaft => "shaft",
+            Self::Holder => "holder",
+        }
+    }
+}
+#[derive(Clone, Copy)]
 pub(crate) struct Envelope {
+    section: ToolSection,
     pub(crate) radius: f64,
     pub(crate) low: f64,
     pub(crate) high: f64,
@@ -424,6 +429,7 @@ pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envel
         let stickout = record.dimension("stickout");
         let flute = record.dimension("flute_length").min(stickout);
         result.push(Envelope {
+            section: ToolSection::Cutter,
             radius: tool.diameter / 2.0,
             low: 0.0,
             high: flute,
@@ -435,6 +441,7 @@ pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envel
             .fold(record.dimension("shaft_diameter"), f64::max);
         if stickout > flute {
             result.push(Envelope {
+                section: ToolSection::Shaft,
                 radius: shaft / 2.0,
                 low: flute,
                 high: stickout,
@@ -448,6 +455,7 @@ pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envel
                 .flat_map(|s| [s.lower_diameter, s.upper_diameter])
                 .fold(h.dimension("body_diameter"), f64::max);
             result.push(Envelope {
+                section: ToolSection::Holder,
                 radius: diameter / 2.0,
                 low: stickout,
                 high: stickout + h.dimension("overall_length"),
@@ -465,12 +473,14 @@ pub(crate) fn envelopes(project: &Project, operation: usize) -> Result<Vec<Envel
         };
         let wider_shank = shank > tool.diameter && length > flute;
         result.push(Envelope {
+            section: ToolSection::Cutter,
             radius: tool.diameter / 2.,
             low: 0.,
             high: if wider_shank { flute } else { length },
         });
         if wider_shank {
             result.push(Envelope {
+                section: ToolSection::Shaft,
                 radius: shank / 2.,
                 low: flute,
                 high: length,
@@ -494,6 +504,107 @@ fn move_bounds(m: &Move, e: Envelope) -> Bounds {
         ],
     }
 }
+fn swept_triangle(
+    points: [Point; 3],
+    bounds: Bounds,
+    from: [f64; 2],
+    to: [f64; 2],
+    radius: f64,
+) -> bool {
+    let mut polygon = clip(&points, bounds.min[2], true);
+    polygon = clip(&polygon, bounds.max[2], false);
+    let points: Vec<_> = polygon.iter().map(|p| [p[0], p[1]]).collect();
+    inside(from, &points)
+        || inside(to, &points)
+        || (0..points.len()).any(|i| {
+            segment_distance(from, to, points[i], points[(i + 1) % points.len()]) <= radius
+        })
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct ContactFinding {
+    pub fixture: u64,
+    pub name: String,
+    pub movement: usize,
+    pub section: &'static str,
+    pub fraction: f64,
+    pub tip: [f64; 3],
+    pub point: [f64; 3],
+    pub patch: Vec<[f64; 3]>,
+    pub contained: bool,
+}
+
+pub(crate) fn inspect(project: &Project, path: &Toolpath) -> (Vec<ContactFinding>, Option<String>) {
+    let mut findings = Vec::new();
+    let error = verify(
+        project,
+        path,
+        &mut Budget {
+            remaining: MAX_WORK,
+            cancel: &AtomicBool::new(false),
+        },
+        0.,
+        Some(&mut findings),
+    )
+    .err();
+    (findings, error)
+}
+
+struct ContactPose {
+    fraction: f64,
+    tip: Point,
+    patch: Vec<Point>,
+}
+
+fn contact_location(
+    move_: &Move,
+    envelope: Envelope,
+    triangle: &Triangle,
+    budget: &mut Budget<'_>,
+) -> Result<ContactPose, String> {
+    let at = |t: f64| crate::cam::Point3 {
+        x: move_.from.x + t * (move_.to.x - move_.from.x),
+        y: move_.from.y + t * (move_.to.y - move_.from.y),
+        z: move_.from.z + t * (move_.to.z - move_.from.z),
+    };
+    let mut prefix = move_.clone();
+    let [mut lo, mut hi] = [0., 1.];
+    for _ in 0..20 {
+        budget.tick()?;
+        let mid = (lo + hi) / 2.;
+        prefix.to = at(mid);
+        if swept_triangle(
+            triangle.points,
+            move_bounds(&prefix, envelope),
+            [prefix.from.x, prefix.from.y],
+            [prefix.to.x, prefix.to.y],
+            envelope.radius + 0.01,
+        ) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    let tip = at(hi);
+    let size = envelope.radius + 0.08;
+    let mut patch = triangle.points.to_vec();
+    for (axis, limit, greater) in [
+        (0, tip.x - size, true),
+        (0, tip.x + size, false),
+        (1, tip.y - size, true),
+        (1, tip.y + size, false),
+        (2, tip.z + envelope.low - 0.08, true),
+        (2, tip.z + envelope.high + 0.08, false),
+    ] {
+        patch = crate::surface::clip(patch, axis, limit, greater);
+    }
+    Ok(ContactPose {
+        fraction: hi,
+        tip: [tip.x, tip.y, tip.z],
+        patch,
+    })
+}
+
 pub fn check(project: &Project, path: &Toolpath) -> Result<(), String> {
     check_with_cancel(project, path, &AtomicBool::new(false))
 }
@@ -510,6 +621,7 @@ pub fn check_with_cancel(
             cancel,
         },
         0.,
+        None,
     )
 }
 pub(crate) fn check_with_margin(
@@ -525,6 +637,7 @@ pub(crate) fn check_with_margin(
             cancel: &AtomicBool::new(false),
         },
         margin,
+        None,
     )
 }
 fn verify(
@@ -532,6 +645,7 @@ fn verify(
     path: &Toolpath,
     budget: &mut Budget<'_>,
     margin: f64,
+    mut report: Option<&mut Vec<ContactFinding>>,
 ) -> Result<(), String> {
     budget.tick()?;
     crate::workspace::validate(&project.workspace, project.machine.as_ref())?;
@@ -600,17 +714,82 @@ fn verify(
             current = Some(movement.operation);
         }
         for envelope in &tool {
-            if let Some(model) = tree.contact(
+            let hit = tree.contact(
                 0,
                 move_bounds(movement, *envelope),
                 [movement.from.x, movement.from.y],
                 [movement.to.x, movement.to.y],
                 envelope.radius + 0.01,
                 budget,
-            )? {
+            )?;
+            let center = [
+                movement.from.x,
+                movement.from.y,
+                movement.from.z + (envelope.low + envelope.high) / 2.,
+            ];
+            let (model, contained) = if let Some(hit) = hit {
+                (hit.model, false)
+            } else if let Some(model) = if changed {
+                tree.containing(center, budget)?
+            } else {
+                None
+            } {
+                (model, true)
+            } else {
+                continue;
+            };
+            let fixture = &project.workspace[model];
+            if let Some(findings) = report.as_deref_mut() {
+                let section = envelope.section.name();
+                if findings.iter().any(|hit| {
+                    hit.fixture == fixture.id
+                        && hit.section == section
+                        && path.moves[hit.movement].operation == movement.operation
+                }) {
+                    continue;
+                }
+                if findings.len() >= 48 {
+                    return Err(
+                        "More fixture contacts exist than the Issues panel can display".into(),
+                    );
+                }
+                let ContactPose {
+                    fraction,
+                    tip,
+                    patch,
+                } = if let Some(hit) = hit {
+                    contact_location(movement, *envelope, hit, budget)?
+                } else {
+                    ContactPose {
+                        fraction: 0.,
+                        tip: [movement.from.x, movement.from.y, movement.from.z],
+                        patch: Vec::new(),
+                    }
+                };
+                let point = if patch.is_empty() {
+                    [tip[0], tip[1], tip[2] + (envelope.high + envelope.low) / 2.]
+                } else {
+                    std::array::from_fn(|i| {
+                        patch.iter().map(|p| p[i]).sum::<f64>() / patch.len() as f64
+                    })
+                };
+                findings.push(ContactFinding {
+                    fixture: fixture.id,
+                    name: fixture.name.clone(),
+                    movement: index,
+                    section,
+                    fraction,
+                    tip,
+                    point,
+                    patch,
+                    contained,
+                });
+            } else if contained {
+                return Err(format!("Tool/shaft/holder envelope is contained inside fixture '{}' at move {}; NC export is blocked",fixture.name,index+1));
+            } else {
                 return Err(format!(
                     "Tool/shaft/holder envelope contacts fixture '{}' at move {} ({})",
-                    project.workspace[model].name,
+                    fixture.name,
                     index + 1,
                     if movement.motion == Motion::Rapid {
                         "rapid"
@@ -618,16 +797,6 @@ fn verify(
                         "cutting"
                     }
                 ));
-            }
-            if changed {
-                let point = [
-                    movement.from.x,
-                    movement.from.y,
-                    movement.from.z + (envelope.low + envelope.high) / 2.0,
-                ];
-                if let Some(model) = tree.containing(point, budget)? {
-                    return Err(format!("Tool/shaft/holder envelope is contained inside fixture '{}' at move {}; NC export is blocked",project.workspace[model].name,index+1));
-                }
             }
         }
     }
@@ -863,6 +1032,7 @@ mod tests {
             remaining: MAX_WORK,
         };
         let e = Envelope {
+            section: ToolSection::Cutter,
             radius: 0.2,
             low: 0.,
             high: 4.,
@@ -870,6 +1040,7 @@ mod tests {
         assert!(f.top([1.5, 0.], [1.5, 3.], &[e]).unwrap() >= 2.01);
         assert_eq!(f.top([-2., 0.], [-2., 3.], &[e]), Some(f64::NEG_INFINITY));
         let shaft = Envelope {
+            section: ToolSection::Shaft,
             radius: 1.2,
             low: 0.5,
             high: 5.,

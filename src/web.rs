@@ -419,15 +419,28 @@ impl WebSession {
         budget: u32,
         conservative: bool,
     ) -> Result<String, JsValue> {
-        crate::commands::simulate_project_mode(
-            self.inner.project(),
-            progress,
-            resolution,
-            u64::from(budget),
-            conservative,
-        )
-        .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
-        .map_err(|e| JsValue::from_str(&e))
+        let project = self.inner.project();
+        let result = if let Some(preview) = &self.playback {
+            crate::commands::simulate_review_path(
+                project,
+                &preview.path,
+                progress,
+                resolution,
+                u64::from(budget),
+                conservative,
+            )
+        } else {
+            crate::commands::simulate_project_mode(
+                project,
+                progress,
+                resolution,
+                u64::from(budget),
+                conservative,
+            )
+        };
+        result
+            .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn operation_draft(&self, strategy: &str) -> Result<String, JsValue> {
         let strategy = serde_json::from_str(&format!("\"{strategy}\""))
@@ -596,18 +609,29 @@ impl WebSession {
             .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
             .map_err(|e| JsValue::from_str(&e))
     }
+    pub fn describe_issue(&self, message: &str) -> Result<String, JsValue> {
+        serde_json::to_string(&crate::issues::describe(
+            self.inner.project(),
+            message.into(),
+            None,
+        ))
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
     pub fn run(&mut self, action: &str) -> Result<String, JsValue> {
         let action: crate::commands::Command =
             action.parse().map_err(|e: String| JsValue::from_str(&e))?;
         let result = if action == crate::commands::Command::Generate {
-            let preview = crate::commands::PlaybackPreview::new(self.inner.project())
-                .map_err(|e| JsValue::from_str(&e))?;
-            let mut value = crate::commands::path_value(&preview.path);
-            match preview.snapshot(self.inner.project(), 0., 32) {
-                Ok(stock) => value["initial_stock"] = stock,
-                Err(error) => value["stock_preview_error"] = error.into(),
+            let (preview, issues) = crate::commands::review_preview(self.inner.project());
+            let mut value = serde_json::json!({"moves": [], "seconds": 0, "cut": 0});
+            if let Some(preview) = &preview {
+                value = crate::commands::path_value(&preview.path);
+                match preview.snapshot(self.inner.project(), 0., 32) {
+                    Ok(stock) => value["initial_stock"] = stock,
+                    Err(error) => value["stock_preview_error"] = error.into(),
+                }
             }
-            self.playback = Some(preview);
+            value["issues"] = serde_json::json!(issues);
+            self.playback = preview;
             Ok(value)
         } else {
             self.inner.run(action)

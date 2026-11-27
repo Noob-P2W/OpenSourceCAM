@@ -6,6 +6,8 @@ use std::sync::atomic::AtomicBool;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Generate,
+    Review,
+    Issues,
     Recognize,
     Export,
     Simulate,
@@ -18,6 +20,8 @@ impl std::str::FromStr for Command {
         match id {
             "recognize" => Ok(Self::Recognize),
             "generate" => Ok(Self::Generate),
+            "review" => Ok(Self::Review),
+            "issues" => Ok(Self::Issues),
             "export" => Ok(Self::Export),
             "simulate" => Ok(Self::Simulate),
             "plan" => Ok(Self::PlanStock),
@@ -31,8 +35,21 @@ pub fn execute(data: &str, action: Command) -> Result<Value, String> {
     execute_project(&p, action)
 }
 pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
+    if action == Command::Issues {
+        return Ok(json!(crate::issues::setup(p)));
+    }
+    if action == Command::Review {
+        let (preview, issues) = review_preview(p);
+        let mut value = preview.as_ref().map_or_else(
+            || json!({"moves":[], "seconds":0, "cut":0}),
+            |p| path_value(&p.path),
+        );
+        value["issues"] = json!(issues);
+        return Ok(value);
+    }
     cam::validate_setup(p)?;
     match action {
+        Command::Issues | Command::Review => unreachable!(),
         Command::Recognize => Ok(json!(crate::features::recognize_project(p)?)),
         Command::Generate => {
             let path = post::playback_path(p, post::checked_geometry_path(p)?)?;
@@ -46,6 +63,44 @@ pub fn execute_project(p: &Project, action: Command) -> Result<Value, String> {
         }
     }
 }
+/// Return a drawable preview even when the calculated route fails preflight.
+pub(crate) fn review_preview(
+    project: &Project,
+) -> (Option<PlaybackPreview>, Vec<crate::issues::Issue>) {
+    let geometry = match cam::inspection_geometry(project) {
+        Ok(path) => path,
+        Err((error, operation)) => {
+            let mut issues = crate::issues::setup(project);
+            let failure = crate::issues::describe(project, error, operation);
+            if !issues.iter().any(|issue| issue.id == failure.id) {
+                issues.push(failure);
+            }
+            return (None, issues);
+        }
+    };
+    let (path, extra) = match post::inspection_playback(project, geometry.clone()) {
+        Ok(path) => (path, None),
+        Err(error) => (
+            geometry,
+            Some(crate::issues::describe(project, error, None)),
+        ),
+    };
+    let mut issues = crate::issues::path(project, &path);
+    issues.extend(crate::issues::advisories(project));
+    if let Some(extra) = extra {
+        if !issues.iter().any(|i| i.id == extra.id) {
+            issues.push(extra);
+        }
+    }
+    (
+        Some(PlaybackPreview {
+            path,
+            frame: std::cell::RefCell::new(None),
+        }),
+        issues,
+    )
+}
+
 /// Shared estimated-time timeline for tool display and stock playback.
 pub fn path_value(path: &cam::Toolpath) -> Value {
     let mut elapsed = 0.;
@@ -588,9 +643,20 @@ pub fn simulate_project_mode(
     conservative: bool,
 ) -> Result<Value, String> {
     let path = post::playback_path(project, post::checked_geometry_path(project)?)?;
+    simulate_review_path(project, &path, progress, resolution, limit, conservative)
+}
+
+pub(crate) fn simulate_review_path(
+    project: &Project,
+    path: &cam::Toolpath,
+    progress: f64,
+    resolution: usize,
+    limit: u64,
+    conservative: bool,
+) -> Result<Value, String> {
     let sim = stock::simulate_mode(
         project,
-        &path,
+        path,
         progress,
         resolution,
         &AtomicBool::new(false),
