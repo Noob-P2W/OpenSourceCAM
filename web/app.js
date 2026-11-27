@@ -165,7 +165,8 @@ $('generate').onclick=()=>task(async()=>{
  if($('show-simulation').checked)requestStockPreview(true);
  if(p.issues?.length){
   openIssues();
-  status(path?`Paths generated for inspection · ${p.issues.length} issue(s)`:'Review Issues before generating paths.',!path,true);
+  const failure=p.issues.find(issue=>issue.severity==='error');
+  status(path?`Paths generated for inspection · ${p.issues.length} issue(s)`:failure?.detail||'No toolpath available · review Issues',!path,true);
  }else{
   status(`Paths generated and checked${p.stock_preview_error?' · '+p.stock_preview_error:''}`);
  }
