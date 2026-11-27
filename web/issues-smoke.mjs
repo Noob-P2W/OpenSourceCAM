@@ -30,7 +30,10 @@ try{
  assert.match(await collision.locator('.issue-coordinates').textContent(),/Move \d+ · .* Work X /);
  await collision.getByRole('button',{name:'Look at',exact:true}).click();
  const canvas=page.locator('#canvas');
- await page.waitForFunction(()=>document.querySelector('#canvas').dataset.issueMove&&Number(document.querySelector('#canvas').dataset.toolTriangles)>0);
+ await page.waitForFunction(()=>{
+  const data=document.querySelector('#canvas').dataset;
+  return data.issueMove&&/^(cutter|shaft|holder)$/.test(data.issueSection)&&Number(data.toolTriangles)>0&&Number(data.selectionCopies)>0;
+ });
  assert.match(await canvas.getAttribute('data-issue-section'),/cutter|shaft|holder/);
  assert.ok(Number(await canvas.getAttribute('data-selection-copies'))>0,'The fixture patch is highlighted');
  await collision.getByRole('button',{name:'Approve',exact:true}).click();
